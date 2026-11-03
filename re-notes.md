@@ -76,3 +76,45 @@ Port: `src/lzh.c`; reference: `tools/lzh.py`.
 
 Decompressed: u16 x, y, w, h; u16 palette[256] as above (16 x 0x0GRB + 240 x RGB555);
 u8 pixels[w*h]. Backgrounds are 512x288 at (64,0); full screens 640x400 at (0,0).
+
+## Sound (0x402ad0-0x4034a0)
+
+DirectSound only; MCI (`mciSendStringA`) is used for nothing but `LOGO.AVI` (0x401e20). No
+buffer ever gets SetVolume/SetPan/SetFrequency (vtable calls used: 0x0c CreateSoundBuffer,
+0x18 SetCooperativeLevel, 0x24 GetStatus, 0x2c Lock, 0x30 Play, 0x34 SetCurrentPosition,
+0x38 SetFormat, 0x48 Stop, 0x4c Unlock, 0x50 Restore), and there is no volume setting.
+
+- 0x402ad0 init: DirectSoundCreate, priority level, primary buffer set to PCM 22050 Hz 8-bit
+  stereo. Failure only shows a MessageBox; the caller 0x402620 ignores the result.
+- Two secondary buffers, nothing else:
+  - music: buffer `0x4be560`, file image `0x4be570`, `0x4be54c` = 1 for WAV. 0x402cb0(n):
+    stop music (0x4032c0), then `MUSIC\%02d.MP3` (0x4312a8), else `MUSIC\%02d.WAV`
+    (0x431298), read whole (0x401000 open with the CD prefix). MP3: decoder 0x402e10
+    (state `0x4be56c`), 0x4030f0 makes a 0x24000-byte stream buffer (44100 Hz 16-bit stereo,
+    caps 0x181e0 with position notify), 0x402ea0 sets two notifications (events
+    `0x4be550`/`0x4be554`, offsets 0 and 0x12000), Play with DSBPLAY_LOOPING. The message
+    pump 0x401bf0 calls 0x4034a0, which waits on the events and refills the played half
+    (0x4031d0 decodes 0x12000 bytes through 0x409550; on -0x202, end of stream, it rewinds
+    with 0x4084b0(dec, 0)): MP3 music loops forever. WAV: 0x403020 copies the data chunk
+    (0x402f10 finds `data` after the fmt chunk) into a static buffer (caps 0x180e2) in the
+    file's own format, Play(0,0,0): plays once.
+  - voice: buffer `0x4be564`, file image `0x4be574`. 0x403360(name): stop voice (0x403440),
+    `SPEECH%s` (0x4312c0, name from the script, e.g. `\A\A10012.WAV`), 0x403020,
+    SetCurrentPosition(0), Play once. Nothing ever polls the voice status, so the script never
+    waits for a voice to finish.
+- Script music opcode (0x4073a5): arguments parsed by 0x40741b into words at `0x445d06`...;
+  first argument 0 stops the music, otherwise music number = second argument (`0x445d08`,
+  zero-extended).
+  Voice opcode 0x4073cd copies the name (0x406dc4) to `0x445d26` and calls 0x403360.
+- The `MUSIC\4x-5x.WAV` files (22050 Hz 8-bit mono, 0.3-17 s) are jingles and effects; they go
+  through the music channel and replace the BGM. MP3s are all 44100 Hz stereo 96 kbit/s.
+- WndProc (0x4021c0) stops the voice on WM_LBUTTONDOWN/WM_RBUTTONDOWN (jump table 0x402550:
+  0x40242f, 0x402446), on WM_KEYUP of Return/Space (0x402361) and Esc (0x402378) (tables
+  0x402508/0x40252c), and on WM_ACTIVATEAPP(0) (0x402235: voice stop, then 0x403220 Stop the
+  music if playing). WM_ACTIVATEAPP(1) after a deactivation (`0x4ac518`) calls 0x403250:
+  Play again, looping for MP3, once for WAV (restoring a lost WAV buffer).
+- 0x402c70 (exit): voice stop, music stop (0x4032c0 also frees the decoder 0x409f40 and the
+  notify object), release primary buffer and DirectSound.
+
+Port: `src/hle/sound.c` (SDL audio, minimp3); 0x402f10/0x402f60/0x4031d0 are only reached
+from the replaced functions and are stubs in `override_call`.

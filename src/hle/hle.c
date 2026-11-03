@@ -169,9 +169,26 @@ static void override_call(uint32_t addr)
 	case 0x402ad0: /* DirectSound init */
 		cpu.r[EAX] = (uint32_t)sound_init();
 		return;
-	case 0x402c70: /* sound shutdown */
-		sound_music_stop();
-		sound_voice_stop();
+	case 0x402c70: /* sound shutdown: voice stop, music stop, release */
+		sound_shutdown();
+		return;
+	/* Internals of the native DirectSound path. Their only callers are
+	 * the overrides here (0x402cb0, 0x403250, 0x403360, 0x4034a0) and
+	 * 0x403020/0x4030f0, which only those call, so the lifted code never
+	 * reaches them; they are listed so a stray call cannot run native
+	 * DirectSound code. */
+	case 0x402f10: { /* cdecl (wav, &data): size of the WAV "data" chunk */
+		uint32_t wav = hle_arg(0), out = hle_arg(1);
+		uint32_t at = rd32(wav + 0x10) + 0x14; /* skip RIFF/WAVE/fmt chunk */
+		for (int i = 0; i < 64 && rd32(wav + at) != 0x61746164u; i++)
+			at += 8 + rd32(wav + at + 4);
+		if (out)
+			wr32(out, wav + at + 8);
+		cpu.r[EAX] = rd32(wav + at + 4);
+		return;
+	}
+	case 0x402f60: /* Lock/copy/Unlock a DirectSound buffer: no buffers */
+	case 0x4031d0: /* decode MP3 into the stream buffer: sound.c decodes */
 		return;
 	case 0x402cb0: { /* play MUSIC\%02d.MP3 (or .WAV) */
 		sound_music_play((int)hle_arg(0));

@@ -39,7 +39,7 @@ HLE_OVERRIDES = {
     0x403220: 'music pause',
     0x403250: 'music resume',
     0x4032c0: 'music stop',
-    0x403440: 'sound effect stop',
+    0x403440: 'voice stop',
     0x4034a0: 'music stream pump',
     0x4075f0: 'GP4/ANI decompressor (src/lzh.c)',
     0x402cb0: 'play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)',

@@ -75,6 +75,7 @@ void text_set_color(uint32_t hdc, uint32_t fg, uint32_t bg, int mode);
 
 /* sound.c: music and voices (replaces the native DirectSound/MP3 code) */
 int sound_init(void);
+void sound_shutdown(void);
 void sound_music_play(int n);
 void sound_music_stop(void);
 void sound_music_pause(int pause);
