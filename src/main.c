@@ -11,6 +11,7 @@
  *   --no-crt                                            plain pixels (F12 toggles)
  *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
  *   --no-logo                                           skip LOGO.AVI
+ *   --window WxH                                        initial window size (points)
  *   --fullscreen                                        start fullscreen
  *                                                       (Alt+Enter, Cmd+F toggle)
  *
@@ -176,6 +177,7 @@ int main(int argc, char **argv)
 {
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
 	const char *crt_shot = NULL, *view_bmp = NULL;
+	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
@@ -203,6 +205,8 @@ int main(int argc, char **argv)
 			logo_frame_n = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--no-logo"))
 			SDL_setenv("NANPA2_LOGO", "0", 1);
+		else if (!strcmp(argv[i], "--window") && i + 1 < argc)
+			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
 	}
@@ -251,7 +255,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_Window *win = SDL_CreateWindow("同級生２", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					   SCREEN_W, SCREEN_H,
+					   win_w, win_h,
 					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
 						   present_window_flags());
 	if (!win || !present_init(win)) {

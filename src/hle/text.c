@@ -1,7 +1,12 @@
-/* GDI text for the lifted code (native 0x401900 draws one Big5 or ASCII
- * character at a time with TextOutA into a scratch surface, then copies the
- * non-zero pixels). Glyphs come from a TrueType Ming font via stb_truetype;
- * Big5 is decoded as Windows code page 950. */
+/* GDI text for the lifted code. Native 0x401900 (char, x, y, size, fg, bg)
+ * draws one Big5 or ASCII character with TextOutA at (0, 0) of the scratch
+ * surface 0x4ab058 (font 0x4ac070[size & 3]: MingLiU at em heights 15, 24,
+ * 32, weights 700, 700, 400; text colour 0xf0f0f0 on 0, opaque), then
+ * copies an N x N cell (N = 8 * size + 16: 16, 24, 32) to the primary at
+ * (x, y): fg where the scratch is non-zero, bg elsewhere, and clears the
+ * scratch. There is no shadow pass. Glyphs come from a TrueType Ming font
+ * via stb_truetype, unantialiased like GDI on an 8-bit DC; bold is GDI's
+ * 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
 #include "hle.h"
 
 #include <SDL.h>
@@ -18,6 +23,7 @@
 #endif
 
 #define MAX_FONTS 8
+#define INK 110 /* coverage threshold: GDI draws 8-bit DCs without antialiasing */
 #define MAX_DC 16
 
 static stbtt_fontinfo font;
@@ -27,6 +33,7 @@ static int have_font;
 static struct {
 	int height; /* em height in pixels (CreateFontA with negative height) */
 	int bold;
+	int base;   /* baseline row in the cell, 0: not computed yet */
 } fonts[MAX_FONTS];
 static int nfonts;
 
@@ -154,6 +161,47 @@ static uint32_t big5_to_ucs(const unsigned char *s, int len)
 #endif
 }
 
+/* Thresholded ink rows of a glyph relative to the baseline. */
+static void ink_rows(float scale, int ch, int *top, int *bot)
+{
+	int w, h, xo, yo;
+	unsigned char *bm = stbtt_GetCodepointBitmap(&font, scale, scale, ch, &w, &h, &xo, &yo);
+	if (!bm)
+		return;
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++)
+			if (bm[y * w + x] >= INK) {
+				if (yo + y < *top) *top = yo + y;
+				if (yo + y > *bot) *bot = yo + y;
+			}
+	stbtt_FreeBitmap(bm, NULL);
+}
+
+/* Baseline for an em-high font. GDI's TextOutA puts the top of the cell at
+ * y, and native 0x401900 copies an N x N cell (N = 16, 24, 32 for the
+ * heights 15, 24, 32 of 0x402620) to the screen: the baseline goes at the
+ * font's ideographic ascender (OS/2 typo ascender), raised if ideographs
+ * would reach past the cell's last row (Songti's ideographs fill the whole
+ * em, so at 32 px they would lose their bottom row). */
+static int baseline(int em)
+{
+	float scale = stbtt_ScaleForMappingEmToPixels(&font, (float)em);
+	int asc, desc, gap;
+	if (!stbtt_GetFontVMetricsOS2(&font, &asc, &desc, &gap))
+		stbtt_GetFontVMetrics(&font, &asc, &desc, &gap);
+	int base = (int)(asc * scale + 0.5f);
+	int cell = (em + 7) & ~7;
+	static const int probe[] = { 0x570b, 0x9ad4, 0x8072, 0x9f8d, 0x53e3, 0x76ee, 0x9b31 };
+	int top = 0, bot = 0;
+	for (size_t i = 0; i < sizeof probe / sizeof probe[0]; i++)
+		ink_rows(scale, probe[i], &top, &bot);
+	if (base + bot > cell - 1)
+		base = cell - 1 - bot;
+	if (base + top < 0)
+		base = -top;
+	return base;
+}
+
 void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 {
 	int di = dc_index(hdc);
@@ -166,6 +214,9 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 	if (getenv("NANPA2_LOG") && (ch == 0x3000 || (have_font && !stbtt_FindGlyphIndex(&font, (int)ch))))
 		fprintf(stderr, "text: %02x %02x len %d -> U+%04X (missing)\n", s[0], s[1], len, ch);
 	int em = fonts[dcs[di].font].height, bold = fonts[dcs[di].font].bold;
+	if (have_font && !fonts[dcs[di].font].base)
+		fonts[dcs[di].font].base = baseline(em);
+	int base = fonts[dcs[di].font].base;
 	/* GDI uses palette indices on an 8-bit DC; the native caller only tests
 	 * for zero, so map any non-black colour to 0xff */
 	uint32_t fg = dcs[di].fg ? 0xff : 0, bg = dcs[di].bg ? 0xff : 0;
@@ -180,24 +231,23 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 		return;
 
 	float scale = stbtt_ScaleForMappingEmToPixels(&font, (float)em);
-	int asc, desc, gap;
-	stbtt_GetFontVMetrics(&font, &asc, &desc, &gap);
-	int base = (int)(asc * scale + 0.5f);
-	/* fit the font's ascent+descent into the em box, as MingLiU does */
-	int total = (int)((asc - desc) * scale + 0.5f);
-	if (total > em)
-		base -= (total - em + 1) / 2;
-	int gw, gh, xo, yo;
-	unsigned char *bm = stbtt_GetCodepointBitmap(&font, scale, scale, (int)ch, &gw, &gh, &xo, &yo);
-	if (!bm)
-		return;
 	int adv, lsb;
 	stbtt_GetCodepointHMetrics(&font, (int)ch, &adv, &lsb);
-	int gx = x + (cell_w - (int)(adv * scale + 0.5f)) / 2 + xo;
+	/* MingLiU's ASCII is fixed half-width; Songti's Latin is proportional
+	 * and wider, so narrow it to the half-width cell (the next character's
+	 * cell would cover the overhang: 0x401900 copies whole cells) */
+	float sx = scale;
+	if (len == 1 && adv * scale > cell_w)
+		sx = cell_w / (float)adv;
+	int gw, gh, xo, yo;
+	unsigned char *bm = stbtt_GetCodepointBitmap(&font, sx, scale, (int)ch, &gw, &gh, &xo, &yo);
+	if (!bm)
+		return;
+	int gx = x + (cell_w - (int)(adv * sx + 0.5f)) / 2 + xo;
 	int gy = y + base + yo;
 	for (int yy = 0; yy < gh; yy++)
 		for (int xx = 0; xx < gw; xx++) {
-			if (bm[yy * gw + xx] < 110)
+			if (bm[yy * gw + xx] < INK)
 				continue;
 			for (int b = 0; b <= bold; b++) {
 				int px = gx + xx + b, py = gy + yy;
