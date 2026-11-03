@@ -229,3 +229,27 @@ click (0x4065f6 -> 0x406acc), 0x13 call, 0x04 xx extended opcodes (table 0x40626
 Menus: item lists `02 [0f expr 03] text` ... `00`; the choice comes back in register S
 (1-based, 0 = cancelled). OPEN.MES (Prologue) keeps the main choice in V and the sub
 choice in N; the main loop starts at script offset 0x2a3c.
+
+## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
+
+After the Prologue (S63.MES jumps to OPEN1.MES) scenes are point-and-click. The script's
+hit test, ext op 0x23 (0x4071a4), scans 10-byte entries {code, x0, y0, x1, y1} (picture
+coordinates; the picture starts at screen y 40) until code 0xffff and returns the code of the
+rectangle under the mouse in S. The table lives in a script segment ([0x44533c + 4*seg] + arg)
+and is built at run time; `NANPA2_HOTSPOTS=1` logs it. The scene then sets RN = code & 0xff
+and RV = code >> 8 (+1), and its main loop dispatches on `if RV == v && RN == n && F[k] == s`
+blocks. Hovering a hotspot shows its verb in the slot between date and weekday (verb names:
+看．調查 1, 離開 2, 打．敲 3, 推．拉 4, 給 5, 拿 6, ...).
+OPEN1: Yui's mouth is code 0x0101 (183,73)-(211,94); clicking it three times (flag 10 0→1→2)
+ends the scene with `1e 06 40.mes`.
+
+Right-click: a script handler (OPEN1/40.MES 0x1284, reached from the hotspot loop) runs only
+if flag 2000 == 0; it sets RV = 0 and the scene shows a pop-up list at the top left of the
+picture (`04 13 01 item 02 item ... 00`), e.g. OPEN1: 伸懶腰; 40.MES (own room): 到客廳去 /
+待在原地 / 結束遊戲 / 儲存、讀取. In the Prologue's text menus a right-click only cancels
+(S = 0). Natively the right button is input bit 0x20 (also Esc/Insert); the only other reader
+is the sprite code at 0x404484 (calls 0x405597 when [0x435573] != 0xff).
+
+40.MES 0x274a copies 30 values into flags 1978-2007 (`0b 08 7b eb ...`, value
+`B[100+I]` via op 0x2b, 0x403938: segment_base[@[7]] + register + 2*index), which includes
+flag 2000.

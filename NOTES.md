@@ -169,3 +169,26 @@ input, then ANI/A6/maps and sound.
 - The map/drawing code 0x404132-0x405fb6 has no frame waits (856a896).
 - Throttled CPU over the 349 s S5->S6 run: 46.6 s user (13 %), against 4.7 % in the
   Prologue classroom; not yet broken down.
+
+## 2026-11-04 (engine: into the main game, host CPU, right-click)
+
+- Prologue to S7: S6's menu path (talk ×2, listen ×3, 移動 -> 回到自己房裡) loads S7.MES. The
+  Prologue runs S1-S63 and S63 jumps to OPEN1.MES, the first main-game scene (12/22
+  Sunday). To get there without 57 more scenes, a test save in a separate folder
+  (`NANPA2_SAVE_DIR`, 5891002) names open1.mes at offset 0 of the save block; the title's
+  Data Load then starts OPEN1. Clicking Yui's mouth (hotspot 0x0101) three times loads
+  40.MES (own room, point-and-click); hotspots respond (drawer, desk, computer) with no traps.
+- Not reached: the town map (TOWN.MES, MATI1.MAP). In 40.MES the right-click menu (到客廳去
+  ...) stays off because 40.MES 0x274a copies a table into flags 1978-2007 and flag 2000
+  becomes 15 (`if F[2000] == 0` gates the handler). The table is read through registers the
+  synthetic save carries over from S5, so this is probably the test save rather than the
+  engine; a save made by playing S7-S63 would settle it.
+- Right-click (re-notes "Main game scenes"): main-game scenes open a script pop-up of
+  self actions (OPEN1: 伸懶腰, verified; 40.MES: 到客廳去 / 待在原地 / 結束遊戲 / 儲存、讀取);
+  Prologue menus only cancel.
+- Host CPU of scripted runs (5891002, 7af68bd): dev_inject and the VM sync check scanned the
+  whole input list on every pump and every script opcode; S5->S7 run 38.7 s -> 27.2 s user
+  over 415 s. Scripted runs now pump Cocoa events every 16 ms: 16.6 s -> 14.9 s over 172 s.
+  What is left is mostly the hidden window's event pump and the per-present frame copy
+  (ddraw.c:85); the lifted game code itself is about 0.5 % of samples. Not the status thread.
+- `NANPA2_HOTSPOTS=1` logs the hit-test rectangles (probe 0x4071bb).
