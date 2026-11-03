@@ -4,6 +4,9 @@
  *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
+ *          [--crt-size WxH]                             ... at another size
+ *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
+ *                                                       screenshot (NANPA2_SHOT_DIR)
  *   --no-crt                                            plain pixels (F12 toggles)
  *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
@@ -87,6 +90,35 @@ static int show(const char *name)
 	return 1;
 }
 
+/* Load a 640x480 screenshot (as dev.c writes them) as screen + palette;
+ * the game screen has at most 256 colours. */
+static int show_bmp(const char *path)
+{
+	SDL_Surface *b = SDL_LoadBMP(path);
+	SDL_Surface *s = b ? SDL_ConvertSurfaceFormat(b, SDL_PIXELFORMAT_XRGB8888, 0) : NULL;
+	SDL_FreeSurface(b);
+	if (!s || s->w != SCREEN_W || s->h != SCREEN_H) {
+		SDL_Log("cannot load %s as a %dx%d screenshot", path, SCREEN_W, SCREEN_H);
+		SDL_FreeSurface(s);
+		return 0;
+	}
+	int n = 0;
+	for (int y = 0; y < SCREEN_H; y++) {
+		const uint32_t *row = (const uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
+		for (int x = 0; x < SCREEN_W; x++) {
+			uint32_t c = row[x] & 0xffffff;
+			int i = 0;
+			while (i < n && palette[i] != c)
+				i++;
+			if (i == n && n < 256)
+				palette[n++] = c;
+			screen[y * SCREEN_W + x] = (uint8_t)(i < 256 ? i : 0);
+		}
+	}
+	SDL_FreeSurface(s);
+	return 1;
+}
+
 static void save_bmp(const char *path)
 {
 	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
@@ -128,8 +160,8 @@ static int run_game(const char *game, const char *exe, const char *font)
 int main(int argc, char **argv)
 {
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
-	const char *crt_shot = NULL;
-	int viewer = 0, crt = 1;
+	const char *crt_shot = NULL, *view_bmp = NULL;
+	int viewer = 0, crt = 1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -145,13 +177,21 @@ int main(int argc, char **argv)
 			shot = argv[++i];
 		else if (!strcmp(argv[i], "--crt-shot") && i + 1 < argc)
 			crt_shot = argv[++i];
-		else if (!strcmp(argv[i], "--no-crt"))
+		else if (!strcmp(argv[i], "--crt-size") && i + 1 < argc)
+			sscanf(argv[++i], "%dx%d", &crt_w, &crt_h);
+		else if (!strcmp(argv[i], "--view-bmp") && i + 1 < argc) {
+			viewer = 1;
+			view_bmp = argv[++i];
+		} else if (!strcmp(argv[i], "--no-crt"))
 			crt = 0;
 	}
 	fsys_set_root(game);
 
 	int cur = 0;
-	if (viewer) {
+	if (view_bmp) {
+		if (SDL_Init(0) < 0 || !show_bmp(view_bmp))
+			return 1;
+	} else if (viewer) {
 		list_gp4();
 		if (view)
 			for (int i = 0; i < name_count; i++)
@@ -185,7 +225,7 @@ int main(int argc, char **argv)
 	present_set_crt(crt);
 	if (viewer && crt_shot) {
 		present_frame(screen, palette);
-		int ok = present_capture(crt_shot, SCREEN_W * 2, SCREEN_H * 2);
+		int ok = present_capture(crt_shot, crt_w, crt_h);
 		present_shutdown();
 		SDL_DestroyWindow(win);
 		SDL_Quit();
