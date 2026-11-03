@@ -76,3 +76,53 @@ Port: `src/lzh.c`; reference: `tools/lzh.py`.
 
 Decompressed: u16 x, y, w, h; u16 palette[256] as above (16 x 0x0GRB + 240 x RGB555);
 u8 pixels[w*h]. Backgrounds are 512x288 at (64,0); full screens 640x400 at (0,0).
+
+## Input (WndProc 0x4021c0)
+
+Button/key state byte `0x445d8f`, set on WM_KEYDOWN/WM_*BUTTONDOWN and cleared on the
+matching up message (key tables: VK-0x0d indexes bytes at 0x4024a4 / 0x40252c into jump
+tables 0x40247c / 0x402508):
+
+| bit | source |
+|---|---|
+| 0x01 / 0x02 / 0x04 / 0x08 | Up / Down / Left / Right |
+| 0x10 | left button, Enter, Space |
+| 0x20 | right button, Esc, Insert |
+| 0x40 | Ctrl (skip) |
+| 0x80 | End |
+
+F1 (0x4022dd) calls an import with `0x4ab05c`. Mouse position: `0x4452e2`/`0x4452e4`.
+0x40609c returns bl = bit0 (0x10) | bit1 (0x20), cx/dx = mouse x/y.
+
+## Pacing (what is timed by what)
+
+Everything visible is paced by the 16 ms multimedia timer (frame counter `0x446292`,
+incremented in 0x4028c0); nothing in the game code uses timeGetTime/GetTickCount, and the
+only WaitForVerticalBlank is in WM_PAINT (0x402570).
+
+- 0x4075c6: wait ecx/4+1 frames, pumping messages (0x401bf0) and stepping animations
+  (0x403624) meanwhile. Used by the script wait opcode (0x406ab8), the per-character text
+  delay (0x406310 / 0x40637e, ecx = text speed `0x4452de`, script variable 8 of the array at
+  `0x4452ce`; 0 = no delay, as in the Prologue), and the
+  wait-for-click loop 0x406acc (one frame per poll).
+- 0x403624: animation tick, at most once per frame (`0x4313bc` = last frame seen); steps the
+  ten animation slots at `0x4312cc` (stride 0x18) through 0x403661. 0x4035a0 waits frame by
+  frame until one slot finishes.
+- 0x401a50: dissolve wipe, 0x80 steps (a bit mask per 16-line band), each step waits 2 frames
+  (about 4 s); with a button (0x30) held it stops waiting and runs at CPU speed (about 16 M
+  instructions, 0.65 s at 25 MIPS).
+- 0x4028c0: palette fade, one step every `0x44628e` ticks, 16 steps.
+- Script opcode at 0x4072c3/0x4072f2: frame-counter stopwatch (`0x446296`).
+
+CPU-bound: only the work between waits (script interpretation, picture decompression
+0x4075f0, blits 0x401430/0x4014f0, text 0x401900). The port throttles it to an emulated
+instruction rate (`--cpu-mips`, default 25). Measured instruction counts of the lifted native
+decompressor: ELF.GP4 (6 KB in, 256 KB out) 0.71 M, NAME.GP4 (32 KB in) 2.45 M,
+02.GP4 (15 KB in, 147 KB out) 1.28 M, ELF.ANI (28 KB) 2.32 M: about 70 instructions per
+input byte plus 1.2 per output byte.
+
+## Save files
+
+0x401160 save(name, buf, size): fopen(name, "wb") + fwrite + fclose. The script save opcode
+(0x407188) writes 0xc00 bytes from the script buffer `0x444e78` to the name at `0x445d86`
+(FLAGn); load (0x407152) reads it back through 0x401050.

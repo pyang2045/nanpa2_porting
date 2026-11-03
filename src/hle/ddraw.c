@@ -125,6 +125,15 @@ static uint32_t create_surface(uint32_t desc, uint32_t out)
 	return 0;
 }
 
+/* Emulated CPU time of a blit (see x86_throttle): DirectDraw on a 486 with
+ * system-memory surfaces copies about 4 pixels per instruction-time plain
+ * (rep movsd) and 1 per pixel with a source colour key (software). */
+static void blit_cost(int w, int h, int keyed)
+{
+	if (w > 0 && h > 0)
+		X86_COUNT((uint64_t)w * (uint64_t)h / (keyed ? 1u : 4u) + 200u);
+}
+
 static void blt_fast(struct surf *d, int x, int y, struct surf *s, uint32_t rect, uint32_t flags)
 {
 	int l = 0, t = 0, r = s->w, b = s->h;
@@ -135,6 +144,7 @@ static void blt_fast(struct surf *d, int x, int y, struct surf *s, uint32_t rect
 		b = (int)rd32(rect + 12);
 	}
 	int key = (flags & DDBLTFAST_SRCCOLORKEY) && s->has_ckey;
+	blit_cost(r - l, b - t, key);
 	for (int yy = t; yy < b; yy++) {
 		int dy = y + (yy - t);
 		if (yy < 0 || yy >= s->h || dy < 0 || dy >= d->h)
@@ -174,6 +184,7 @@ static int surface_method(uint32_t m)
 		}
 		if (flags & 0x400) { /* DDBLT_COLORFILL */
 			uint32_t c = rd32(fx + 0x50) & 0xff;
+			blit_cost(r - l, b - t, 0);
 			for (int y = t < 0 ? 0 : t; y < b && y < s->h; y++)
 				for (int x = l < 0 ? 0 : l; x < r && x < s->w; x++)
 					wr8(s->pixels + (uint32_t)(y * s->pitch + x), c);
@@ -186,6 +197,7 @@ static int surface_method(uint32_t m)
 				srr = (int)rd32(sr + 8); sb = (int)rd32(sr + 12);
 			}
 			int key = (flags & 0x8000) && src->has_ckey; /* DDBLT_KEYSRC */
+			blit_cost(r - l, b - t, key);
 			for (int y = t; y < b; y++)
 				for (int x = l; x < r; x++) {
 					int sx = sl + (x - l) * (srr - sl) / (r - l);

@@ -156,6 +156,11 @@ static void collect_events(void)
 	SDL_Event ev;
 	dev_inject();
 	while (SDL_PollEvent(&ev)) {
+		/* scripted runs: the real cursor, keys and focus changes on a shared
+		 * desktop would move the injected mouse or stop the timer
+		 * (WM_ACTIVATEAPP 0 clears 0x4ac4ec) */
+		if (dev_scripted() && ev.type != SDL_QUIT)
+			continue;
 		switch (ev.type) {
 		case SDL_QUIT:
 			win32_post_message(WM_QUIT, 0, 0);
@@ -212,7 +217,11 @@ static uint32_t dispatch(const struct msg *m)
 	if (!win32_wndproc)
 		return 0;
 	uint32_t args[4] = { HWND_MAIN, m->msg, m->wparam, m->lparam };
-	return x86_call(win32_wndproc, 4, args);
+	uint32_t r = x86_call(win32_wndproc, 4, args);
+	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
+		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
+			rd8(0x445d8f), rd32(0x446292));
+	return r;
 }
 
 /* ---- timer ---- */
@@ -269,9 +278,18 @@ void x86_throttle(void)
 
 void x86_probe(uint32_t pc)
 {
-	static int on = -1;
-	if (on < 0)
+	static int on = -1, vm = -1;
+	if (on < 0) {
 		on = getenv("NANPA2_PROBE") != NULL;
+		vm = getenv("NANPA2_VMTRACE") != NULL;
+	}
+	if (pc == 0x40616e) { /* script VM opcode fetch: esi = offset in 0x435e78 */
+		if (vm)
+			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
+				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
+				rd8(0x435e7a + cpu.r[ESI]), rd32(0x446292), (unsigned long long)x86_icount);
+		return;
+	}
 	if (on)
 		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), rd32(0x446292), (unsigned long long)x86_icount);
 }
@@ -284,7 +302,7 @@ void x86_poll(void)
 		log = getenv("NANPA2_LOG") != NULL;
 	if (log && SDL_GetTicks() - last_log > 1000) {
 		last_log = SDL_GetTicks();
-		fprintf(stderr, "poll at %08x frame %u\n", x86_poll_pc, rd32(0x446292));
+		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, rd32(0x446292), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
 	}
 	x86_poll_countdown = 2000;
 	x86_throttle();
@@ -411,6 +429,9 @@ int win32_call_import(int id)
 		r = 1;
 		break;
 	case F_TextOutA:
+		/* emulated CPU time: GDI TrueType text on Windows 95 / 486, about
+		 * 0.2 ms a (cached) glyph */
+		X86_COUNT(5000u * hle_arg(4));
 		text_out(hle_arg(0), (int)hle_arg(1), (int)hle_arg(2), hle_arg(3), (int)hle_arg(4));
 		r = 1;
 		break;

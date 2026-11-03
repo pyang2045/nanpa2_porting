@@ -6,7 +6,9 @@
  *       keys are held for HOLD_MS
  *       sync,0,NAME   later events count from when the game opens file NAME
  *                     (e.g. DATA\NAME.GP4; case-insensitive substring)
- *       shot,MS       save the next frame as dir/ev_NNN.bmp */
+ *       shot,MS       save the next frame as dir/ev_NNN.bmp
+ *   NANPA2_INPUT_CLOCK=frames  MS counts game time (16 ms ticks of 0x446292)
+ *       instead of wall-clock time, for repeatable runs */
 #include "dev.h"
 
 #include <SDL.h>
@@ -21,7 +23,7 @@ static const char *shot_dir;
 static uint32_t shot_start, shot_interval, shot_count, shot_done;
 static uint32_t t0;
 
-#define MAX_INPUT 512
+#define MAX_INPUT 8192
 #define HOLD_MS 120
 static struct ev {
 	uint32_t ms;
@@ -80,9 +82,28 @@ void dev_init(void)
 	}
 }
 
+int dev_scripted(void)
+{
+	return ninput > 0;
+}
+
 uint32_t dev_now(void)
 {
 	return SDL_GetTicks() - t0;
+}
+
+/* Clock for scripted input and screenshots: wall-clock ms, or with
+ * NANPA2_INPUT_CLOCK=frames the game's own 16 ms tick counter (0x446292)
+ * times 16, so a schedule lines up with the game however fast the host
+ * runs or stalls. */
+static uint32_t clock_now(void)
+{
+	static int frames = -1;
+	if (frames < 0) {
+		const char *c = getenv("NANPA2_INPUT_CLOCK");
+		frames = c && !strcmp(c, "frames");
+	}
+	return frames ? rd32(0x446292) * 16u : dev_now();
 }
 
 static void save_frame(const uint8_t *frame, const uint32_t pal[256], const char *path)
@@ -110,7 +131,7 @@ void dev_frame(const uint8_t *frame, const uint32_t pal[256])
 	if (shot_done >= shot_count)
 		return;
 	uint32_t due = shot_start + shot_done * shot_interval;
-	if (dev_now() < due)
+	if (clock_now() < due)
 		return;
 	snprintf(path, sizeof path, "%s/shot_%03u.bmp", shot_dir, shot_done);
 	save_frame(frame, pal, path);
@@ -144,7 +165,7 @@ void dev_file_opened(const char *name)
 		if (seg_started[e->seg - 1] && ci_contains(name, e->file)) {
 			e->done = 1;
 			seg_started[e->seg] = 1;
-			seg_start[e->seg] = dev_now();
+			seg_start[e->seg] = clock_now();
 			if (log_on())
 				fprintf(stderr, "dev: sync %s at %u ms\n", e->file, seg_start[e->seg]);
 		}
@@ -154,7 +175,7 @@ void dev_file_opened(const char *name)
 
 void dev_inject(void)
 {
-	uint32_t now = dev_now();
+	uint32_t now = clock_now();
 	for (int i = 0; i < ninput; i++) {
 		struct ev *e = &input[i];
 		if (e->done || !seg_started[e->seg] || !strcmp(e->kind, "sync") ||
