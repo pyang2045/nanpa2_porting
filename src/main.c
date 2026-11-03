@@ -277,22 +277,35 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* NANPA2_HEADLESS (scripted and smoke test runs): SDL's dummy video
+	 * driver and the presenter's software path, no window server or GPU, so
+	 * test runs leave nothing on the desktop and also run while the screen
+	 * is locked (where the display and GPU setup can block for good) */
+	int headless = getenv("NANPA2_HEADLESS") != NULL;
+	if (headless) {
+		SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
+		SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+	}
+	/* the status file exists from here and names the startup stage: the
+	 * video setup can hang with the screen locked, see status.c */
+	if (!viewer)
+		status_early();
+	status_stage("sdl_init");
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) < 0) {
 		fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
 		return 1;
 	}
-	/* NANPA2_HEADLESS (scripted test runs): the window and presenter exist,
-	 * for present_capture, but the window is never shown, so test runs
-	 * leave no black window on the desktop */
-	int headless = getenv("NANPA2_HEADLESS") != NULL;
+	status_stage("window");
 	SDL_Window *win = SDL_CreateWindow("同級生２", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 					   win_w, win_h,
 					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
 						   (headless ? SDL_WINDOW_HIDDEN : 0) | present_window_flags());
+	status_stage("present_init");
 	if (!win || !present_init(win)) {
 		fprintf(stderr, "video init failed: %s\n", SDL_GetError());
 		return 1;
 	}
+	status_stage("game_init");
 	SDL_Log("Renderer: %s", present_name());
 	/* A binary started from a terminal is not activated by macOS 14+, so its
 	 * window can open behind the terminal; bring it to the front. */

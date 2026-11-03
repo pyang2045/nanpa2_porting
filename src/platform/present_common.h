@@ -3,9 +3,13 @@
 
 #include "present.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 /* ---- status counters (present_stats) ---- */
 
-static struct present_stats pstats = { .occluded = -1, .os_windows = -1, .luma_shown = -1 };
+static struct present_stats pstats = { .occluded = -1, .os_windows = -1, .luma_shown = -1, .app_hidden = -1,
+				       .luma_probe = -1, .luma_probe_src = -1 };
 
 /* Mean luminance of a frame, sampled sparsely (about 8000 pixels). */
 static inline int present_luma_indexed(const uint8_t *pixels, const uint32_t pal[256])
@@ -44,6 +48,93 @@ static inline void present_note_shown(void)
 	pstats.luma_shown = pstats.luma_in;
 	if (pstats.luma_in >= PRESENT_BLACK_LUMA)
 		pstats.last_nonblack = pstats.last_present;
+}
+
+/* The offscreen probe (see struct present_stats) rendered the last frame
+ * given, with mean output luminance luma. */
+static inline void present_note_probe(int luma)
+{
+	uint32_t now = SDL_GetTicks();
+	pstats.probes++;
+	pstats.last_probe = now ? now : 1;
+	pstats.luma_probe = luma;
+	pstats.luma_probe_src = pstats.luma_in;
+	if (luma >= PRESENT_BLACK_LUMA)
+		pstats.last_probe_nonblack = pstats.last_probe;
+}
+
+/* ---- headless presenter (NANPA2_HEADLESS) ----
+ *
+ * Headless runs use SDL's dummy video driver and no GPU at all: with the
+ * screen locked, the window server and GPU setup (SDL_Init's display link,
+ * CAMetalLayer setDevice) can block the process uninterruptibly. Frames
+ * are kept in memory; about once a second the probe converts the last one
+ * to RGB in C (palette lookup) and notes its luminance, so the status file
+ * shows that the game draws; present_capture saves it (nearest-scaled). */
+
+static int soft;                                 /* headless: this path */
+static uint8_t soft_idx[SCREEN_W * SCREEN_H];
+static uint32_t soft_pal[256], soft_rgb[SCREEN_W * SCREEN_H];
+static int soft_is_rgb;
+
+static inline int present_headless(void)
+{
+	return getenv("NANPA2_HEADLESS") != NULL;
+}
+
+/* the last frame as 0x00RRGGBB in soft_rgb */
+static inline void soft_convert(void)
+{
+	if (!soft_is_rgb)
+		for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
+			soft_rgb[i] = soft_pal[soft_idx[i]];
+}
+
+static inline void soft_probe(void)
+{
+	uint32_t now = SDL_GetTicks();
+	if (pstats.last_probe && now - pstats.last_probe < 1000)
+		return;
+	soft_convert();
+	present_note_probe(present_luma_rgb(soft_rgb));
+}
+
+static inline void soft_frame(const uint8_t *pixels, const uint32_t pal[256])
+{
+	memcpy(soft_idx, pixels, sizeof soft_idx);
+	memcpy(soft_pal, pal, sizeof soft_pal);
+	soft_is_rgb = 0;
+	present_note_in(present_luma_indexed(pixels, pal));
+	soft_probe();
+}
+
+static inline void soft_frame_rgb(const uint32_t *xrgb)
+{
+	memcpy(soft_rgb, xrgb, sizeof soft_rgb);
+	soft_is_rgb = 1;
+	present_note_in(present_luma_rgb(xrgb));
+	soft_probe();
+}
+
+static inline int soft_capture(const char *bmp_path, int w, int h)
+{
+	if (w <= 0 || h <= 0) {
+		w = SCREEN_W;
+		h = SCREEN_H;
+	}
+	soft_convert();
+	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_XRGB8888);
+	if (!s)
+		return 0;
+	for (int y = 0; y < h; y++) {
+		uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
+		const uint32_t *src = soft_rgb + (y * SCREEN_H / h) * SCREEN_W;
+		for (int x = 0; x < w; x++)
+			row[x] = src[x * SCREEN_W / w];
+	}
+	int ok = SDL_SaveBMP(s, bmp_path) == 0;
+	SDL_FreeSurface(s);
+	return ok;
 }
 
 /* Largest SCREEN_W:SCREEN_H rectangle centred in a dw x dh drawable. */

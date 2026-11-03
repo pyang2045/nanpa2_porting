@@ -202,12 +202,18 @@ static id<MTLTexture> make_texture(MTLPixelFormat fmt, int w, int h, MTLTextureU
 
 Uint32 present_window_flags(void)
 {
-	return SDL_WINDOW_METAL;
+	return present_headless() ? 0 : SDL_WINDOW_METAL;
 }
 
 int present_init(SDL_Window *win)
 {
 	window = win;
+	if (present_headless()) {
+		/* no Metal device or layer (present_common.h) */
+		soft = 1;
+		snprintf(name, sizeof name, "headless (software, no GPU)");
+		return 1;
+	}
 	view = SDL_Metal_CreateView(win);
 	if (!view)
 		return 0;
@@ -306,8 +312,57 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 
 static void show(void);
 
+/* Offscreen probe (struct present_stats): render the current frame at
+ * 640x480 without the CRT simulation into a texture kept for the purpose,
+ * read it back and note its mean luminance. Called from show() while
+ * presents are skipped, at most once a second: one small render and a
+ * 1.2 MB readback. */
+static id<MTLTexture> probe_tex;
+static uint32_t probe_buf[SCREEN_W * SCREEN_H];
+
+static void probe(void)
+{
+	uint32_t now = SDL_GetTicks();
+	if (pstats.last_probe && now - pstats.last_probe < 1000)
+		return;
+	if (!probe_tex) {
+		MTLTextureDescriptor *td =
+			[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+									   width:SCREEN_W
+									  height:SCREEN_H
+								       mipmapped:NO];
+		td.usage = MTLTextureUsageRenderTarget;
+		td.storageMode = MTLStorageModeManaged;
+		probe_tex = [device newTextureWithDescriptor:td];
+		if (!probe_tex)
+			return;
+	}
+	int saved_crt = crt;
+	crt = 0;
+	id<MTLCommandBuffer> cb = [queue commandBuffer];
+	encode(cb, probe_tex, SCREEN_W, SCREEN_H);
+	crt = saved_crt;
+	id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+	[bl synchronizeResource:probe_tex];
+	[bl endEncoding];
+	[cb commit];
+	[cb waitUntilCompleted];
+	if (cb.status != MTLCommandBufferStatusCompleted)
+		return;
+	[probe_tex getBytes:probe_buf
+		bytesPerRow:SCREEN_W * 4
+		 fromRegion:MTLRegionMake2D(0, 0, SCREEN_W, SCREEN_H)
+		mipmapLevel:0];
+	/* BGRA8 in memory is 0xAARRGGBB as a little-endian word */
+	present_note_probe(present_luma_rgb(probe_buf));
+}
+
 void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 {
+	if (soft) {
+		soft_frame(pixels, pal);
+		return;
+	}
 	@autoreleasepool {
 		[index_tex replaceRegion:MTLRegionMake2D(0, 0, SCREEN_W, SCREEN_H)
 			     mipmapLevel:0
@@ -328,6 +383,10 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 
 void present_frame_rgb(const uint32_t *xrgb)
 {
+	if (soft) {
+		soft_frame_rgb(xrgb);
+		return;
+	}
 	@autoreleasepool {
 		/* alpha is ignored by the shaders, so 0x00RRGGBB uploads as BGRA */
 		[rgb_tex replaceRegion:MTLRegionMake2D(0, 0, SCREEN_W, SCREEN_H)
@@ -358,6 +417,7 @@ static void show(void)
 		pstats.occluded = nsw && !(nsw.occlusionState & NSWindowOcclusionStateVisible);
 		if (pstats.occluded) {
 			pstats.skip_occluded++;
+			probe();
 			return;
 		}
 		layer.drawableSize = CGSizeMake(dw, dh);
@@ -389,12 +449,15 @@ void present_stats(struct present_stats *out)
 		for (NSWindow *w in NSApp.windows)
 			n += w.visible ? 1 : 0;
 		pstats.os_windows = n;
+		pstats.app_hidden = NSApp.hidden ? 1 : 0;
 		*out = pstats;
 	}
 }
 
 int present_capture(const char *bmp_path, int w, int h)
 {
+	if (soft)
+		return soft_capture(bmp_path, w, h);
 	@autoreleasepool {
 		if (w <= 0 || h <= 0) /* the window's drawable size */
 			SDL_Metal_GetDrawableSize(window, &w, &h);
@@ -482,6 +545,7 @@ void present_shutdown(void)
 	pipe_lin = pipe_blur = pipe_crt = nil;
 	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = nil;
 	linear_sampler = nil;
+	probe_tex = nil;
 	queue = nil;
 	device = nil;
 	layer = nil;

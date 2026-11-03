@@ -67,6 +67,19 @@ struct present_stats {
 	int luma_shown;               /* ... of the last frame presented, -1 none */
 	uint32_t last_present;        /* when a frame last reached the window */
 	uint32_t last_nonblack;       /* when a non-black frame last reached it */
+	int app_hidden;               /* the application is hidden (Cmd-H), -1 unknown */
+	/* Offscreen probe: while presents are skipped because the window is
+	 * covered (or the screen locked), the presenter renders the frame it
+	 * skipped through the same pipeline into an offscreen texture about
+	 * once a second and reads it back, so the status file shows whether
+	 * rendering works although nothing can reach the screen. The probe
+	 * runs with the CRT simulation off (its dark glass would make a black
+	 * frame read as grey) and does not touch the counters above. */
+	unsigned long probes;         /* offscreen renders done */
+	int luma_probe;               /* mean luminance of the last one, -1 none */
+	int luma_probe_src;           /* ... of the frame it was given (luma_in then) */
+	uint32_t last_probe;          /* when the last one ran */
+	uint32_t last_probe_nonblack; /* when one last came out non-black */
 };
 void present_stats(struct present_stats *out);
 
