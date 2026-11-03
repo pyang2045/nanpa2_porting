@@ -112,6 +112,10 @@ static NSString *const shader_src = @
 	"  float edge = saturate(-d * u.out_size.y * 0.5);\n"
 	"  float2 uv = in.uv;\n"
 	"  float2 p = uv * src - 0.5;\n"
+	/* at 2x the two output rows of a line would sit symmetrically about the
+	 * beam and get the same light (no visible scanlines): shift by half an
+	 * output row so one is on the beam and the other in the gap */
+	"  p.y += 0.5 / scale.y * saturate(1.0 - 2.0 * abs(scale.y - 2.0));\n"
 	"  float2 b = floor(p), f = p - b;\n"
 	"  int2 i = int2(b);\n"
 	/* horizontally each screen pixel is a box blurred by the beam spot
@@ -145,7 +149,7 @@ static NSString *const shader_src = @
 	"    float sigma = mix(0.28, 0.38, sqrt(dot(row[k], LUMA)));\n"
 	"    scan += row[k] * beam(f.y - float(k - 1), sigma, hy);\n"
 	"  }\n"
-	"  float3 col = mix(flat, scan, SCAN * smoothstep(1.0, 3.0, scale.y));\n"
+	"  float3 col = mix(flat, scan, SCAN * smoothstep(1.0, 2.0, scale.y));\n"
 	/* aperture grille: continuous vertical R, G, B stripes in output pixels,
 	 * the loss made up (bright pixels clip on their own stripe) */
 	"  float ms = MASK * saturate((scale.x - 1.25) / 2.25);\n"
