@@ -6,6 +6,7 @@
 #include "present_common.h"
 
 #include <SDL_metal.h>
+#import <AppKit/AppKit.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 
@@ -343,6 +344,12 @@ static void show(void)
 		int dw, dh;
 		SDL_Metal_GetDrawableSize(window, &dw, &dh);
 		if (dw <= 0 || dh <= 0)
+			return;
+		/* nextDrawable blocks up to its 1 s timeout while the window is
+		 * covered, which would stall the game; skip until it is visible.
+		 * The textures hold the frame, so the next call shows it. */
+		NSWindow *nsw = ((__bridge NSView *)view).window;
+		if (nsw && !(nsw.occlusionState & NSWindowOcclusionStateVisible))
 			return;
 		layer.drawableSize = CGSizeMake(dw, dh);
 		id<CAMetalDrawable> drawable = [layer nextDrawable];
