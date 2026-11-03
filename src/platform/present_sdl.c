@@ -225,11 +225,27 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 void present_frame_rgb(const uint32_t *xrgb)
 {
 	SDL_UpdateTexture(texture, NULL, xrgb, SCREEN_W * 4);
+	present_note_in(present_luma_rgb(xrgb));
 	int ow, oh;
-	if (SDL_GetRendererOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0)
+	if (SDL_GetRendererOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0) {
+		pstats.skip_size++;
 		return;
+	}
+	pstats.drawable_w = ow;
+	pstats.drawable_h = oh;
 	draw(ow, oh);
+	Uint64 t = SDL_GetPerformanceCounter();
 	SDL_RenderPresent(renderer);
+	pstats.last_wait_ms = (double)(SDL_GetPerformanceCounter() - t) * 1000.0 /
+			      (double)SDL_GetPerformanceFrequency();
+	if (pstats.last_wait_ms > pstats.worst_wait_ms)
+		pstats.worst_wait_ms = pstats.last_wait_ms;
+	present_note_shown();
+}
+
+void present_stats(struct present_stats *out)
+{
+	*out = pstats;
 }
 
 int present_capture(const char *bmp_path, int w, int h)

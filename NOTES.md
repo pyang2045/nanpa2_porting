@@ -126,3 +126,27 @@ input, then ANI/A6/maps and sound.
   covered (NSWindow occlusionState), since nextDrawable then blocks up to 1 s per call. That
   stall was reported from another run; hidden, minimized and second-window cases here did
   not reproduce it.
+
+## 2026-11-03 (two black windows, self-diagnosis)
+
+- "Two windows, both black" was two scripted runs of the engine agent, not the user's game:
+  started with `NANPA2_HEADLESS=1 NANPA2_INPUT=... NANPA2_SHOT_DIR=...` from its worktree
+  (one more seen here: pid 4608, started 23:22:10, `./build/nanpa2 --game ../../../game`,
+  cwd `.claude/worktrees/agent-a2075...`). NANPA2_HEADLESS only skipped present_frame in
+  ddraw_present; main.c still created and raised a visible window, which stayed black.
+- 1d61bb2: headless runs create the window SDL_WINDOW_HIDDEN and do not raise it.
+- 1d61bb2: live status file `$TMPDIR/nanpa2-status-<pid>.json` (src/hle/status.c), about once
+  a second, removed on exit/SIGTERM/SIGALRM, stale ones removed at start: mode and NANPA2_*
+  env, window and on-screen counts, occlusion, presenter counters (new present_stats(),
+  luminance sampled at upload), frame counter 0x446292, 0x4ac4ec, last X86_POLL pc, logo,
+  music, voice. Watchdog: one WARNING line with the likely cause after 8 s black or
+  unpresented, 3 s frame counter standstill (timer on, not in the logo 0x401e20), 3 s main
+  thread stall, or a headless run with a window on screen.
+- tests/smoke.py (`ctest -R smoke`): plain launch 35 s plus headless 6 s. Passes on the Metal
+  and SDL_Renderer presenters: one window, ~1480 frames presented, logo luma 14-179, then
+  luma 20 and 60 after it (scenes not checked by eye), frame counter ~67/s, no warnings;
+  headless: os_windows 0.
+- The occlusionState skip (31ffa68) is correct: hiding the app 14 s mid-run gave
+  `WARNING: no frame presented ... presents skipped, occluded=485`, the game kept running
+  (frame counter advancing), and presenting resumed on unhide. Initial occlusionState is
+  "covered" for a moment at startup and turns visible within the first second.

@@ -58,7 +58,13 @@ cmake -S . -B build -G Ninja && ninja -C build
 ./build/nanpa2 --view                            # picture viewer: Left/Right, Esc
 ./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
 ./build/decode_all game                          # expect "ok 705 bad 0"
+ctest --test-dir build -R smoke --output-on-failure  # after each merge: one window, renders
+cat $TMPDIR/nanpa2-status-*.json                 # live state of every running instance
 ```
+
+A black or frozen window: read the status file first (`warning`, `mode`, `present`,
+`game`); see README "Diagnosing a running instance". Scripted test runs use
+`NANPA2_HEADLESS=1` and must not show a window.
 
 The log line `Renderer: Metal | <GPU>` confirms Metal. Wrap scripted runs:
 `perl -e 'alarm 10; exec @ARGV' ./build/nanpa2 ...`.
