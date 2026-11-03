@@ -321,6 +321,7 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 			     withBytes:bgra
 			   bytesPerRow:sizeof bgra];
 		rgb_mode = 0;
+		present_note_in(present_luma_indexed(pixels, pal));
 		show();
 	}
 }
@@ -334,6 +335,7 @@ void present_frame_rgb(const uint32_t *xrgb)
 			     withBytes:xrgb
 			   bytesPerRow:SCREEN_W * 4];
 		rgb_mode = 1;
+		present_note_in(present_luma_rgb(xrgb));
 		show();
 	}
 }
@@ -343,22 +345,51 @@ static void show(void)
 	@autoreleasepool {
 		int dw, dh;
 		SDL_Metal_GetDrawableSize(window, &dw, &dh);
-		if (dw <= 0 || dh <= 0)
+		pstats.drawable_w = dw;
+		pstats.drawable_h = dh;
+		if (dw <= 0 || dh <= 0) {
+			pstats.skip_size++;
 			return;
+		}
 		/* nextDrawable blocks up to its 1 s timeout while the window is
 		 * covered, which would stall the game; skip until it is visible.
 		 * The textures hold the frame, so the next call shows it. */
 		NSWindow *nsw = ((__bridge NSView *)view).window;
-		if (nsw && !(nsw.occlusionState & NSWindowOcclusionStateVisible))
+		pstats.occluded = nsw && !(nsw.occlusionState & NSWindowOcclusionStateVisible);
+		if (pstats.occluded) {
+			pstats.skip_occluded++;
 			return;
+		}
 		layer.drawableSize = CGSizeMake(dw, dh);
+		Uint64 t = SDL_GetPerformanceCounter();
 		id<CAMetalDrawable> drawable = [layer nextDrawable];
-		if (!drawable)
+		pstats.last_wait_ms = (double)(SDL_GetPerformanceCounter() - t) * 1000.0 /
+				      (double)SDL_GetPerformanceFrequency();
+		if (pstats.last_wait_ms > pstats.worst_wait_ms)
+			pstats.worst_wait_ms = pstats.last_wait_ms;
+		if (!drawable) {
+			pstats.skip_drawable++;
 			return;
+		}
 		id<MTLCommandBuffer> cb = [queue commandBuffer];
 		encode(cb, drawable.texture, dw, dh);
 		[cb presentDrawable:drawable];
 		[cb commit];
+		present_note_shown();
+	}
+}
+
+void present_stats(struct present_stats *out)
+{
+	@autoreleasepool {
+		NSWindow *nsw = ((__bridge NSView *)view).window;
+		if (nsw)
+			pstats.occluded = !(nsw.occlusionState & NSWindowOcclusionStateVisible);
+		int n = 0;
+		for (NSWindow *w in NSApp.windows)
+			n += w.visible ? 1 : 0;
+		pstats.os_windows = n;
+		*out = pstats;
 	}
 }
 

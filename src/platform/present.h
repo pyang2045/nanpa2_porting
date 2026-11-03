@@ -47,4 +47,27 @@ int present_get_crt(void);
  * presenter headlessly). Returns 0 on failure. */
 int present_capture(const char *bmp_path, int w, int h);
 
+/* A frame below this mean luminance (0..255) counts as black. */
+#define PRESENT_BLACK_LUMA 4
+
+/* Presenter counters for the live status file and watchdog (src/hle/status.c).
+ * Call on the main thread. Times are SDL_GetTicks() values, 0 = never. */
+struct present_stats {
+	unsigned long frames_in;      /* present_frame / present_frame_rgb calls */
+	unsigned long presented;      /* frames that reached the window */
+	unsigned long skip_occluded;  /* skipped: the window is covered or hidden */
+	unsigned long skip_drawable;  /* skipped: no drawable (nextDrawable nil) */
+	unsigned long skip_size;      /* skipped: drawable size 0 */
+	double last_wait_ms;          /* time to get the last drawable */
+	double worst_wait_ms;         /* longest such wait */
+	int drawable_w, drawable_h;
+	int occluded;                 /* 1 covered, 0 visible, -1 unknown */
+	int os_windows;               /* this process's on-screen windows, -1 unknown */
+	int luma_in;                  /* mean luminance 0..255 of the last frame given */
+	int luma_shown;               /* ... of the last frame presented, -1 none */
+	uint32_t last_present;        /* when a frame last reached the window */
+	uint32_t last_nonblack;       /* when a non-black frame last reached it */
+};
+void present_stats(struct present_stats *out);
+
 #endif

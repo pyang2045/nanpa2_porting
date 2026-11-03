@@ -44,6 +44,7 @@ set(SOURCES
   src/cinepak.c
   src/hle/sound.c
   src/hle/dev.c
+  src/hle/status.c
   "${GEN_C}"
 )
 
@@ -68,7 +69,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
-  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" iconv)
+  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" iconv)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -79,3 +80,11 @@ endif()
 
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
 target_include_directories(decode_all PRIVATE src)
+
+# Smoke test of a plain interactive launch (a real window on this desktop,
+# about 45 s): ctest --test-dir build -R smoke --output-on-failure
+set(NANPA2_GAME_DIR "${CMAKE_SOURCE_DIR}/game" CACHE PATH "Game folder for the tests")
+enable_testing()
+add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
+  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
+set_tests_properties(smoke PROPERTIES TIMEOUT 120)

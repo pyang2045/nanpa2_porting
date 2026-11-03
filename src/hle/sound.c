@@ -322,6 +322,8 @@ void sound_shutdown(void)
 	dump_close();
 }
 
+static char voice_name[64];
+
 static void music_free(void)
 {
 	if (music.is_mp3)
@@ -401,6 +403,15 @@ void sound_music_pause(int pause)
 	SDL_UnlockAudioDevice(dev);
 }
 
+/* For the status file: the music number playing (-1 none) and the last
+ * voice started, if it still plays. Read without the audio lock: a stale
+ * value is harmless there. */
+int sound_status(char *voice_out, size_t cap)
+{
+	snprintf(voice_out, cap, "%s", dev && voice.active ? voice_name : "");
+	return dev && music.active && !music.paused ? music.num : -1;
+}
+
 /* native 0x403440 */
 void sound_voice_stop(void)
 {
@@ -429,6 +440,7 @@ void sound_voice_play(const char *rel)
 		voice = c;
 		voice.active = 1;
 		SDL_UnlockAudioDevice(dev);
+		snprintf(voice_name, sizeof voice_name, "%s", rel);
 		slog("voice", rel);
 	} else {
 		SDL_Log("voice %s not found", rel);

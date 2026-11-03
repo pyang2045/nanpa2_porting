@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "dev.h"
+#include "status.h"
 #include "platform/present.h"
 
 #define HWND_MAIN 0x00001000u
@@ -237,6 +238,11 @@ static uint32_t dispatch(const struct msg *m)
 
 void hle_timer_callback(void);
 
+int win32_timer_running(void)
+{
+	return timer_on;
+}
+
 void win32_run_timer(void)
 {
 	if (!timer_on)
@@ -314,6 +320,7 @@ void x86_poll(void)
 		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, rd32(0x446292), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
 	}
 	x86_poll_countdown = 2000;
+	status_main();
 	x86_throttle();
 	win32_run_timer();
 	ddraw_present(0);
@@ -327,6 +334,7 @@ int win32_pump(void)
 	 * charging it keeps the throttle from running the game's pump loops
 	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
 	X86_COUNT(500);
+	status_main();
 	x86_throttle();
 	win32_run_timer();
 	ddraw_present(0);
