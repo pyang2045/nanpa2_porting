@@ -306,6 +306,10 @@ void x86_probe(uint32_t pc)
 				rd8(0x435e7a + cpu.r[ESI]), rd32(0x446292), (unsigned long long)x86_icount);
 		return;
 	}
+	if (pc == 0x4071bb) { /* script hit test 0x4071a4: edi = rectangle table */
+		dev_hit_table(cpu.r[EDI]);
+		return;
+	}
 	if (on)
 		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), rd32(0x446292), (unsigned long long)x86_icount);
 }
