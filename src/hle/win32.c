@@ -281,6 +281,7 @@ void x86_probe(uint32_t pc)
 		vm = getenv("NANPA2_VMTRACE") != NULL;
 	}
 	if (pc == 0x40616e) { /* script VM opcode fetch: esi = offset in 0x435e78 */
+		dev_vm_fetch(cpu.r[ESI]);
 		if (vm)
 			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
 				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
