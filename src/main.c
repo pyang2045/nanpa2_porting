@@ -171,8 +171,10 @@ static int run_game(const char *game, const char *exe, const char *font)
 		fprintf(stderr, "cannot load %s\n", exe);
 		return 1;
 	}
-	char *save = SDL_GetPrefPath("nanpa2", "nanpa2");
-	if (!hle_init(game, save ? save : ".")) {
+	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
+	const char *save_env = getenv("NANPA2_SAVE_DIR");
+	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
+	if (!hle_init(game, save_env ? save_env : save ? save : ".")) {
 		fprintf(stderr, "cannot map imports of %s\n", exe);
 		return 1;
 	}

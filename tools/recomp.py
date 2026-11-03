@@ -56,8 +56,9 @@ DATA_TABLE_RANGES = [(0x435576, 0x4355fa), (0x435dfc, 0x435e60)]
 # instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
 # two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
 # wait-for-click at 0x406acc; 0x40616e is the script VM's opcode fetch
-# (logged with NANPA2_VMTRACE=1).
-PROBES = {0x40616e, 0x401a50, 0x40738b, 0x4062ff, 0x40636d, 0x406acc}
+# (logged with NANPA2_VMTRACE=1); 0x4071bb is inside the script hit test
+# 0x4071a4 with edi = its rectangle table (NANPA2_HOTSPOTS=1).
+PROBES = {0x40616e, 0x401a50, 0x40738b, 0x4062ff, 0x40636d, 0x406acc, 0x4071bb}
 
 # entry points only referenced as immediates: WndProc, the logo window
 # subclass proc

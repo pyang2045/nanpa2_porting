@@ -168,9 +168,20 @@ static int ci_contains(const char *hay, const char *needle)
 /* The first pending sync fires when its trigger happens after its own
  * segment started; events of earlier segments that have not fired yet are
  * dropped (e.g. dialogue clicks once the next menu is up). */
+/* Lowest index of an event that has not fired; scans start here, since a
+ * long script is mostly fired events and both scans run very often (every
+ * script opcode, every pump). */
+static int first_live(void)
+{
+	static int lo;
+	while (lo < ninput && input[lo].done)
+		lo++;
+	return lo;
+}
+
 static void sync_check(const char *name, int vm, uint32_t off)
 {
-	for (int i = 0; i < ninput; i++) {
+	for (int i = first_live(); i < ninput; i++) {
 		struct ev *e = &input[i];
 		if (e->done || strcmp(e->kind, "sync"))
 			continue;
@@ -204,13 +215,48 @@ void dev_vm_fetch(uint32_t off)
 		sync_check(NULL, 1, off);
 }
 
+/* The script hit test (ext op 0x23, 0x4071a4) scans 10-byte entries
+ * {code, x0, y0, x1, y1} up to code 0xffff and returns the code of the
+ * rectangle under the mouse in register S. The table is built at run time,
+ * so NANPA2_HOTSPOTS=1 logs it whenever it changes. */
+void dev_hit_table(uint32_t table)
+{
+	static int on = -1;
+	static uint8_t last[400];
+	static uint32_t last_at, last_len = ~0u;
+	if (on < 0)
+		on = getenv("NANPA2_HOTSPOTS") != NULL;
+	if (!on)
+		return;
+	uint32_t n = 0;
+	while (n < 40 && rd16(table + 10 * n) != 0xffff)
+		n++;
+	uint32_t len = 10 * n;
+	if (table == last_at && len == last_len && !memcmp(last, x86_ptr(table, len), len))
+		return;
+	last_at = table;
+	last_len = len;
+	memcpy(last, x86_ptr(table, len), len);
+	fprintf(stderr, "hotspots at %06x frame %u:", table, rd32(0x446292));
+	for (uint32_t i = 0; i < n; i++) {
+		uint32_t e = table + 10 * i;
+		fprintf(stderr, " %04x(%u,%u)-(%u,%u)", rd16(e), rd16(e + 2), rd16(e + 4),
+			rd16(e + 6), rd16(e + 8));
+	}
+	fprintf(stderr, "\n");
+}
+
 void dev_inject(void)
 {
 	uint32_t now = clock_now();
-	for (int i = 0; i < ninput; i++) {
+	for (int i = first_live(); i < ninput; i++) {
 		struct ev *e = &input[i];
-		if (e->done || !seg_started[e->seg] || !strcmp(e->kind, "sync") ||
-		    now - seg_start[e->seg] < e->ms)
+		if (e->done)
+			continue;
+		/* segments start in order: nothing after an unfired sync is live */
+		if (!strcmp(e->kind, "sync"))
+			break;
+		if (!seg_started[e->seg] || now - seg_start[e->seg] < e->ms)
 			continue;
 		e->done = 1;
 		if (log_on())

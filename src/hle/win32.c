@@ -168,6 +168,15 @@ static void collect_events(void)
 {
 	SDL_Event ev;
 	dev_inject();
+	/* scripted runs only take SDL_QUIT from the host, so the Cocoa event
+	 * pump (most of their host CPU) can run every 16 ms */
+	if (dev_scripted()) {
+		static uint32_t last;
+		uint32_t now = SDL_GetTicks();
+		if (now - last < 16)
+			return;
+		last = now;
+	}
 	while (SDL_PollEvent(&ev)) {
 		/* scripted runs: the real cursor, keys and focus changes on a shared
 		 * desktop would move the injected mouse or stop the timer
@@ -304,6 +313,10 @@ void x86_probe(uint32_t pc)
 			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
 				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
 				rd8(0x435e7a + cpu.r[ESI]), rd32(0x446292), (unsigned long long)x86_icount);
+		return;
+	}
+	if (pc == 0x4071bb) { /* script hit test 0x4071a4: edi = rectangle table */
+		dev_hit_table(cpu.r[EDI]);
 		return;
 	}
 	if (on)
