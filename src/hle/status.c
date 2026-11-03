@@ -62,7 +62,7 @@ static struct snap {
 } snap;
 
 /* watchdog state (writer thread only) */
-static char warning[256];
+static char warning[256], last_key[64];
 static unsigned warnings;
 static uint32_t last_frame_value, last_frame_change;
 
@@ -117,7 +117,6 @@ static void warn(const char *key, const char *fmt, ...)
 	vsnprintf(msg, sizeof msg, fmt, ap);
 	va_end(ap);
 	/* log once per cause (the key), not every second */
-	static char last_key[64];
 	if (strcmp(last_key, key)) {
 		snprintf(last_key, sizeof last_key, "%s", key);
 		SDL_Log("WARNING: %s", msg);
@@ -214,6 +213,8 @@ static void write_status(void)
 	uint32_t now = SDL_GetTicks();
 	uint32_t frame = rd32(0x446292), active = rd32(0x4ac4ec), pc = x86_poll_pc;
 	watchdog(&s, now, frame, active, pc);
+	if (!warning[0])
+		last_key[0] = 0; /* a cause that clears and comes back is logged again */
 
 	const struct present_stats *ps = &s.ps;
 	char voice[64], vq[160], wq[600], started[32];
@@ -348,8 +349,8 @@ void status_init(SDL_Window *win, double mips_setting)
 	lock = SDL_CreateMutex();
 	status_main();
 	atexit(status_shutdown);
-	signal(SIGTERM, on_signal);
-	signal(SIGINT, on_signal);
+	/* SIGINT and SIGTERM stay with SDL (SDL_QUIT: a clean exit, which
+	 * removes the file); SIGALRM is the perl alarm wrapper of test runs */
 #ifndef _WIN32
 	signal(SIGHUP, on_signal);
 	signal(SIGALRM, on_signal);
