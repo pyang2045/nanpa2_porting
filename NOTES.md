@@ -150,3 +150,22 @@ input, then ANI/A6/maps and sound.
   `WARNING: no frame presented ... presents skipped, occluded=485`, the game kept running
   (frame counter advancing), and presenting resumed on unhide. Initial occlusionState is
   "covered" for a moment at startup and turns visible within the first second.
+
+## 2026-11-03 (engine: through the Prologue scenes, in-game save and load)
+
+- Scripted runs (frame clock, VM syncs from 734059c) now play OPEN.MES (classroom) -> S1
+  (school gate) -> S2 -> S4 -> S5 (own room) -> S6 (living room, 8:00 PM) with no traps and
+  no watchdog warnings. Menu-loop offsets used for syncs: OPEN @2a3c/@2a4f, S1 @26d5/@26e0,
+  S2 @264f/@265a, S4 @2a05/@2a10, S5 @2760/@276b. S5 needs 考慮自己的事 -> 母親/美佐子/唯
+  twice each (flags 13-18) before 移動 shows; 移動 -> 到唯的房間 then 客廳 loads S6.MES.
+- In-game save: S5 存檔 -> 存檔 runs `04 21 31` (0x4070d5 -> 0x407188 -> 0x401160) for slot 0
+  and slot 6: flag0 and flag6 (3072 bytes each) land in the SDL pref folder and the game
+  prints 已經儲存。 Load: title "Data Load" -> diary picker -> the lit diary runs
+  `04 21 30 03 02 53` (START1.MES 0x1342 -> 0x407152 -> 0x401050), reads flag0 and resumes
+  S5.MES with the saved date, time and money. Round trip confirmed in-game.
+- Pitfalls for input scripts: a click outside every menu item picks the highlighted item,
+  so advance clicks must not overlap a menu; a move must land after the menu is drawn;
+  menus return the item's index as written, with hidden items packed out of the 2x2 grid.
+- The map/drawing code 0x404132-0x405fb6 has no frame waits (856a896).
+- Throttled CPU over the 349 s S5->S6 run: 46.6 s user (13 %), against 4.7 % in the
+  Prologue classroom; not yet broken down.

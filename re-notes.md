@@ -203,6 +203,19 @@ the throttle covers them and nothing there needs a timer.
 (0x407188) writes 0xc00 bytes from the script buffer `0x444e78` to the name at `0x445d86`
 (FLAGn); load (0x407152) reads it back through 0x401050.
 
+Script form: `04 21 mode 03 02 slot 03`, mode 0x31 save / 0x30 load / 0x32 (START1.MES 0x23d,
+reads FLAG6), slot an expression. The 存檔 item in a scene (S5.MES 0x235a/0x2367; the same block is
+at OPEN.MES 0x2522) saves slot 0 and then slot 6; FLAG6 is the diary index the title reads
+(START1.MES, its "Data Load" item lights the used diaries). The title load is
+`04 21 30 03 02 53 03` (START1.MES 0x1342): slot = register S from the diary picker
+(請選擇日記, six books in a row at y 170, the lit one at x 440 for slot 0; Exit at (410,204)).
+Title menu: Prologue (320,170), Data Load (320,226).
+
+Menus return the item's index in the list as written, not its position on screen: hidden
+items (a false `0f expr 03` guard) are packed out of the 2x2 grid ((215,383) (420,383)
+(215,407) (420,407)), so S5's 存檔 is item 4 even when it is drawn third. A click outside every
+item takes the highlighted item.
+
 ## Script expressions and menus (0x4037fc)
 
 RPN on the native stack, ended by 0x03. Tokens: 0x30-0x3f literal 0-15; `07 b` literal b>>2;
