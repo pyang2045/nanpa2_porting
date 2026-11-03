@@ -1,6 +1,9 @@
 /* Developer hooks for scripted, headless testing (environment variables):
  *   NANPA2_SHOT_DIR=dir NANPA2_SHOT_SCHEDULE=start_ms,interval_ms,count
  *       save the screen as dir/shot_NNN.bmp on that schedule
+ *   NANPA2_SHOT_PRESENT=1
+ *       also save what the presenter draws (CRT included) at the window's
+ *       drawable size as dir/present_NNN.bmp
  *   NANPA2_INPUT="click,MS,X,Y;rclick,MS,X,Y;move,MS,X,Y;key,MS,VK;quit,MS"
  *       timed input in 640x480 screen coordinates, MS after start; clicks and
  *       keys are held for HOLD_MS */
@@ -84,6 +87,10 @@ void dev_frame(const uint8_t *frame, const uint32_t pal[256])
 	snprintf(path, sizeof path, "%s/shot_%03u.bmp", shot_dir, shot_done);
 	SDL_SaveBMP(s, path);
 	SDL_FreeSurface(s);
+	if (getenv("NANPA2_SHOT_PRESENT")) {
+		snprintf(path, sizeof path, "%s/present_%03u.bmp", shot_dir, shot_done);
+		present_capture(path, 0, 0);
+	}
 	shot_done++;
 }
 
