@@ -110,3 +110,19 @@ input, then ANI/A6/maps and sound.
   blocks `nextDrawable` up to 1 s (game and timer stall; a click's down and up arrive in
   the same pump), the real cursor/focus on a shared desktop, and wall-clock schedules.
   Input lists were also cut at 512 entries (~255 clicks), which looked like a hang.
+
+## 2026-11-03 (black window)
+
+- Interactive runs could show a black window: on focus loss collect_events posted
+  WM_ACTIVATEAPP(0), whose handler clears 0x4ac4ec, so the 16 ms timer (0x4028c0) stops
+  advancing the frame counter 0x446292 that the game waits on (e.g. poll at 0x4035c0/0x406f48)
+  and music pauses (0x403220). Injected focus loss right after LOGO.AVI froze the counter at 2
+  with a black screen for good; at 18 s it froze on the elf logo. Launched from a terminal the
+  window was never activated (no SDL_WINDOW_INPUT_FOCUS), so a click on it and back to the
+  terminal was enough.
+- 31ffa68: focus loss no longer pauses the game (`--pause-inactive` /
+  NANPA2_PAUSE_INACTIVE=1 restores 0x403220/0x4ac4ec behaviour); SDL_RaiseWindow at startup
+  (the window now gets input focus); the Metal presenter skips frames while the window is
+  covered (NSWindow occlusionState), since nextDrawable then blocks up to 1 s per call. That
+  stall was reported from another run; hidden, minimized and second-window cases here did
+  not reproduce it.

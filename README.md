@@ -28,3 +28,7 @@ Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` 
 ```sh
 ./build/nanpa2 --game game        # picture viewer for now: Left/Right, Esc
 ```
+
+The window is raised at startup and the game keeps running (music too) when it is in the
+background; `--pause-inactive` restores the original behaviour of stopping it while the
+window has no focus.
