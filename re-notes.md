@@ -190,6 +190,13 @@ decompressor: ELF.GP4 (6 KB in, 256 KB out) 0.71 M, NAME.GP4 (32 KB in) 2.45 M,
 02.GP4 (15 KB in, 147 KB out) 1.28 M, ELF.ANI (28 KB) 2.32 M: about 70 instructions per
 input byte plus 1.2 per output byte.
 
+The map/drawing range 0x404132-0x405fb6 has no frame-counter reads (the only readers of
+`0x446292` in the game code are at 0x401adf/0x401b7b/0x401b99 (wipe), 0x4029bb/0x4029c9 (fade),
+0x4035b5/0x40362d (animation), 0x4072c2/0x4072f2 (stopwatch) and 0x4075ca/0x4075e5 (frame
+wait)). 0x405b07 (recursive, called about 25 times from 0x405c88-0x405f8b) and the
+0x404731/0x404937/0x404a9a/0x404c9f group under 0x405691 are pure computation between waits, so
+the throttle covers them and nothing there needs a timer.
+
 ## Save files
 
 0x401160 save(name, buf, size): fopen(name, "wb") + fwrite + fclose. The script save opcode
