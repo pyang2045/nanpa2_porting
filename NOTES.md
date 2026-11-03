@@ -39,7 +39,8 @@ input, then ANI/A6/maps and sound.
   WndProc). No volume, pan or settings; MCI is only for the logo.
 - `src/hle/sound.c` follows it: MP3 loops, WAV music and voices play once, a new piece or
   voice replaces the old, pause/resume on WM_ACTIVATEAPP (0x403220/0x403250; a finished WAV
-  piece replays on reactivation, as a stopped one-shot DirectSound buffer is back at 0).
+  piece replays on reactivation; inferred from DirectSound rewinding a finished one-shot
+  buffer, not verified in the exe).
   Linear resampling; 0x402c70 closes the device. 0x402f10/0x402f60/0x4031d0 (only reached
   from replaced functions) are handled as stubs instead of trapping.
 - `NANPA2_AUDIO_DUMP=out.wav` writes the mixed output (44100 Hz S16 stereo, header kept
