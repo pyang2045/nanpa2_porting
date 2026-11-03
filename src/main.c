@@ -33,6 +33,7 @@
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "hle/logo.h"
+#include "hle/status.h"
 #include "x86/x86.h"
 
 #ifndef _WIN32
@@ -157,6 +158,8 @@ static void save_bmp(const char *path)
 #define NANPA2_DEFAULT_MIPS 25.0
 static double cpu_mips = NANPA2_DEFAULT_MIPS;
 
+static SDL_Window *game_window;
+
 static int run_game(const char *game, const char *exe, const char *font)
 {
 	char exe_buf[1100];
@@ -176,6 +179,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	SDL_free(save);
 	text_init(font);
 	dev_init();
+	status_init(game_window, cpu_mips);
 	x86_set_speed(cpu_mips * 1e6);
 	if (getenv("NANPA2_SAVETEST"))
 		return dev_save_selftest();
@@ -275,10 +279,14 @@ int main(int argc, char **argv)
 		fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
 		return 1;
 	}
+	/* NANPA2_HEADLESS (scripted test runs): the window and presenter exist,
+	 * for present_capture, but the window is never shown, so test runs
+	 * leave no black window on the desktop */
+	int headless = getenv("NANPA2_HEADLESS") != NULL;
 	SDL_Window *win = SDL_CreateWindow("同級生２", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 					   win_w, win_h,
 					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
-						   present_window_flags());
+						   (headless ? SDL_WINDOW_HIDDEN : 0) | present_window_flags());
 	if (!win || !present_init(win)) {
 		fprintf(stderr, "video init failed: %s\n", SDL_GetError());
 		return 1;
@@ -286,7 +294,8 @@ int main(int argc, char **argv)
 	SDL_Log("Renderer: %s", present_name());
 	/* A binary started from a terminal is not activated by macOS 14+, so its
 	 * window can open behind the terminal; bring it to the front. */
-	SDL_RaiseWindow(win);
+	if (!headless)
+		SDL_RaiseWindow(win);
 	present_set_crt(crt);
 	if (fullscreen)
 		present_set_fullscreen(1);
@@ -309,7 +318,9 @@ int main(int argc, char **argv)
 	int rc = 0;
 	if (!viewer) {
 		cpu_mips = mips;
+		game_window = win;
 		rc = run_game(game, exe, font);
+		status_shutdown();
 	} else {
 		for (int running = 1; running;) {
 			SDL_Event ev;

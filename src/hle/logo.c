@@ -22,6 +22,7 @@
 #include "cinepak.h"
 #include "fsys.h"
 #include "platform/present.h"
+#include "status.h"
 
 struct avi {
 	unsigned char *data;
@@ -172,6 +173,7 @@ void logo_play(void)
 		avi_free(&a);
 		return;
 	}
+	status_set_logo(1);
 	int cursor = SDL_ShowCursor(SDL_QUERY);
 	SDL_ShowCursor(SDL_DISABLE); /* native ShowCursor(0) */
 	SDL_AudioDeviceID dev = open_audio(&a);
@@ -193,6 +195,7 @@ void logo_play(void)
 		}
 		present_frame_rgb(dec.pixels);
 		shown++;
+		status_main();
 		SDL_Event ev;
 		while (SDL_PollEvent(&ev)) {
 			if (ev.type == SDL_QUIT) {
@@ -216,6 +219,7 @@ void logo_play(void)
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
 	SDL_ShowCursor(cursor);
+	status_set_logo(0);
 	cvid_free(&dec);
 	avi_free(&a);
 }

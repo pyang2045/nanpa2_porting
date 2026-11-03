@@ -11,6 +11,7 @@
 #ifndef NANPA2_HLE_H
 #define NANPA2_HLE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "x86/x86.h"
@@ -53,6 +54,7 @@ int win32_call_import(int id);
 void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam);
 int win32_pump(void);        /* native 0x401bf0: 0 on quit */
 void win32_run_timer(void);  /* run due 16 ms ticks (native timer thread) */
+int win32_timer_running(void); /* timeSetEvent seen, not killed */
 extern uint32_t win32_wndproc;
 
 /* crt.c: C runtime replacements by native address */
@@ -78,6 +80,7 @@ int sound_init(void);
 void sound_shutdown(void);
 void sound_music_play(int n);
 void sound_music_stop(void);
+int sound_status(char *voice_out, size_t cap); /* music number or -1 */
 void sound_music_pause(int pause);
 void sound_voice_play(const char *rel);
 void sound_voice_stop(void);

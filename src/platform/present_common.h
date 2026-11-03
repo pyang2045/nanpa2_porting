@@ -3,6 +3,49 @@
 
 #include "present.h"
 
+/* ---- status counters (present_stats) ---- */
+
+static struct present_stats pstats = { .occluded = -1, .os_windows = -1, .luma_shown = -1 };
+
+/* Mean luminance of a frame, sampled sparsely (about 8000 pixels). */
+static inline int present_luma_indexed(const uint8_t *pixels, const uint32_t pal[256])
+{
+	uint32_t sum = 0, n = 0;
+	for (int i = 0; i < SCREEN_W * SCREEN_H; i += 37, n++) {
+		uint32_t c = pal[pixels[i]];
+		sum += (((c >> 16) & 0xff) * 54 + ((c >> 8) & 0xff) * 183 + (c & 0xff) * 19) >> 8;
+	}
+	return (int)(sum / n);
+}
+
+static inline int present_luma_rgb(const uint32_t *xrgb)
+{
+	uint32_t sum = 0, n = 0;
+	for (int i = 0; i < SCREEN_W * SCREEN_H; i += 37, n++) {
+		uint32_t c = xrgb[i];
+		sum += (((c >> 16) & 0xff) * 54 + ((c >> 8) & 0xff) * 183 + (c & 0xff) * 19) >> 8;
+	}
+	return (int)(sum / n);
+}
+
+/* A frame was given to the presenter. */
+static inline void present_note_in(int luma)
+{
+	pstats.frames_in++;
+	pstats.luma_in = luma;
+}
+
+/* The last frame given reached the window. */
+static inline void present_note_shown(void)
+{
+	uint32_t now = SDL_GetTicks();
+	pstats.presented++;
+	pstats.last_present = now ? now : 1;
+	pstats.luma_shown = pstats.luma_in;
+	if (pstats.luma_in >= PRESENT_BLACK_LUMA)
+		pstats.last_nonblack = pstats.last_present;
+}
+
 /* Largest SCREEN_W:SCREEN_H rectangle centred in a dw x dh drawable. */
 static inline void present_fit(int dw, int dh, int *x, int *y, int *w, int *h)
 {
