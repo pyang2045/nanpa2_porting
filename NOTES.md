@@ -55,6 +55,10 @@ input, then ANI/A6/maps and sound.
 - Checked windowed (640x480-point window, Retina drawable 1280x960; 900x560 window,
   drawable 1800x1120, letterboxed) and fullscreen (3584x2240) with `--crt-size 0x0`, and
   640x480 / 1000x750 / 1920x1440 / 2560x1920 offscreen. The scripted run to the first
-  dialogue stopped working at name entry this evening for the old baseline binary too
-  (shared machine, other agents running the game), so the text check used a harness that
+  dialogue stopped working at name entry this evening (the clicks on the name grid do not
+  register) for the old baseline binary too, and with a fresh HOME (so not the shared save
+  folder); likely the shared desktop (real mouse/focus). The text check used a harness that
   copies cells the way 0x401900 does.
+- 31d5943: scanlines were invisible at exactly 2x (both output rows of a line sampled the
+  beam symmetrically); the sampling is shifted half an output row around 2x. Grey scanline
+  depth at 1280x960 3% -> 14%; black level (glass) is 18/19/21 of 255.
