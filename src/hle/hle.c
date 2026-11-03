@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "logo.h"
 #include "lzh.h"
 
 #define MAX_IMPORTS 256
@@ -164,7 +165,8 @@ static void override_call(uint32_t addr)
 	case 0x401bf0: /* message pump */
 		cpu.r[EAX] = (uint32_t)win32_pump();
 		return;
-	case 0x401e20: /* LOGO.AVI through MCI: not played yet */
+	case 0x401e20: /* LOGO.AVI through MCI (src/hle/logo.c) */
+		logo_play();
 		return;
 	case 0x402ad0: /* DirectSound init */
 		cpu.r[EAX] = (uint32_t)sound_init();

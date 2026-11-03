@@ -9,6 +9,8 @@
  *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
  *                                                       screenshot (NANPA2_SHOT_DIR)
  *   --no-crt                                            plain pixels (F12 toggles)
+ *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
+ *   --no-logo                                           skip LOGO.AVI
  *   --fullscreen                                        start fullscreen
  *                                                       (Alt+Enter, Cmd+F toggle)
  *
@@ -25,6 +27,7 @@
 #include "platform/present.h"
 #include "hle/dev.h"
 #include "hle/hle.h"
+#include "hle/logo.h"
 #include "x86/x86.h"
 
 #ifndef _WIN32
@@ -39,6 +42,7 @@
 
 static uint8_t screen[SCREEN_W * SCREEN_H];
 static uint32_t palette[256];
+static const uint32_t *logo_rgb; /* --logo-frame: show this RGB frame */
 
 static char **names;
 static int name_count;
@@ -122,6 +126,14 @@ static int show_bmp(const char *path)
 	return 1;
 }
 
+static void show_screen(void)
+{
+	if (logo_rgb)
+		present_frame_rgb(logo_rgb);
+	else
+		present_frame(screen, palette);
+}
+
 static void save_bmp(const char *path)
 {
 	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
@@ -164,7 +176,7 @@ int main(int argc, char **argv)
 {
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
 	const char *crt_shot = NULL, *view_bmp = NULL;
-	int viewer = 0, crt = 1, fullscreen = 0, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
+	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -187,13 +199,33 @@ int main(int argc, char **argv)
 			view_bmp = argv[++i];
 		} else if (!strcmp(argv[i], "--no-crt"))
 			crt = 0;
+		else if (!strcmp(argv[i], "--logo-frame") && i + 1 < argc)
+			logo_frame_n = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--no-logo"))
+			SDL_setenv("NANPA2_LOGO", "0", 1);
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
 	}
 	fsys_set_root(game);
 
 	int cur = 0;
-	if (view_bmp) {
+	if (logo_frame_n >= 0) {
+		/* the decoded movie frame goes through the presenter as RGB */
+		static uint32_t rgb[SCREEN_W * SCREEN_H];
+		int n = logo_frame(logo_frame_n, rgb);
+		if (!n)
+			return 1;
+		SDL_Log("LOGO.AVI frame %d of %d", logo_frame_n, n);
+		if (shot) {
+			SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(rgb, SCREEN_W, SCREEN_H, 32, SCREEN_W * 4,
+									    SDL_PIXELFORMAT_XRGB8888);
+			SDL_SaveBMP(s, shot);
+			SDL_FreeSurface(s);
+			return 0;
+		}
+		logo_rgb = rgb;
+		viewer = 1;
+	} else if (view_bmp) {
 		if (SDL_Init(0) < 0 || !show_bmp(view_bmp))
 			return 1;
 	} else if (viewer) {
@@ -236,7 +268,7 @@ int main(int argc, char **argv)
 			SDL_Event ev;
 			while (SDL_PollEvent(&ev)) {
 			}
-			present_frame(screen, palette);
+			show_screen();
 			SDL_Delay(16);
 		}
 		int ok = present_capture(crt_shot, crt_w, crt_h);
@@ -265,7 +297,7 @@ int main(int argc, char **argv)
 					}
 				}
 			}
-			present_frame(screen, palette);
+			show_screen();
 			SDL_Delay(16);
 		}
 	}

@@ -15,7 +15,8 @@ static CAMetalLayer *layer;
 static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
 static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt;
-static id<MTLTexture> index_tex, pal_tex, lin_tex, blur_tex, glow_tex;
+static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex;
+static int rgb_mode; /* the last frame came from present_frame_rgb */
 static id<MTLSamplerState> linear_sampler;
 static char name[128];
 static int crt = 1;
@@ -23,7 +24,7 @@ static int crt = 1;
 struct uniforms {
 	float out_w, out_h; /* viewport size in drawable pixels */
 	int32_t crt;
-	int32_t pad;
+	int32_t rgb; /* read rgb_tex instead of index + palette */
 };
 
 /* The CRT is a late-90s flat-face Sony FD Trinitron PC monitor showing
@@ -40,7 +41,7 @@ static NSString *const shader_src = @
 	"#include <metal_stdlib>\n"
 	"using namespace metal;\n"
 	"struct V { float4 pos [[position]]; float2 uv; };\n"
-	"struct U { float2 out_size; int crt; int pad; };\n"
+	"struct U { float2 out_size; int crt; int rgb; };\n"
 	"constant float GAMMA = 2.2;\n"
 	"constant float SCAN = 1.0;\n"   /* scanline amount at >= 3.5x */
 	"constant float BEAM_X = 0.25;\n" /* beam spot sigma, screen pixels */
@@ -55,9 +56,15 @@ static NSString *const shader_src = @
 	"  V o; o.pos = float4(p * 2.0 - 1.0, 0.0, 1.0); o.uv = float2(p.x, 1.0 - p.y);\n"
 	"  return o;\n"
 	"}\n"
+	/* one screen pixel: palette lookup, or the true-colour frame */
+	"static float4 screen_px(texture2d<uint> idx, texture2d<float> pal, texture2d<float> rgb,\n"
+	"                        int is_rgb, uint2 c) {\n"
+	"  return float4((is_rgb ? rgb.read(c) : pal.read(uint2(idx.read(c).r, 0))).rgb, 1.0);\n"
+	"}\n"
 	"fragment float4 fs_lin(V in [[stage_in]], texture2d<uint> idx [[texture(0)]],\n"
-	"                       texture2d<float> pal [[texture(1)]]) {\n"
-	"  float3 s = pal.read(uint2(idx.read(uint2(in.pos.xy)).r, 0)).rgb;\n"
+	"                       texture2d<float> pal [[texture(1)]],\n"
+	"                       texture2d<float> rgb [[texture(4)]], constant U &u [[buffer(0)]]) {\n"
+	"  float3 s = screen_px(idx, pal, rgb, u.rgb, uint2(in.pos.xy)).rgb;\n"
 	"  return float4(pow(s, GAMMA), 1.0);\n"
 	"}\n"
 	/* 9-tap Gaussian, sigma 2 screen pixels, along dir */
@@ -90,11 +97,12 @@ static NSString *const shader_src = @
 	"                       texture2d<float> pal [[texture(1)]],\n"
 	"                       texture2d<float> lt [[texture(2)]],\n"
 	"                       texture2d<float> glow [[texture(3)]],\n"
+	"                       texture2d<float> rgb [[texture(4)]],\n"
 	"                       sampler smp [[sampler(0)]], constant U &u [[buffer(0)]]) {\n"
 	"  float2 src = float2(idx.get_width(), idx.get_height());\n"
 	"  if (u.crt == 0) {\n"
 	"    uint2 c = min(uint2(in.uv * src), uint2(src) - 1);\n"
-	"    return pal.read(uint2(idx.read(c).r, 0));\n"
+	"    return screen_px(idx, pal, rgb, u.rgb, c);\n"
 	"  }\n"
 	"  float2 scale = u.out_size / src;\n"
 	/* flat face: the raster's corners are only slightly rounded */
@@ -222,6 +230,7 @@ int present_init(SDL_Window *win)
 
 	index_tex = make_texture(MTLPixelFormatR8Uint, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
 	pal_tex = make_texture(MTLPixelFormatBGRA8Unorm, 256, 1, MTLTextureUsageShaderRead);
+	rgb_tex = make_texture(MTLPixelFormatBGRA8Unorm, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
 	MTLTextureUsage rt = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
 	lin_tex = make_texture(MTLPixelFormatRGBA16Float, SCREEN_W, SCREEN_H, rt);
 	blur_tex = make_texture(MTLPixelFormatRGBA16Float, SCREEN_W, SCREEN_H, rt);
@@ -230,7 +239,7 @@ int present_init(SDL_Window *win)
 	sd.minFilter = sd.magFilter = MTLSamplerMinMagFilterLinear;
 	sd.sAddressMode = sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
 	linear_sampler = [device newSamplerStateWithDescriptor:sd];
-	if (!index_tex || !pal_tex || !lin_tex || !blur_tex || !glow_tex || !linear_sampler)
+	if (!index_tex || !pal_tex || !rgb_tex || !lin_tex || !blur_tex || !glow_tex || !linear_sampler)
 		return 0;
 	snprintf(name, sizeof name, "Metal | %s", device.name.UTF8String);
 	return 1;
@@ -263,29 +272,34 @@ static void blur_pass(id<MTLCommandBuffer> cb, id<MTLTexture> from, id<MTLTextur
 /* Draw the screen into target (dw x dh), letterboxed. */
 static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int dh)
 {
+	int x, y, w, h;
+	present_fit(dw, dh, &x, &y, &w, &h);
+	struct uniforms u = { (float)w, (float)h, crt, rgb_mode };
 	if (crt) {
 		id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
 		[enc setFragmentTexture:index_tex atIndex:0];
 		[enc setFragmentTexture:pal_tex atIndex:1];
+		[enc setFragmentTexture:rgb_tex atIndex:4];
+		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 		[enc endEncoding];
 		blur_pass(cb, lin_tex, blur_tex, 1, 0);
 		blur_pass(cb, blur_tex, glow_tex, 0, 1);
 	}
-	int x, y, w, h;
-	present_fit(dw, dh, &x, &y, &w, &h);
-	struct uniforms u = { (float)w, (float)h, crt, 0 };
 	id<MTLRenderCommandEncoder> enc = begin_pass(cb, target, pipe_crt);
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
 	[enc setFragmentTexture:index_tex atIndex:0];
 	[enc setFragmentTexture:pal_tex atIndex:1];
 	[enc setFragmentTexture:lin_tex atIndex:2];
 	[enc setFragmentTexture:glow_tex atIndex:3];
+	[enc setFragmentTexture:rgb_tex atIndex:4];
 	[enc setFragmentSamplerState:linear_sampler atIndex:0];
 	[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[enc endEncoding];
 }
+
+static void show(void);
 
 void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 {
@@ -301,7 +315,27 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 			   mipmapLevel:0
 			     withBytes:bgra
 			   bytesPerRow:sizeof bgra];
+		rgb_mode = 0;
+		show();
+	}
+}
 
+void present_frame_rgb(const uint32_t *xrgb)
+{
+	@autoreleasepool {
+		/* alpha is ignored by the shaders, so 0x00RRGGBB uploads as BGRA */
+		[rgb_tex replaceRegion:MTLRegionMake2D(0, 0, SCREEN_W, SCREEN_H)
+			   mipmapLevel:0
+			     withBytes:xrgb
+			   bytesPerRow:SCREEN_W * 4];
+		rgb_mode = 1;
+		show();
+	}
+}
+
+static void show(void)
+{
+	@autoreleasepool {
 		int dw, dh;
 		SDL_Metal_GetDrawableSize(window, &dw, &dh);
 		if (dw <= 0 || dh <= 0)
@@ -404,7 +438,7 @@ int present_get_fullscreen(void)
 void present_shutdown(void)
 {
 	pipe_lin = pipe_blur = pipe_crt = nil;
-	index_tex = pal_tex = lin_tex = blur_tex = glow_tex = nil;
+	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = nil;
 	linear_sampler = nil;
 	queue = nil;
 	device = nil;

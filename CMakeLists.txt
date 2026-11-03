@@ -40,6 +40,8 @@ set(SOURCES
   src/hle/win32.c
   src/hle/ddraw.c
   src/hle/text.c
+  src/hle/logo.c
+  src/cinepak.c
   src/hle/sound.c
   src/hle/dev.c
   "${GEN_C}"

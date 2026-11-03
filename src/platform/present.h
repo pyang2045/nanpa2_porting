@@ -17,6 +17,9 @@ Uint32 present_window_flags(void);
 int present_init(SDL_Window *win);
 /* pixels: SCREEN_W*SCREEN_H palette indices; pal: 0x00RRGGBB */
 void present_frame(const uint8_t *pixels, const uint32_t pal[256]);
+/* A true-colour frame (the opening movie, which the native code shows in a
+ * 640x480x16 mode): SCREEN_W*SCREEN_H pixels 0x00RRGGBB. */
+void present_frame_rgb(const uint32_t *xrgb);
 const char *present_name(void);
 void present_shutdown(void);
 

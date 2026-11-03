@@ -219,7 +219,12 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 {
 	for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
 		rgba[i] = pal[pixels[i]];
-	SDL_UpdateTexture(texture, NULL, rgba, SCREEN_W * 4);
+	present_frame_rgb(rgba);
+}
+
+void present_frame_rgb(const uint32_t *xrgb)
+{
+	SDL_UpdateTexture(texture, NULL, xrgb, SCREEN_W * 4);
 	int ow, oh;
 	if (SDL_GetRendererOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0)
 		return;
