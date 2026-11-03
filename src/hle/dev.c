@@ -240,3 +240,23 @@ void dev_inject(void)
 		}
 	}
 }
+
+/* Save/load round trip through the game's own code: 0x401160 save(name,
+ * buf, size) as called by the script save opcode (0x407188, 0xc00 bytes of
+ * 0x444e78 to "FLAGn" at 0x445d86), then 0x401050 load(name, dst) as the
+ * load opcode (0x407152) calls it. Uses slot FLAG9, which the game never
+ * names (its slots are FLAG0-6). */
+int dev_save_selftest(void)
+{
+	uint32_t name = x86_malloc(16), src = x86_malloc(0xc00), dst = x86_malloc(0x1000);
+	memcpy(x86_ptr(name, 6), "FLAG9", 6);
+	for (uint32_t i = 0; i < 0xc00; i++)
+		wr8(src + i, (i * 7 + 3) & 0xff);
+	uint32_t args[3] = { name, src, 0xc00 };
+	x86_call(0x401160, 3, args);
+	uint32_t largs[2] = { name, dst };
+	x86_call(0x401050, 2, largs);
+	int ok = !memcmp(x86_ptr(src, 0xc00), x86_ptr(dst, 0xc00), 0xc00);
+	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
+	return ok ? 0 : 1;
+}

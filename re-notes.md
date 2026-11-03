@@ -195,3 +195,17 @@ input byte plus 1.2 per output byte.
 0x401160 save(name, buf, size): fopen(name, "wb") + fwrite + fclose. The script save opcode
 (0x407188) writes 0xc00 bytes from the script buffer `0x444e78` to the name at `0x445d86`
 (FLAGn); load (0x407152) reads it back through 0x401050.
+
+## Script expressions and menus (0x4037fc)
+
+RPN on the native stack, ended by 0x03. Tokens: 0x30-0x3f literal 0-15; `07 b` literal b>>2;
+`08 h l` literal ((h>>2)<<6 | l>>2); 0x40-0x5a register A-Z (u16 at `0x445298 + 2*n`);
+0x20 + 0x21 - (saturating at 0) 0x22 * 0x23 / 0x24 % 0x25 | 0x26 & 0x27 == 0x28 != 0x29 <
+(a b -> 1 if b < a... pops top first), 0x2d n: 4-bit flag n (nibbles at `0x444e98`, odd n in the
+high nibble, 0x4039d6), 0x2f n: random (0x403999). Statements: `0f expr 01 ... 00` if-block
+(0x40659e; 0x4061d4 skips a block by counting 01/00 nesting), `0a n expr` set flag n
+(0x406491, clamps to 15, 0x406455), `0c R expr` set register (0x4064d9), 0x11 wait for a
+click (0x4065f6 -> 0x406acc), 0x13 call, 0x04 xx extended opcodes (table 0x406262, xx-0x10).
+Menus: item lists `02 [0f expr 03] text` ... `00`; the choice comes back in register S
+(1-based, 0 = cancelled). OPEN.MES (Prologue) keeps the main choice in V and the sub
+choice in N; the main loop starts at script offset 0x2a3c.

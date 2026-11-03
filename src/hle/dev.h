@@ -11,5 +11,7 @@ void dev_file_opened(const char *name);
 void dev_vm_fetch(uint32_t off);
 /* NANPA2_INPUT given: the host mouse, keyboard and focus are ignored */
 int dev_scripted(void);
+/* NANPA2_SAVETEST: round-trip a save through the lifted save/load code */
+int dev_save_selftest(void);
 
 #endif
