@@ -168,6 +168,15 @@ static void collect_events(void)
 {
 	SDL_Event ev;
 	dev_inject();
+	/* scripted runs only take SDL_QUIT from the host, so the Cocoa event
+	 * pump (most of their host CPU) can run every 16 ms */
+	if (dev_scripted()) {
+		static uint32_t last;
+		uint32_t now = SDL_GetTicks();
+		if (now - last < 16)
+			return;
+		last = now;
+	}
 	while (SDL_PollEvent(&ev)) {
 		/* scripted runs: the real cursor, keys and focus changes on a shared
 		 * desktop would move the injected mouse or stop the timer
