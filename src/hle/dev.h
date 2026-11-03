@@ -7,5 +7,6 @@ void dev_init(void);
 uint32_t dev_now(void);
 void dev_frame(const uint8_t *frame, const uint32_t pal[256]);
 void dev_inject(void);
+void dev_file_opened(const char *name);
 
 #endif

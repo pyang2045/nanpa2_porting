@@ -234,6 +234,48 @@ void win32_run_timer(void)
 		timer_next = now + 16; /* fell far behind: drop ticks */
 }
 
+/* ---- emulated CPU speed ----
+ * Budget: instructions executed since the base point may not exceed the
+ * real time elapsed times the rate. Ahead of it, sleep; far behind (HLE
+ * work, a stall, an unthrottled stretch), move the base point so the game
+ * never bursts to catch up. Timer-paced waits (frame counter 0x446292) are
+ * unaffected: they spin, throttled, until the real-time timer ticks. */
+static double cpu_ips;
+static uint64_t base_count, base_ticks;
+
+void x86_set_speed(double ips)
+{
+	cpu_ips = ips;
+	base_count = x86_icount;
+	base_ticks = SDL_GetPerformanceCounter();
+}
+
+void x86_throttle(void)
+{
+	if (cpu_ips <= 0)
+		return;
+	uint64_t now = SDL_GetPerformanceCounter();
+	double freq = (double)SDL_GetPerformanceFrequency();
+	double real = (double)(now - base_ticks) / freq;
+	double virt = (double)(x86_icount - base_count) / cpu_ips;
+	double ahead = virt - real;
+	if (ahead >= 0.002) {
+		SDL_Delay((uint32_t)(ahead * 1000.0));
+	} else if (ahead < -0.05) {
+		base_ticks = now;
+		base_count = x86_icount;
+	}
+}
+
+void x86_probe(uint32_t pc)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_PROBE") != NULL;
+	if (on)
+		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), rd32(0x446292), (unsigned long long)x86_icount);
+}
+
 void x86_poll(void)
 {
 	static uint32_t last_log;
@@ -245,6 +287,7 @@ void x86_poll(void)
 		fprintf(stderr, "poll at %08x frame %u\n", x86_poll_pc, rd32(0x446292));
 	}
 	x86_poll_countdown = 2000;
+	x86_throttle();
 	win32_run_timer();
 	ddraw_present(0);
 	SDL_PumpEvents();
@@ -253,9 +296,20 @@ void x86_poll(void)
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
 int win32_pump(void)
 {
+	/* PeekMessage on Windows 95 costs a 486 some hundreds of instructions;
+	 * charging it keeps the throttle from running the game's pump loops
+	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
+	X86_COUNT(500);
+	x86_throttle();
 	win32_run_timer();
 	ddraw_present(0);
-	collect_events();
+	/* the host event queue at most once a millisecond */
+	static uint32_t last_collect;
+	uint32_t now = SDL_GetTicks();
+	if (now != last_collect) {
+		last_collect = now;
+		collect_events();
+	}
 	struct msg m;
 	if (pop_message(&m)) {
 		if (m.msg == WM_QUIT)

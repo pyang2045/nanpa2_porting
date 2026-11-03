@@ -52,6 +52,12 @@ TEXT_TABLES = [0x40247c, 0x402508, 0x402550, 0x403521, 0x40368b, 0x40386d,
 # Code-pointer tables in .data (dwords that point into lifted code)
 DATA_TABLE_RANGES = [(0x435576, 0x4355fa), (0x435dfc, 0x435e60)]
 
+# Timing probes (x86_probe, logged with NANPA2_PROBE=1) before these
+# instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
+# two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
+# wait-for-click at 0x406acc.
+PROBES = {0x401a50, 0x40738b, 0x4062ff, 0x40636d, 0x406acc}
+
 # entry points only referenced as immediates: WndProc, the logo window
 # subclass proc
 EXTRA_ENTRIES = [0x401000, 0x4021c0, 0x401fd0]
@@ -388,7 +394,12 @@ class Lifter:
                 mode = 'REP_NE'
             elif rep_kw:
                 raise Unsupported('prefix ' + rep_kw)
-            return 'str_%s(%d, %s);' % (kind, sz, mode)
+            if mode == 'REP_NONE':
+                return 'str_%s(%d, %s);' % (kind, sz, mode)
+            # each repeated iteration costs about one instruction's time
+            # (counted after the fact: `repne scasb` with ecx = -1 is strlen)
+            return '{ uint32_t c_ = cpu.r[ECX]; str_%s(%d, %s); X86_COUNT(c_ - cpu.r[ECX]); }' \
+                % (kind, sz, mode)
 
         # control flow
         if m == 'jmp':
@@ -445,6 +456,17 @@ class Lifter:
         w('\t\tx86_trap(pc, "dispatch to unknown address");')
         w('\t\treturn;')
         w('\t}')
+        # instructions from each block start to the next block start, for
+        # the emulated-CPU-speed throttle (X86_COUNT, src/x86/x86.h)
+        run_len = {}
+        start = None
+        prev_end = None
+        for a in addrs:
+            if a != prev_end or a in self.labels:
+                start = a
+                run_len[a] = 0
+            run_len[start] += 1
+            prev_end = a + self.insns[a].size
         prev_end = None
         for a in addrs:
             insn = self.insns[a]
@@ -452,11 +474,14 @@ class Lifter:
                 if prev_end is not None and a != prev_end:
                     w('\tx86_trap(0x%xu, "fell off block");' % prev_end)
                 w('L_%x:' % a)
+                w('\tX86_COUNT(%du);' % run_len[a])
             try:
                 body = self.lift(insn)
             except Unsupported as e:
                 self.unsupported.setdefault(str(e), []).append(a)
                 body = 'x86_trap(0x%xu, "unsupported: %s");' % (a, insn.mnemonic)
+            if a in PROBES:
+                body = 'x86_probe(0x%xu); ' % a + body
             w('\t%s /* %x: %s %s */' % (body, a, insn.mnemonic, insn.op_str))
             prev_end = a + insn.size
         w('}')

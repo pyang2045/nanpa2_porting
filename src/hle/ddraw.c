@@ -5,6 +5,7 @@
 
 #include <SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "dev.h"
 #include "platform/present.h"
@@ -89,7 +90,14 @@ void ddraw_present(int force)
 		pal[i] = ((e & 0xff) << 16) | (e & 0xff00) | ((e >> 16) & 0xff);
 	}
 	dev_frame(frame, pal);
-	present_frame(frame, pal);
+	/* NANPA2_HEADLESS: scripted runs skip the window (screenshots still
+	 * work); an occluded CAMetalLayer blocks nextDrawable for up to 1 s,
+	 * which stalls the game and its timer */
+	static int headless = -1;
+	if (headless < 0)
+		headless = getenv("NANPA2_HEADLESS") != NULL;
+	if (!headless)
+		present_frame(frame, pal);
 }
 
 /* ---- methods ---- */

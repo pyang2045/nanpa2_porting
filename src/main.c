@@ -4,6 +4,7 @@
  *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
+ *   --cpu-mips N (or NANPA2_CPU_MIPS=N)                 emulated CPU speed, 0 = unthrottled
  *   --no-crt                                            plain pixels (F12 toggles)
  *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
@@ -99,6 +100,12 @@ static void save_bmp(const char *path)
 	SDL_FreeSurface(s);
 }
 
+/* 486DX2-66 class: 66 MHz at about 2.6 clocks per instruction for this
+ * kind of integer code (memory operands, cache misses, Windows 95 around
+ * it) gives about 25 million instructions per second. */
+#define NANPA2_DEFAULT_MIPS 25.0
+static double cpu_mips = NANPA2_DEFAULT_MIPS;
+
 static int run_game(const char *game, const char *exe, const char *font)
 {
 	char exe_buf[1100];
@@ -118,6 +125,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	SDL_free(save);
 	text_init(font);
 	dev_init();
+	x86_set_speed(cpu_mips * 1e6);
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
@@ -130,6 +138,10 @@ int main(int argc, char **argv)
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
 	const char *crt_shot = NULL;
 	int viewer = 0, crt = 1;
+	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
+	double mips = NANPA2_DEFAULT_MIPS;
+	if (getenv("NANPA2_CPU_MIPS"))
+		mips = atof(getenv("NANPA2_CPU_MIPS"));
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -147,6 +159,8 @@ int main(int argc, char **argv)
 			crt_shot = argv[++i];
 		else if (!strcmp(argv[i], "--no-crt"))
 			crt = 0;
+		else if (!strcmp(argv[i], "--cpu-mips") && i + 1 < argc)
+			mips = atof(argv[++i]);
 	}
 	fsys_set_root(game);
 
@@ -194,6 +208,7 @@ int main(int argc, char **argv)
 
 	int rc = 0;
 	if (!viewer) {
+		cpu_mips = mips;
 		rc = run_game(game, exe, font);
 	} else {
 		for (int running = 1; running;) {
