@@ -177,11 +177,8 @@ static void collect_events(void)
 		case SDL_KEYUP: {
 			if (ev.type == SDL_KEYDOWN && ev.key.repeat)
 				break;
-			if (ev.key.keysym.sym == SDLK_F12) { /* port hotkey: CRT simulation */
-				if (ev.type == SDL_KEYDOWN)
-					present_set_crt(!present_get_crt());
+			if (present_hotkey(&ev.key)) /* port hotkeys: CRT, fullscreen */
 				break;
-			}
 			uint32_t vk = sdl_to_vk(ev.key.keysym.sym);
 			if (vk)
 				win32_post_message(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
@@ -283,16 +280,8 @@ int win32_call_import(int id)
 		/* screen coordinates of the 640x480 display */
 		SDL_Window *w = SDL_GetMouseFocus();
 		if (w) {
-			int ww, wh;
-			SDL_GetWindowSize(w, &ww, &wh);
-			int x, y, fw, fh;
-			if (ww * SCREEN_H > wh * SCREEN_W) {
-				fh = wh; fw = wh * SCREEN_W / SCREEN_H;
-			} else {
-				fw = ww; fh = ww * SCREEN_H / SCREEN_W;
-			}
-			x = (ww - fw) / 2 + (int)hle_arg(0) * fw / SCREEN_W;
-			y = (wh - fh) / 2 + (int)hle_arg(1) * fh / SCREEN_H;
+			int x, y;
+			present_screen_to_window((int)hle_arg(0), (int)hle_arg(1), &x, &y);
 			SDL_WarpMouseInWindow(w, x, y);
 		}
 		r = 1;

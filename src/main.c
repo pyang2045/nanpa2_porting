@@ -4,7 +4,16 @@
  *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
+ *          [--crt-size WxH]                             ... at another size
+ *                                                       (0x0: the window's drawable)
+ *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
+ *                                                       screenshot (NANPA2_SHOT_DIR)
  *   --no-crt                                            plain pixels (F12 toggles)
+ *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
+ *   --no-logo                                           skip LOGO.AVI
+ *   --window WxH                                        initial window size (points)
+ *   --fullscreen                                        start fullscreen
+ *                                                       (Alt+Enter, Cmd+F toggle)
  *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
  * hand-written Win32/DirectX layer in src/hle.
@@ -19,6 +28,7 @@
 #include "platform/present.h"
 #include "hle/dev.h"
 #include "hle/hle.h"
+#include "hle/logo.h"
 #include "x86/x86.h"
 
 #ifndef _WIN32
@@ -33,6 +43,7 @@
 
 static uint8_t screen[SCREEN_W * SCREEN_H];
 static uint32_t palette[256];
+static const uint32_t *logo_rgb; /* --logo-frame: show this RGB frame */
 
 static char **names;
 static int name_count;
@@ -87,6 +98,43 @@ static int show(const char *name)
 	return 1;
 }
 
+/* Load a 640x480 screenshot (as dev.c writes them) as screen + palette;
+ * the game screen has at most 256 colours. */
+static int show_bmp(const char *path)
+{
+	SDL_Surface *b = SDL_LoadBMP(path);
+	SDL_Surface *s = b ? SDL_ConvertSurfaceFormat(b, SDL_PIXELFORMAT_XRGB8888, 0) : NULL;
+	SDL_FreeSurface(b);
+	if (!s || s->w != SCREEN_W || s->h != SCREEN_H) {
+		SDL_Log("cannot load %s as a %dx%d screenshot", path, SCREEN_W, SCREEN_H);
+		SDL_FreeSurface(s);
+		return 0;
+	}
+	int n = 0;
+	for (int y = 0; y < SCREEN_H; y++) {
+		const uint32_t *row = (const uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
+		for (int x = 0; x < SCREEN_W; x++) {
+			uint32_t c = row[x] & 0xffffff;
+			int i = 0;
+			while (i < n && palette[i] != c)
+				i++;
+			if (i == n && n < 256)
+				palette[n++] = c;
+			screen[y * SCREEN_W + x] = (uint8_t)(i < 256 ? i : 0);
+		}
+	}
+	SDL_FreeSurface(s);
+	return 1;
+}
+
+static void show_screen(void)
+{
+	if (logo_rgb)
+		present_frame_rgb(logo_rgb);
+	else
+		present_frame(screen, palette);
+}
+
 static void save_bmp(const char *path)
 {
 	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
@@ -128,8 +176,9 @@ static int run_game(const char *game, const char *exe, const char *font)
 int main(int argc, char **argv)
 {
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
-	const char *crt_shot = NULL;
-	int viewer = 0, crt = 1;
+	const char *crt_shot = NULL, *view_bmp = NULL;
+	int win_w = SCREEN_W, win_h = SCREEN_H;
+	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -145,13 +194,45 @@ int main(int argc, char **argv)
 			shot = argv[++i];
 		else if (!strcmp(argv[i], "--crt-shot") && i + 1 < argc)
 			crt_shot = argv[++i];
-		else if (!strcmp(argv[i], "--no-crt"))
+		else if (!strcmp(argv[i], "--crt-size") && i + 1 < argc)
+			sscanf(argv[++i], "%dx%d", &crt_w, &crt_h);
+		else if (!strcmp(argv[i], "--view-bmp") && i + 1 < argc) {
+			viewer = 1;
+			view_bmp = argv[++i];
+		} else if (!strcmp(argv[i], "--no-crt"))
 			crt = 0;
+		else if (!strcmp(argv[i], "--logo-frame") && i + 1 < argc)
+			logo_frame_n = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--no-logo"))
+			SDL_setenv("NANPA2_LOGO", "0", 1);
+		else if (!strcmp(argv[i], "--window") && i + 1 < argc)
+			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
+		else if (!strcmp(argv[i], "--fullscreen"))
+			fullscreen = 1;
 	}
 	fsys_set_root(game);
 
 	int cur = 0;
-	if (viewer) {
+	if (logo_frame_n >= 0) {
+		/* the decoded movie frame goes through the presenter as RGB */
+		static uint32_t rgb[SCREEN_W * SCREEN_H];
+		int n = logo_frame(logo_frame_n, rgb);
+		if (!n)
+			return 1;
+		SDL_Log("LOGO.AVI frame %d of %d", logo_frame_n, n);
+		if (shot) {
+			SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(rgb, SCREEN_W, SCREEN_H, 32, SCREEN_W * 4,
+									    SDL_PIXELFORMAT_XRGB8888);
+			SDL_SaveBMP(s, shot);
+			SDL_FreeSurface(s);
+			return 0;
+		}
+		logo_rgb = rgb;
+		viewer = 1;
+	} else if (view_bmp) {
+		if (SDL_Init(0) < 0 || !show_bmp(view_bmp))
+			return 1;
+	} else if (viewer) {
 		list_gp4();
 		if (view)
 			for (int i = 0; i < name_count; i++)
@@ -174,7 +255,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_Window *win = SDL_CreateWindow("同級生２", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					   SCREEN_W, SCREEN_H,
+					   win_w, win_h,
 					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
 						   present_window_flags());
 	if (!win || !present_init(win)) {
@@ -183,9 +264,18 @@ int main(int argc, char **argv)
 	}
 	SDL_Log("Renderer: %s", present_name());
 	present_set_crt(crt);
+	if (fullscreen)
+		present_set_fullscreen(1);
 	if (viewer && crt_shot) {
-		present_frame(screen, palette);
-		int ok = present_capture(crt_shot, SCREEN_W * 2, SCREEN_H * 2);
+		/* let the window settle (fullscreen transition) for drawable-size shots */
+		for (Uint32 t = SDL_GetTicks() + (fullscreen ? 1500 : 100); SDL_GetTicks() < t;) {
+			SDL_Event ev;
+			while (SDL_PollEvent(&ev)) {
+			}
+			show_screen();
+			SDL_Delay(16);
+		}
+		int ok = present_capture(crt_shot, crt_w, crt_h);
 		present_shutdown();
 		SDL_DestroyWindow(win);
 		SDL_Quit();
@@ -201,19 +291,17 @@ int main(int argc, char **argv)
 			while (SDL_PollEvent(&ev)) {
 				if (ev.type == SDL_QUIT)
 					running = 0;
-				else if (ev.type == SDL_KEYDOWN) {
+				else if (ev.type == SDL_KEYDOWN && !present_hotkey(&ev.key)) {
 					SDL_Keycode k = ev.key.keysym.sym;
 					if (k == SDLK_ESCAPE)
 						running = 0;
-					else if (k == SDLK_F12)
-						present_set_crt(!present_get_crt());
 					else if (name_count && (k == SDLK_RIGHT || k == SDLK_LEFT)) {
 						cur = (cur + (k == SDLK_RIGHT ? 1 : name_count - 1)) % name_count;
 						show(names[cur]);
 					}
 				}
 			}
-			present_frame(screen, palette);
+			show_screen();
 			SDL_Delay(16);
 		}
 	}

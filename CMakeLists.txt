@@ -40,12 +40,15 @@ set(SOURCES
   src/hle/win32.c
   src/hle/ddraw.c
   src/hle/text.c
+  src/hle/logo.c
+  src/cinepak.c
   src/hle/sound.c
   src/hle/dev.c
   "${GEN_C}"
 )
 
-if(APPLE)
+option(NANPA2_SDL_RENDERER "Use the SDL_Renderer presenter on macOS too" OFF)
+if(APPLE AND NOT NANPA2_SDL_RENDERER)
   enable_language(OBJC)
   list(APPEND SOURCES src/platform/present_metal.m)
 else()

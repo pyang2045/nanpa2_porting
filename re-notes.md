@@ -118,3 +118,30 @@ buffer ever gets SetVolume/SetPan/SetFrequency (vtable calls used: 0x0c CreateSo
 
 Port: `src/hle/sound.c` (SDL audio, minimp3); 0x402f10/0x402f60/0x4031d0 are only reached
 from the replaced functions and are stubs in `override_call`.
+
+## LOGO.AVI (0x401e20, window procedure 0x401fd0)
+
+RIFF AVI, 451 frames at 30 fps (33333 us), two streams: `vids`/`cvid` (Cinepak) 640x480
+24-bit, 31 key frames in `00db` chunks and 420 inter frames in `00dc`, 3 strips per frame;
+`auds` PCM 8-bit mono 22050 Hz in 323 `01wb` chunks (330750 samples, 15 s). 0x401e20 hides
+the cursor, sets DirectDraw to 640x480x16, then MCI: `open avivideo!%s alias vfw` (retried
+with the CD prefix), `window vfw handle %d`, `put vfw destination at 0 0 640 480`, `play vfw
+window from 0 notify`, and pumps messages through 0x401fd0 until 0x4ac4f8 is cleared:
+MM_MCINOTIFY (0x3b9) with wParam 1, or WM_KEYDOWN / WM_LBUTTONDOWN / WM_RBUTTONDOWN
+(skip). WM_ACTIVATEAPP sends the strings at 0x431128 (active) / 0x43111c (inactive).
+Afterwards `stop vfw wait`, `close vfw wait`, the old window procedure and full-screen size
+are restored. Port: `src/cinepak.c` (decoder), `src/hle/logo.c` (player).
+
+## Text routine (0x401900)
+
+cdecl (char, x, y, size, fg, bg); called from the script VM at 0x4062ff (ASCII, size 0) and
+0x40636d (Big5, size from 0x4452f6) with x = column 0x4452f0 * 8, y = 0x4452f2, fg/bg the
+low/high nibble of 0x4452f4. A char with bit 15 set is Big5 (high byte first). It selects
+font 0x4ac070[size & 3] into the scratch surface 0x4ab058's DC, `SetTextColor(0xf0f0f0)`,
+`SetBkColor(0)`, `SetBkMode(OPAQUE)`, `TextOutA(dc, 0, 0, s, 1 or 2)`, then copies an N x N
+cell with N = 8 * size + 16 to primary + pitch * y + x, writing fg where the scratch byte is
+non-zero and bg elsewhere (so the cell is opaque), clearing each scratch row (32 bytes,
+pitch 640) as it goes. No shadow. The fonts (0x402620, lines CreateFontA) are MingLiU with
+negative heights, i.e. em heights 15/24/32, weights 700/700/400, charset CHINESEBIG5, so
+cells are 16/24/32 for ems 15/24/32. ASCII uses the same N x N cell at 8-pixel columns, so a
+glyph wider than 8 pixels is overwritten by the next character's cell.
