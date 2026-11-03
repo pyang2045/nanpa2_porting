@@ -26,26 +26,29 @@ struct uniforms {
 	int32_t pad;
 };
 
-/* The CRT pipeline, per frame:
+/* The CRT is a late-90s flat-face Sony FD Trinitron PC monitor showing
+ * 640x480. Per frame:
  *   fs_lin   index + palette -> linear-light RGB (640x480, half float)
  *   fs_blur  Gaussian blur of that, horizontally then vertically (the glow)
- *   fs_crt   curvature, beam/scanlines, aperture grille, glow, vignette
- * fs_crt adapts to the output scale (drawable pixels per screen pixel):
- * at 1x it is a plain antialiased resample of the curved picture, scanlines
- * fade in from about 2x and the chromatic grille only from 3x, where it
- * cannot beat against the screen pixels into colour fringes.
- * %1$f/%2$f are CRT_WARP_X/Y, shared with present_crt_warp(). */
-static NSString *const shader_fmt = @
+ *   fs_crt   beam and scanlines, aperture grille, damper wires, glow,
+ *            vignette, dark glass
+ * fs_crt adapts to the output scale (drawable pixels per screen pixel): at
+ * 1x it is a plain resample, the scanlines fade in towards 3x and the grille
+ * (RGB stripes three output pixels per triad, the finest that does not beat
+ * against the output pixels) is faint at 2x and full from about 3.5x. */
+static NSString *const shader_src = @
 	"#include <metal_stdlib>\n"
 	"using namespace metal;\n"
 	"struct V { float4 pos [[position]]; float2 uv; };\n"
 	"struct U { float2 out_size; int crt; int pad; };\n"
-	"constant float WARP_X = %1$.9g, WARP_Y = %2$.9g;\n"
 	"constant float GAMMA = 2.2;\n"
 	"constant float SCAN = 1.0;\n"   /* scanline amount at >= 3.5x */
-	"constant float BEAM_X = 0.32;\n" /* beam spot sigma, screen pixels */
-	"constant float MASK = 0.14;\n"  /* aperture grille strength at >= 4x */
-	"constant float GLOW = 0.15;\n"  /* halation: share of the blurred picture */
+	"constant float BEAM_X = 0.25;\n" /* beam spot sigma, screen pixels */
+	"constant float MASK = 0.22;\n"  /* aperture grille strength from 3.5x */
+	"constant float GLOW = 0.10;\n"  /* halation: share of the blurred picture */
+	"constant float WIRE = 0.22;\n"  /* damper wire shadow */
+	"constant float WIRE_W = 0.3;\n" /* ... and width, in screen lines */
+	"constant float3 GLASS = float3(0.0030, 0.0034, 0.0040);\n" /* dark glass, linear */
 	"constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);\n"
 	"vertex V vs(uint vid [[vertex_id]]) {\n"
 	"  float2 p = float2((vid << 1) & 2, vid & 2);\n"
@@ -94,14 +97,12 @@ static NSString *const shader_fmt = @
 	"    return pal.read(uint2(idx.read(c).r, 0));\n"
 	"  }\n"
 	"  float2 scale = u.out_size / src;\n"
-	/* curvature: same formula as present_crt_warp(); rounded, antialiased corners */
+	/* flat face: the raster's corners are only slightly rounded */
 	"  float2 c = in.uv * 2.0 - 1.0;\n"
-	"  c *= float2(1.0 + c.y * c.y * WARP_X, 1.0 + c.x * c.x * WARP_Y);\n"
-	"  const float r = 0.035;\n"
+	"  const float r = 0.012;\n"
 	"  float d = length(max(abs(c) - (1.0 - r), 0.0)) - r;\n"
 	"  float edge = saturate(-d * u.out_size.y * 0.5);\n"
-	"  if (edge <= 0.0) return float4(0, 0, 0, 1);\n"
-	"  float2 uv = c * 0.5 + 0.5;\n"
+	"  float2 uv = in.uv;\n"
 	"  float2 p = uv * src - 0.5;\n"
 	"  float2 b = floor(p), f = p - b;\n"
 	"  int2 i = int2(b);\n"
@@ -137,17 +138,27 @@ static NSString *const shader_fmt = @
 	"    scan += row[k] * beam(f.y - float(k - 1), sigma, hy);\n"
 	"  }\n"
 	"  float3 col = mix(flat, scan, SCAN * smoothstep(1.0, 3.0, scale.y));\n"
-	/* aperture grille in output pixels, only where there are enough of them */
-	"  float ms = MASK * smoothstep(2.75, 4.0, scale.x);\n"
+	/* aperture grille: continuous vertical R, G, B stripes in output pixels,
+	 * the loss made up (bright pixels clip on their own stripe) */
+	"  float ms = MASK * saturate((scale.x - 1.25) / 2.25);\n"
 	"  uint m = uint(in.pos.x) - 3u * (uint(in.pos.x) / 3u);\n"
-	/* darkening only (no clipped channels), half the loss made up */
-	"  col *= (1.0 - 1.5 * ms * (1.0 - float3(m == 0u, m == 1u, m == 2u))) / (1.0 - 0.5 * ms);\n"
-	/* glow: phosphor halation, mostly from bright areas */
-	"  float3 g = glow.sample(smp, uv).rgb;\n"
-	"  col = mix(col, g, GLOW);\n"
-	/* vignette */
+	"  col *= (1.0 - 1.5 * ms * (1.0 - float3(m == 0u, m == 1u, m == 2u))) / (1.0 - ms);\n"
+	/* glow: phosphor halation */
+	"  col = mix(col, glow.sample(smp, uv).rgb, GLOW);\n"
+	/* damper wires at 1/3 and 2/3 of the height: their thin shadow,
+	 * averaged over the output pixel */
+	"  float y = uv.y * src.y;\n"
+	"  float wire = 0.0;\n"
+	"  for (int k = 1; k <= 2; k++) {\n"
+	"    float wy = src.y * float(k) / 3.0;\n"
+	"    float lo = max(y - 0.5 * hy, wy - 0.5 * WIRE_W), hi = min(y + 0.5 * hy, wy + 0.5 * WIRE_W);\n"
+	"    wire += max(hi - lo, 0.0) / hy;\n"
+	"  }\n"
+	"  col *= 1.0 - WIRE * saturate(wire);\n"
+	/* mild vignette, then the dark grey-black of the glass under it all */
 	"  float2 vv = uv * (1.0 - uv);\n"
-	"  col *= pow(saturate(vv.x * vv.y * 16.0), 0.15);\n"
+	"  col *= pow(saturate(vv.x * vv.y * 16.0), 0.06);\n"
+	"  col = GLASS + col * (1.0 - GLASS);\n"
 	"  return float4(pow(saturate(col), 1.0 / GAMMA) * edge, 1.0);\n"
 	"}\n";
 
@@ -197,8 +208,7 @@ int present_init(SDL_Window *win)
 	queue = [device newCommandQueue];
 
 	NSError *err = nil;
-	NSString *src = [NSString stringWithFormat:shader_fmt, (double)CRT_WARP_X, (double)CRT_WARP_Y];
-	id<MTLLibrary> lib = [device newLibraryWithSource:src options:nil error:&err];
+	id<MTLLibrary> lib = [device newLibraryWithSource:shader_src options:nil error:&err];
 	if (!lib) {
 		SDL_Log("Metal shader: %s", err.localizedDescription.UTF8String);
 		return 0;
@@ -363,12 +373,12 @@ const char *present_name(void)
 
 int present_window_to_screen(int wx, int wy, int *sx, int *sy)
 {
-	return present_map_point(window, wx, wy, crt, sx, sy);
+	return present_map_point(window, wx, wy, sx, sy);
 }
 
 void present_screen_to_window(int sx, int sy, int *wx, int *wy)
 {
-	present_unmap_point(window, sx, sy, crt, wx, wy);
+	present_unmap_point(window, sx, sy, wx, wy);
 }
 
 static void toggle_crt(void)

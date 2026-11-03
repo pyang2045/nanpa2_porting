@@ -20,8 +20,7 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256]);
 const char *present_name(void);
 void present_shutdown(void);
 
-/* Map a window point to screen coordinates; returns 0 if outside.
- * Follows the CRT curvature when that is on. */
+/* Map a window point to screen coordinates; returns 0 if outside. */
 int present_window_to_screen(int wx, int wy, int *sx, int *sy);
 
 /* Screen pixel to window (point) coordinates: the inverse of
@@ -35,8 +34,9 @@ int present_hotkey(const SDL_KeyboardEvent *key);
 void present_set_fullscreen(int on);
 int present_get_fullscreen(void);
 
-/* CRT monitor simulation (curvature, scanlines, aperture grille, glow,
- * vignette), in the window and in fullscreen alike. On by default. */
+/* CRT monitor simulation: a flat Sony FD Trinitron style tube (scanlines,
+ * aperture grille, damper wires, glow, dark glass), in the window and in
+ * fullscreen alike, at any size. On by default. */
 void present_set_crt(int on);
 int present_get_crt(void);
 
