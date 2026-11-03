@@ -229,7 +229,7 @@ def check_interactive(r):
     for s in st:
         w, dk = s["window"], s["desktop"]
         on_screen = w["os_windows"] in (1, -1) or (dk["app_hidden"] == 1 and w["os_windows"] == 0)
-        if w["count"] != 1 or not on_screen or not w["shown"]:
+        if w["count"] != 1 or not on_screen or not (w["shown"] or dk["app_hidden"] == 1):
             errs.append("at %.1f s: %d SDL windows, %d on screen, shown %d, app hidden %d (want exactly one)" % (
                 s["uptime_ms"] / 1000, w["count"], w["os_windows"], w["shown"], dk["app_hidden"]))
             break
@@ -241,11 +241,13 @@ def check_interactive(r):
         errs.append("no frame reached the window although the desktop was visible")
     by20 = [s for s in st if s["uptime_ms"] <= 20000]
     on_screen_ok = any(visible(s) and s["present"]["luma_shown"] >= BLACK for s in by20)
-    probe_ok = any(not visible(s) and s["present"]["probe"]["luma"] >= BLACK
-                   and 0 <= s["present"]["probe"]["age_ms"] <= 2500 for s in by20)
+    # a frame that reached the window (even with the screen locked) or the
+    # offscreen probe of a skipped one
+    content_ok = any(s["present"]["luma_shown"] >= BLACK or (s["present"]["probe"]["luma"] >= BLACK
+                     and 0 <= s["present"]["probe"]["age_ms"] <= 2500) for s in by20)
     unverified = None
     if not on_screen_ok:
-        if probe_ok:
+        if content_ok:
             unverified = unavailable_why(hidden)
         elif any(not visible(s) for s in by20) and last["present"]["probe"]["count"] == 0:
             errs.append("no non-black frame by T=20 s: nothing was presented (%s) and the presenter has no "
