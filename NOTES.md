@@ -212,7 +212,7 @@ input, then ANI/A6/maps and sound.
   chosen at run time in both presenters (no window server, no GPU); ddraw_present hands
   headless frames to it, so luminance and NANPA2_SHOT_PRESENT captures (plain 640x480)
   work. Runs fine with the screen locked: logo ~16 s, then frame counter 0x446292 ~65/s.
-- tests/smoke.py: reads the lock state first and skips the interactive run if locked or
+- tests/smoke.py (1e3aaaf, fac2a65): reads the lock state first and skips the interactive run if locked or
   asleep; a covered window is checked through the probe; a 24 s headless run checks game
   progress and non-black frames; exit 77 (ctest SKIP_RETURN_CODE) = passed but on-screen
   presentation not verified; never blocks on an unkillable child, reports the hang stage.
