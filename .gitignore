@@ -1,0 +1,11 @@
+# game data: local only, never commit (only the placeholder README is tracked)
+game/*
+!game/README.md
+*.iso
+# decompiled exe and Ghidra project: local only
+decomp/
+# builds
+build*/
+.DS_Store
+__pycache__/
+compile_commands.json

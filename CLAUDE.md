@@ -1,0 +1,67 @@
+# CLAUDE.md
+
+Guidance for Claude Code in this repository.
+
+## What this is
+
+A native port of 同級生２ (Doukyuusei 2), Taiwan Traditional Chinese release (`nanpa2.exe`,
+built 2000-07-10), to SDL2. The original engine is reimplemented in C from static analysis of
+`nanpa2.exe`; the game's own data files are read unchanged. macOS presents through a
+CAMetalLayer; other platforms use SDL_Renderer. `README.md` is the overview and build guide,
+`NOTES.md` the dated status log, `re-notes.md` the reverse-engineered formats and native
+addresses.
+
+## Hard rules
+
+- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe` and
+  `FLAG0..6` from `data1.cab`), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
+  gitignored. Never commit or upload them, and never copy tables or text out of them into the
+  source beyond small format constants (code tables, offsets) needed to read the data.
+- Never run any `.exe`. Static analysis of `nanpa2.exe` (Ghidra headless, objdump) only.
+- Commit as `pyang2045 <39607593+pyang2045@users.noreply.github.com>` with `TZ=UTC git commit`.
+  No personal information (home paths, real names, emails) in commits, docs or release files.
+  Stage only the files you mean to commit.
+- After each fix or milestone, add a dated `NOTES.md` entry citing commit hashes and native
+  addresses; record format findings in `re-notes.md`.
+- Keep the platform split: game code never includes Metal or Objective-C; everything
+  platform-specific goes behind `src/platform/present.h` (and later audio/input headers).
+- Ask before outward or destructive actions (pushing, creating remotes, deleting files).
+
+## Layout
+
+- `src/` engine: `lzh.c` (GP4/ANI decompressor), `gp4.c` (pictures), `fsys.c` (game files,
+  case-insensitive), `main.c`, `platform/present_metal.m` (macOS), `platform/present_sdl.c`.
+- `tools/` Python helpers: `peek.py` (read exe bytes by VA), `lzh.py` + `gp4png.py` (reference
+  decoder, PNG dump).
+- `ghidra_scripts/DecompileAll.java`: dumps every function to `decomp/all.c` and
+  `decomp/functions.txt`.
+- `tests/decode_all.c`: decodes every GP4/ANI and checks sizes.
+
+## Build and run
+
+```sh
+cmake -S . -B build -G Ninja && ninja -C build
+./build/nanpa2 --game game                       # picture viewer: Left/Right, Esc
+./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
+./build/decode_all game                          # expect "ok 705 bad 0"
+```
+
+The log line `Renderer: Metal | <GPU>` confirms Metal. Wrap scripted runs:
+`perl -e 'alarm 10; exec @ARGV' ./build/nanpa2 ...`.
+
+## Reverse engineering
+
+Ghidra 12.2 and its JDK live in `~/git/porting/tools/`:
+
+```sh
+G=~/git/porting/tools/ghidra_12.2_PUBLIC
+export JAVA_HOME=~/git/porting/tools/jdk-25.0.5+8/Contents/Home
+$G/support/analyzeHeadless decomp/ghidra Nanpa2 -import game/nanpa2.exe -overwrite \
+  -scriptPath ghidra_scripts -postScript DecompileAll.java decomp
+```
+
+About a quarter of the game functions are hand-written assembly with register arguments
+(`unaff_ESI`, `in_EAX` in the decompile); read those with
+`objdump -d --x86-asm-syntax=intel --start-address=0x... --stop-address=0x... game/nanpa2.exe`.
+Game code is 0x401000-0x412210; the MSVC runtime follows. Cite native addresses in code
+comments, commits and notes.
