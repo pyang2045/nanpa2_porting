@@ -14,6 +14,9 @@
  *   --window WxH                                        initial window size (points)
  *   --fullscreen                                        start fullscreen
  *                                                       (Alt+Enter, Cmd+F toggle)
+ *   --pause-inactive                                    stop the game while the
+ *                                                       window is in the background
+ *                                                       (the original behaviour)
  *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
  * hand-written Win32/DirectX layer in src/hle.
@@ -209,6 +212,8 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
+		else if (!strcmp(argv[i], "--pause-inactive"))
+			SDL_setenv("NANPA2_PAUSE_INACTIVE", "1", 1);
 	}
 	fsys_set_root(game);
 
@@ -263,6 +268,9 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_Log("Renderer: %s", present_name());
+	/* A binary started from a terminal is not activated by macOS 14+, so its
+	 * window can open behind the terminal; bring it to the front. */
+	SDL_RaiseWindow(win);
 	present_set_crt(crt);
 	if (fullscreen)
 		present_set_fullscreen(1);

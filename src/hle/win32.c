@@ -150,6 +150,18 @@ static uint32_t mouse_lparam(int wx, int wy)
 	return ((uint32_t)sy << 16) | (uint32_t)sx;
 }
 
+/* WM_ACTIVATEAPP(0) clears 0x4ac4ec, which stops the 16 ms timer (0x4028c0)
+ * and the frame counter the game waits on, and pauses music (0x403220): the
+ * game freezes, on a black screen if a fade was running. The port keeps
+ * running in the background unless --pause-inactive (NANPA2_PAUSE_INACTIVE). */
+static int pause_inactive(void)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_PAUSE_INACTIVE") && atoi(getenv("NANPA2_PAUSE_INACTIVE"));
+	return on;
+}
+
 /* Move SDL events into the native queue. */
 static void collect_events(void)
 {
@@ -187,7 +199,7 @@ static void collect_events(void)
 		case SDL_WINDOWEVENT:
 			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
 				win32_post_message(WM_ACTIVATEAPP, 1, 0);
-			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && pause_inactive())
 				win32_post_message(WM_ACTIVATEAPP, 0, 0);
 			break;
 		}
