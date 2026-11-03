@@ -5,9 +5,12 @@
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
  *          [--crt-size WxH]                             ... at another size
+ *                                                       (0x0: the window's drawable)
  *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
  *                                                       screenshot (NANPA2_SHOT_DIR)
  *   --no-crt                                            plain pixels (F12 toggles)
+ *   --fullscreen                                        start fullscreen
+ *                                                       (Alt+Enter, Cmd+F toggle)
  *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
  * hand-written Win32/DirectX layer in src/hle.
@@ -161,7 +164,7 @@ int main(int argc, char **argv)
 {
 	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
 	const char *crt_shot = NULL, *view_bmp = NULL;
-	int viewer = 0, crt = 1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
+	int viewer = 0, crt = 1, fullscreen = 0, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -184,6 +187,8 @@ int main(int argc, char **argv)
 			view_bmp = argv[++i];
 		} else if (!strcmp(argv[i], "--no-crt"))
 			crt = 0;
+		else if (!strcmp(argv[i], "--fullscreen"))
+			fullscreen = 1;
 	}
 	fsys_set_root(game);
 
@@ -223,8 +228,17 @@ int main(int argc, char **argv)
 	}
 	SDL_Log("Renderer: %s", present_name());
 	present_set_crt(crt);
+	if (fullscreen)
+		present_set_fullscreen(1);
 	if (viewer && crt_shot) {
-		present_frame(screen, palette);
+		/* let the window settle (fullscreen transition) for drawable-size shots */
+		for (Uint32 t = SDL_GetTicks() + (fullscreen ? 1500 : 100); SDL_GetTicks() < t;) {
+			SDL_Event ev;
+			while (SDL_PollEvent(&ev)) {
+			}
+			present_frame(screen, palette);
+			SDL_Delay(16);
+		}
 		int ok = present_capture(crt_shot, crt_w, crt_h);
 		present_shutdown();
 		SDL_DestroyWindow(win);
@@ -241,12 +255,10 @@ int main(int argc, char **argv)
 			while (SDL_PollEvent(&ev)) {
 				if (ev.type == SDL_QUIT)
 					running = 0;
-				else if (ev.type == SDL_KEYDOWN) {
+				else if (ev.type == SDL_KEYDOWN && !present_hotkey(&ev.key)) {
 					SDL_Keycode k = ev.key.keysym.sym;
 					if (k == SDLK_ESCAPE)
 						running = 0;
-					else if (k == SDLK_F12)
-						present_set_crt(!present_get_crt());
 					else if (name_count && (k == SDLK_RIGHT || k == SDLK_LEFT)) {
 						cur = (cur + (k == SDLK_RIGHT ? 1 : name_count - 1)) % name_count;
 						show(names[cur]);

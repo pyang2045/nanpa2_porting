@@ -366,6 +366,31 @@ int present_window_to_screen(int wx, int wy, int *sx, int *sy)
 	return present_map_point(window, wx, wy, crt, sx, sy);
 }
 
+void present_screen_to_window(int sx, int sy, int *wx, int *wy)
+{
+	present_unmap_point(window, sx, sy, crt, wx, wy);
+}
+
+static void toggle_crt(void)
+{
+	crt = !crt;
+}
+
+int present_hotkey(const SDL_KeyboardEvent *key)
+{
+	return present_common_hotkey(window, key, toggle_crt);
+}
+
+void present_set_fullscreen(int on)
+{
+	present_common_set_fullscreen(window, on);
+}
+
+int present_get_fullscreen(void)
+{
+	return present_common_get_fullscreen(window);
+}
+
 void present_shutdown(void)
 {
 	pipe_lin = pipe_blur = pipe_crt = nil;

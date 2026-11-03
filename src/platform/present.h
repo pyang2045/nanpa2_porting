@@ -24,8 +24,19 @@ void present_shutdown(void);
  * Follows the CRT curvature when that is on. */
 int present_window_to_screen(int wx, int wy, int *sx, int *sy);
 
-/* CRT monitor simulation (curvature, scanlines, shadow mask, vignette).
- * On by default; F12 toggles it. SDL_Renderer only draws scanlines. */
+/* Screen pixel to window (point) coordinates: the inverse of
+ * present_window_to_screen, for warping the mouse (SetCursorPos). */
+void present_screen_to_window(int sx, int sy, int *wx, int *wy);
+
+/* Port hotkeys: F12 toggles the CRT simulation, Alt+Enter (and Cmd+F on
+ * macOS) toggles fullscreen. Returns 1 if the key event (down, up or
+ * repeat) belongs to one of them, so the caller does not pass it on. */
+int present_hotkey(const SDL_KeyboardEvent *key);
+void present_set_fullscreen(int on);
+int present_get_fullscreen(void);
+
+/* CRT monitor simulation (curvature, scanlines, aperture grille, glow,
+ * vignette), in the window and in fullscreen alike. On by default. */
 void present_set_crt(int on);
 int present_get_crt(void);
 
