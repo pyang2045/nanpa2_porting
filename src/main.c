@@ -1,12 +1,13 @@
 /*
  * 同級生２ (nanpa2.exe, Taiwan release) on SDL2.
  *
- * Current milestone: image viewer for the game's .GP4 pictures, drawn into
- * the 640x480 8-bit screen the way the native game places its 640x400
- * content (40 lines down, native DAT_004ac068).
+ *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
+ *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
+ *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
+ *   --no-crt                                            plain pixels (F12 toggles)
  *
- *   nanpa2 [--game DIR] [--view NAME.GP4] [--shot OUT.bmp]
- *   Left/Right: previous/next picture. Esc: quit.
+ * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
+ * hand-written Win32/DirectX layer in src/hle.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -16,6 +17,9 @@
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
+#include "hle/dev.h"
+#include "hle/hle.h"
+#include "x86/x86.h"
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -95,38 +99,77 @@ static void save_bmp(const char *path)
 	SDL_FreeSurface(s);
 }
 
+static int run_game(const char *game, const char *exe, const char *font)
+{
+	char exe_buf[1100];
+	if (!exe) {
+		snprintf(exe_buf, sizeof exe_buf, "%s/nanpa2.exe", game);
+		exe = exe_buf;
+	}
+	if (!x86_load_image(exe)) {
+		fprintf(stderr, "cannot load %s\n", exe);
+		return 1;
+	}
+	char *save = SDL_GetPrefPath("nanpa2", "nanpa2");
+	if (!hle_init(game, save ? save : ".")) {
+		fprintf(stderr, "cannot map imports of %s\n", exe);
+		return 1;
+	}
+	SDL_free(save);
+	text_init(font);
+	dev_init();
+	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
+	 * script interpreter until the game ends */
+	uint32_t hinstance = MEM_BASE;
+	x86_call(0x402090, 1, &hinstance);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
-	const char *game = "game", *view = NULL, *shot = NULL;
+	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
+	const char *crt_shot = NULL;
+	int viewer = 0, crt = 1;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
-		else if (!strcmp(argv[i], "--view") && i + 1 < argc)
-			view = argv[++i];
-		else if (!strcmp(argv[i], "--shot") && i + 1 < argc)
+		else if (!strcmp(argv[i], "--exe") && i + 1 < argc)
+			exe = argv[++i];
+		else if (!strcmp(argv[i], "--font") && i + 1 < argc)
+			font = argv[++i];
+		else if (!strcmp(argv[i], "--view")) {
+			viewer = 1;
+			if (i + 1 < argc && argv[i + 1][0] != '-')
+				view = argv[++i];
+		} else if (!strcmp(argv[i], "--shot") && i + 1 < argc)
 			shot = argv[++i];
+		else if (!strcmp(argv[i], "--crt-shot") && i + 1 < argc)
+			crt_shot = argv[++i];
+		else if (!strcmp(argv[i], "--no-crt"))
+			crt = 0;
 	}
 	fsys_set_root(game);
-	list_gp4();
 
 	int cur = 0;
-	if (view) {
-		for (int i = 0; i < name_count; i++)
-			if (!stricmp(names[i], view))
-				cur = i;
-	}
-	if (!view && !name_count) {
-		fprintf(stderr, "no DATA/*.GP4 under %s\n", game);
-		return 1;
-	}
-	if (!show(view && !name_count ? view : names[cur]))
-		return 1;
-	if (shot) {
-		save_bmp(shot);
-		return 0;
+	if (viewer) {
+		list_gp4();
+		if (view)
+			for (int i = 0; i < name_count; i++)
+				if (!stricmp(names[i], view))
+					cur = i;
+		if (!view && !name_count) {
+			fprintf(stderr, "no DATA/*.GP4 under %s\n", game);
+			return 1;
+		}
+		if (!show(view && !name_count ? view : names[cur]))
+			return 1;
+		if (shot) {
+			save_bmp(shot);
+			return 0;
+		}
 	}
 
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) < 0) {
 		fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
 		return 1;
 	}
@@ -139,27 +182,43 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	SDL_Log("Renderer: %s", present_name());
+	present_set_crt(crt);
+	if (viewer && crt_shot) {
+		present_frame(screen, palette);
+		int ok = present_capture(crt_shot, SCREEN_W * 2, SCREEN_H * 2);
+		present_shutdown();
+		SDL_DestroyWindow(win);
+		SDL_Quit();
+		return ok ? 0 : 1;
+	}
 
-	for (int running = 1; running;) {
-		SDL_Event ev;
-		while (SDL_PollEvent(&ev)) {
-			if (ev.type == SDL_QUIT)
-				running = 0;
-			else if (ev.type == SDL_KEYDOWN) {
-				SDL_Keycode k = ev.key.keysym.sym;
-				if (k == SDLK_ESCAPE)
+	int rc = 0;
+	if (!viewer) {
+		rc = run_game(game, exe, font);
+	} else {
+		for (int running = 1; running;) {
+			SDL_Event ev;
+			while (SDL_PollEvent(&ev)) {
+				if (ev.type == SDL_QUIT)
 					running = 0;
-				else if (name_count && (k == SDLK_RIGHT || k == SDLK_LEFT)) {
-					cur = (cur + (k == SDLK_RIGHT ? 1 : name_count - 1)) % name_count;
-					show(names[cur]);
+				else if (ev.type == SDL_KEYDOWN) {
+					SDL_Keycode k = ev.key.keysym.sym;
+					if (k == SDLK_ESCAPE)
+						running = 0;
+					else if (k == SDLK_F12)
+						present_set_crt(!present_get_crt());
+					else if (name_count && (k == SDLK_RIGHT || k == SDLK_LEFT)) {
+						cur = (cur + (k == SDLK_RIGHT ? 1 : name_count - 1)) % name_count;
+						show(names[cur]);
+					}
 				}
 			}
+			present_frame(screen, palette);
+			SDL_Delay(16);
 		}
-		present_frame(screen, palette);
-		SDL_Delay(16);
 	}
 	present_shutdown();
 	SDL_DestroyWindow(win);
 	SDL_Quit();
-	return 0;
+	return rc;
 }

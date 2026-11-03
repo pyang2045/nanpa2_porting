@@ -20,7 +20,17 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256]);
 const char *present_name(void);
 void present_shutdown(void);
 
-/* Map a window point to screen coordinates; returns 0 if outside. */
+/* Map a window point to screen coordinates; returns 0 if outside.
+ * Follows the CRT curvature when that is on. */
 int present_window_to_screen(int wx, int wy, int *sx, int *sy);
+
+/* CRT monitor simulation (curvature, scanlines, shadow mask, vignette).
+ * On by default; F12 toggles it. SDL_Renderer only draws scanlines. */
+void present_set_crt(int on);
+int present_get_crt(void);
+
+/* Render the last frame at w x h and save it as a BMP (for checking the
+ * presenter headlessly). Returns 0 on failure. */
+int present_capture(const char *bmp_path, int w, int h);
 
 #endif

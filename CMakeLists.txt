@@ -9,11 +9,40 @@ endif()
 
 find_package(SDL2 REQUIRED)
 
+# The game code is lifted from your nanpa2.exe at build time; the generated
+# C stays in the build folder.
+set(NANPA2_EXE "${CMAKE_SOURCE_DIR}/game/nanpa2.exe" CACHE FILEPATH "nanpa2.exe to lift")
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
+  set(_py "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
+else()
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(_py "${Python3_EXECUTABLE}")
+endif()
+set(NANPA2_PYTHON "${_py}" CACHE FILEPATH "Python with capstone")
+
+set(GEN_C "${CMAKE_BINARY_DIR}/gen/recomp.c")
+add_custom_command(
+  OUTPUT "${GEN_C}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/gen"
+  COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tools/recomp.py" "${NANPA2_EXE}" "${GEN_C}"
+  DEPENDS "${CMAKE_SOURCE_DIR}/tools/recomp.py" "${NANPA2_EXE}"
+  COMMENT "Lifting nanpa2.exe to C"
+  VERBATIM)
+
 set(SOURCES
   src/main.c
   src/lzh.c
   src/gp4.c
   src/fsys.c
+  src/x86/x86.c
+  src/hle/hle.c
+  src/hle/crt.c
+  src/hle/win32.c
+  src/hle/ddraw.c
+  src/hle/text.c
+  src/hle/sound.c
+  src/hle/dev.c
+  "${GEN_C}"
 )
 
 if(APPLE)
@@ -24,7 +53,7 @@ else()
 endif()
 
 add_executable(nanpa2 ${SOURCES})
-target_include_directories(nanpa2 PRIVATE src)
+target_include_directories(nanpa2 PRIVATE src third_party)
 if(TARGET SDL2::SDL2)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
 else()
@@ -36,10 +65,13 @@ if(TARGET SDL2::SDL2main)
 endif()
 if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
-  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation")
+  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" iconv)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
+  # generated code: labels and comparisons it never uses
+  set_source_files_properties("${GEN_C}" PROPERTIES COMPILE_OPTIONS
+    "-Wno-unused-label;-Wno-unused-value;-Wno-unused-variable;-Wno-parentheses-equality;-O1")
 endif()
 
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)

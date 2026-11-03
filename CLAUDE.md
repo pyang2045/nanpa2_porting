@@ -29,19 +29,33 @@ addresses.
 
 ## Layout
 
-- `src/` engine: `lzh.c` (GP4/ANI decompressor), `gp4.c` (pictures), `fsys.c` (game files,
-  case-insensitive), `main.c`, `platform/present_metal.m` (macOS), `platform/present_sdl.c`.
-- `tools/` Python helpers: `peek.py` (read exe bytes by VA), `lzh.py` + `gp4png.py` (reference
-  decoder, PNG dump).
-- `ghidra_scripts/DecompileAll.java`: dumps every function to `decomp/all.c` and
-  `decomp/functions.txt`.
-- `tests/decode_all.c`: decodes every GP4/ANI and checks sizes.
+The game runs as a **static recompile**: `tools/recomp.py` (capstone, in `tools/.venv`) lifts
+the x86 game code of `game/nanpa2.exe` to `build/gen/recomp.c` at build time (generated, never
+committed). Lifted code runs on an emulated 32-bit address space (`src/x86/`); calls to
+imports, COM methods, CRT functions and a few hand-replaced game functions go to `hle_call`.
+
+- `src/x86/`: CPU state, memory, flags, heap, `x86_call`, poll hook for backward jumps.
+- `src/hle/`: `hle.c` (import/COM thunks, overridden game functions by native address),
+  `win32.c` (message queue, SDL events to WM_*, timer), `ddraw.c` (surfaces, Blt, palette),
+  `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
+  `crt.c` (MSVC CRT by address), `dev.c` (scripted input and screenshots).
+- `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
+  `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`.
+- `tools/`: `recomp.py`, `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
+  `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots).
+- `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
+  minimp3, public domain).
+
+Dev hooks: `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
+`NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
+(screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.
 
 ## Build and run
 
 ```sh
 cmake -S . -B build -G Ninja && ninja -C build
-./build/nanpa2 --game game                       # picture viewer: Left/Right, Esc
+./build/nanpa2 --game game                       # play (F12 toggles CRT, --no-crt)
+./build/nanpa2 --view                            # picture viewer: Left/Right, Esc
 ./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
 ./build/decode_all game                          # expect "ok 705 bad 0"
 ```
