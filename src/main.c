@@ -8,6 +8,7 @@
  *                                                       (0x0: the window's drawable)
  *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
  *                                                       screenshot (NANPA2_SHOT_DIR)
+ *   --cpu-mips N (or NANPA2_CPU_MIPS=N)                 emulated CPU speed, 0 = unthrottled
  *   --no-crt                                            plain pixels (F12 toggles)
  *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
  *   --no-logo                                           skip LOGO.AVI
@@ -147,6 +148,12 @@ static void save_bmp(const char *path)
 	SDL_FreeSurface(s);
 }
 
+/* 486DX2-66 class: 66 MHz at about 2.6 clocks per instruction for this
+ * kind of integer code (memory operands, cache misses, Windows 95 around
+ * it) gives about 25 million instructions per second. */
+#define NANPA2_DEFAULT_MIPS 25.0
+static double cpu_mips = NANPA2_DEFAULT_MIPS;
+
 static int run_game(const char *game, const char *exe, const char *font)
 {
 	char exe_buf[1100];
@@ -166,6 +173,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	SDL_free(save);
 	text_init(font);
 	dev_init();
+	x86_set_speed(cpu_mips * 1e6);
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
@@ -179,6 +187,10 @@ int main(int argc, char **argv)
 	const char *crt_shot = NULL, *view_bmp = NULL;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
+	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
+	double mips = NANPA2_DEFAULT_MIPS;
+	if (getenv("NANPA2_CPU_MIPS"))
+		mips = atof(getenv("NANPA2_CPU_MIPS"));
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -209,6 +221,8 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
+		else if (!strcmp(argv[i], "--cpu-mips") && i + 1 < argc)
+			mips = atof(argv[++i]);
 	}
 	fsys_set_root(game);
 
@@ -284,6 +298,7 @@ int main(int argc, char **argv)
 
 	int rc = 0;
 	if (!viewer) {
+		cpu_mips = mips;
 		rc = run_game(game, exe, font);
 	} else {
 		for (int running = 1; running;) {

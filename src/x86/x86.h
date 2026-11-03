@@ -518,6 +518,19 @@ extern uint32_t x86_poll_pc;
 void x86_poll(void);
 #define X86_POLL(pc) do { if (--x86_poll_countdown <= 0) { x86_poll_pc = (pc); x86_poll(); } } while (0)
 
+/* Emulated CPU speed. Lifted code adds each basic block's instruction count
+ * (rep string ops: one per iteration) to x86_icount; x86_poll sleeps when the
+ * count runs ahead of real time at the configured rate (win32.c). */
+extern uint64_t x86_icount;
+#define X86_COUNT(n) (x86_icount += (n))
+/* Instructions per second; 0 = unthrottled. */
+void x86_set_speed(double ips);
+void x86_throttle(void);
+
+/* Timing probe compiled in before selected instructions (tools/recomp.py
+ * PROBES); logs a timestamp with NANPA2_PROBE=1. */
+void x86_probe(uint32_t pc);
+
 /* Load the exe image into emulated memory. */
 int x86_load_image(const char *exe_path);
 /* Call a lifted (or HLE) function with stdcall/cdecl args; returns EAX.

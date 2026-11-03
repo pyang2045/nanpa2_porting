@@ -123,9 +123,13 @@ uint32_t com_new(int iface, int nmethods, uint32_t extra_bytes)
  * software cursor every 30 ticks. */
 void hle_timer_callback(void)
 {
+	static uint32_t step_logged_start = 0xffffffffu;
 	if (!rd32(0x4ac4ec))
 		return;
 	if (rd32(0x4ac504)) {
+		if (step_logged_start != rd32(0x446292) && rd32(0x4ac508) == 0 && rd32(0x4ac50c) == 0)
+			x86_probe(0x4028c0); /* fade starts (probe log) */
+		step_logged_start = rd32(0x446292);
 		uint32_t wait = rd32(0x4ac50c) + 1;
 		wr32(0x4ac50c, wait);
 		if ((int32_t)wait >= (int32_t)rd32(0x44628e)) {
@@ -149,6 +153,7 @@ void hle_timer_callback(void)
 			wr32(0x4ac50c, 0);
 			wr32(0x4ac508, 0);
 			wr32(0x4ac504, 0);
+			x86_probe(0x4028c1); /* fade ends (probe log) */
 		}
 	}
 	uint32_t frame = rd32(0x446292) + 1;
@@ -227,6 +232,10 @@ static void override_call(uint32_t addr)
 		if (!out)
 			x86_trap(addr, "corrupt GP4/ANI data");
 		memcpy(x86_ptr(dst, (uint32_t)n), out, n);
+		/* emulated CPU time of the native decoder: lifting it and counting
+		 * gave about 70 instructions per input byte + 1.2 per output byte
+		 * (0.7M for ELF.GP4, 2.4M for NAME.GP4) */
+		X86_COUNT(70u * (uint64_t)cap + (uint64_t)n * 6 / 5);
 		free(out);
 		return;
 	}

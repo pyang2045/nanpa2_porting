@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dev.h"
 #include "fsys.h"
 
 #define MAX_FILES 32
@@ -148,6 +149,7 @@ int crt_call(uint32_t addr)
 		hle_strcpy_in(name, hle_arg(0), sizeof name);
 		hle_strcpy_in(mode, hle_arg(1), sizeof mode);
 		FILE *f = open_native(name, mode);
+		dev_file_opened(name);
 		if (getenv("NANPA2_LOG"))
 			fprintf(stderr, "fopen %s %s -> %s\n", name, mode, f ? "ok" : "fail");
 		cpu.r[EAX] = f ? file_handle(f) : 0;

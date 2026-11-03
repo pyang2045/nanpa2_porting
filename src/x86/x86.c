@@ -7,6 +7,7 @@ struct cpu cpu;
 uint8_t *x86_mem;
 int x86_poll_countdown = 1;
 uint32_t x86_poll_pc;
+uint64_t x86_icount;
 
 _Noreturn void x86_trap(uint32_t pc, const char *why)
 {
