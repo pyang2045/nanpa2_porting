@@ -190,8 +190,42 @@ decompressor: ELF.GP4 (6 KB in, 256 KB out) 0.71 M, NAME.GP4 (32 KB in) 2.45 M,
 02.GP4 (15 KB in, 147 KB out) 1.28 M, ELF.ANI (28 KB) 2.32 M: about 70 instructions per
 input byte plus 1.2 per output byte.
 
+The map/drawing range 0x404132-0x405fb6 has no frame-counter reads (the only readers of
+`0x446292` in the game code are at 0x401adf/0x401b7b/0x401b99 (wipe), 0x4029bb/0x4029c9 (fade),
+0x4035b5/0x40362d (animation), 0x4072c2/0x4072f2 (stopwatch) and 0x4075ca/0x4075e5 (frame
+wait)). 0x405b07 (recursive, called about 25 times from 0x405c88-0x405f8b) and the
+0x404731/0x404937/0x404a9a/0x404c9f group under 0x405691 are pure computation between waits, so
+the throttle covers them and nothing there needs a timer.
+
 ## Save files
 
 0x401160 save(name, buf, size): fopen(name, "wb") + fwrite + fclose. The script save opcode
 (0x407188) writes 0xc00 bytes from the script buffer `0x444e78` to the name at `0x445d86`
 (FLAGn); load (0x407152) reads it back through 0x401050.
+
+Script form: `04 21 mode 03 02 slot 03`, mode 0x31 save / 0x30 load / 0x32 (START1.MES 0x23d,
+reads FLAG6), slot an expression. The 存檔 item in a scene (S5.MES 0x235a/0x2367; the same block is
+at OPEN.MES 0x2522) saves slot 0 and then slot 6; FLAG6 is the diary index the title reads
+(START1.MES, its "Data Load" item lights the used diaries). The title load is
+`04 21 30 03 02 53 03` (START1.MES 0x1342): slot = register S from the diary picker
+(請選擇日記, six books in a row at y 170, the lit one at x 440 for slot 0; Exit at (410,204)).
+Title menu: Prologue (320,170), Data Load (320,226).
+
+Menus return the item's index in the list as written, not its position on screen: hidden
+items (a false `0f expr 03` guard) are packed out of the 2x2 grid ((215,383) (420,383)
+(215,407) (420,407)), so S5's 存檔 is item 4 even when it is drawn third. A click outside every
+item takes the highlighted item.
+
+## Script expressions and menus (0x4037fc)
+
+RPN on the native stack, ended by 0x03. Tokens: 0x30-0x3f literal 0-15; `07 b` literal b>>2;
+`08 h l` literal ((h>>2)<<6 | l>>2); 0x40-0x5a register A-Z (u16 at `0x445298 + 2*n`);
+0x20 + 0x21 - (saturating at 0) 0x22 * 0x23 / 0x24 % 0x25 | 0x26 & 0x27 == 0x28 != 0x29 <
+(a b -> 1 if b < a... pops top first), 0x2d n: 4-bit flag n (nibbles at `0x444e98`, odd n in the
+high nibble, 0x4039d6), 0x2f n: random (0x403999). Statements: `0f expr 01 ... 00` if-block
+(0x40659e; 0x4061d4 skips a block by counting 01/00 nesting), `0a n expr` set flag n
+(0x406491, clamps to 15, 0x406455), `0c R expr` set register (0x4064d9), 0x11 wait for a
+click (0x4065f6 -> 0x406acc), 0x13 call, 0x04 xx extended opcodes (table 0x406262, xx-0x10).
+Menus: item lists `02 [0f expr 03] text` ... `00`; the choice comes back in register S
+(1-based, 0 = cancelled). OPEN.MES (Prologue) keeps the main choice in V and the sub
+choice in N; the main loop starts at script offset 0x2a3c.

@@ -8,7 +8,10 @@
  *       timed input in 640x480 screen coordinates, MS after start; clicks and
  *       keys are held for HOLD_MS
  *       sync,0,NAME   later events count from when the game opens file NAME
- *                     (e.g. DATA\NAME.GP4; case-insensitive substring)
+ *                     (e.g. DATA\NAME.GP4; case-insensitive substring);
+ *                     unfired earlier events are dropped
+ *       sync,0,@HEX   same, when the script VM fetches the opcode at offset
+ *                     HEX of the loaded script (0x40616e)
  *       shot,MS       save the next frame as dir/ev_NNN.bmp
  *   NANPA2_INPUT_CLOCK=frames  MS counts game time (16 ms ticks of 0x446292)
  *       instead of wall-clock time, for repeatable runs */
@@ -162,22 +165,43 @@ static int ci_contains(const char *hay, const char *needle)
 	return 0;
 }
 
-void dev_file_opened(const char *name)
+/* The first pending sync fires when its trigger happens after its own
+ * segment started; events of earlier segments that have not fired yet are
+ * dropped (e.g. dialogue clicks once the next menu is up). */
+static void sync_check(const char *name, int vm, uint32_t off)
 {
 	for (int i = 0; i < ninput; i++) {
 		struct ev *e = &input[i];
 		if (e->done || strcmp(e->kind, "sync"))
 			continue;
-		/* only the first pending sync, and only once its own segment runs */
-		if (seg_started[e->seg - 1] && ci_contains(name, e->file)) {
-			e->done = 1;
-			seg_started[e->seg] = 1;
-			seg_start[e->seg] = clock_now();
-			if (log_on())
-				fprintf(stderr, "dev: sync %s at %u ms\n", e->file, seg_start[e->seg]);
-		}
+		int is_vm = e->file[0] == '@';
+		if (!seg_started[e->seg - 1] || is_vm != vm)
+			return;
+		if (vm ? strtoul(e->file + 1, NULL, 16) != off : !ci_contains(name, e->file))
+			return;
+		e->done = 1;
+		seg_started[e->seg] = 1;
+		seg_start[e->seg] = clock_now();
+		for (int k = 0; k < i; k++)
+			input[k].done = 1;
+		if (log_on())
+			fprintf(stderr, "dev: sync %s at %u ms frame %u (script RS %u RV %u RN %u)\n",
+				e->file, seg_start[e->seg], rd32(0x446292),
+				rd16(0x445298 + 2 * ('S' - 0x40)), rd16(0x445298 + 2 * ('V' - 0x40)),
+				rd16(0x445298 + 2 * ('N' - 0x40)));
 		return;
 	}
+}
+
+void dev_file_opened(const char *name)
+{
+	sync_check(name, 0, 0);
+}
+
+void dev_vm_fetch(uint32_t off)
+{
+	if (nseg)
+		sync_check(NULL, 1, off);
 }
 
 void dev_inject(void)
@@ -215,4 +239,24 @@ void dev_inject(void)
 			win32_post_message(0x12, 0, 0);
 		}
 	}
+}
+
+/* Save/load round trip through the game's own code: 0x401160 save(name,
+ * buf, size) as called by the script save opcode (0x407188, 0xc00 bytes of
+ * 0x444e78 to "FLAGn" at 0x445d86), then 0x401050 load(name, dst) as the
+ * load opcode (0x407152) calls it. Uses slot FLAG9, which the game never
+ * names (its slots are FLAG0-6). */
+int dev_save_selftest(void)
+{
+	uint32_t name = x86_malloc(16), src = x86_malloc(0xc00), dst = x86_malloc(0x1000);
+	memcpy(x86_ptr(name, 6), "FLAG9", 6);
+	for (uint32_t i = 0; i < 0xc00; i++)
+		wr8(src + i, (i * 7 + 3) & 0xff);
+	uint32_t args[3] = { name, src, 0xc00 };
+	x86_call(0x401160, 3, args);
+	uint32_t largs[2] = { name, dst };
+	x86_call(0x401050, 2, largs);
+	int ok = !memcmp(x86_ptr(src, 0xc00), x86_ptr(dst, 0xc00), 0xc00);
+	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
+	return ok ? 0 : 1;
 }

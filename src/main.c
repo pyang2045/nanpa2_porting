@@ -181,6 +181,8 @@ static int run_game(const char *game, const char *exe, const char *font)
 	dev_init();
 	status_init(game_window, cpu_mips);
 	x86_set_speed(cpu_mips * 1e6);
+	if (getenv("NANPA2_SAVETEST"))
+		return dev_save_selftest();
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
