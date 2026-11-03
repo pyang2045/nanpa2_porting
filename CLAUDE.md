@@ -59,12 +59,18 @@ cmake -S . -B build -G Ninja && ninja -C build
 ./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
 ./build/decode_all game                          # expect "ok 705 bad 0"
 ctest --test-dir build -R smoke --output-on-failure  # after each merge: one window, renders
+                                                 # (Skipped = passed, screen not visible)
 cat $TMPDIR/nanpa2-status-*.json                 # live state of every running instance
 ```
 
 A black or frozen window: read the status file first (`warning`, `mode`, `present`,
 `game`); see README "Diagnosing a running instance". Scripted test runs use
 `NANPA2_HEADLESS=1` and must not show a window.
+
+Tests while the screen is locked: use headless. With the screen locked a windowed launch
+can hang in startup (SDL_Init / CAMetalLayer setDevice in IOServiceOpen, process state U,
+unkillable until unlock; the status file names the `stage`). `NANPA2_HEADLESS=1` uses SDL's
+dummy video driver and no GPU, so it always runs; the smoke test checks the lock first.
 
 The log line `Renderer: Metal | <GPU>` confirms Metal. Wrap scripted runs:
 `perl -e 'alarm 10; exec @ARGV' ./build/nanpa2 ...`.
