@@ -29,6 +29,7 @@
 #include "hle.h"
 
 #include <SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -446,4 +447,66 @@ void sound_voice_play(const char *rel)
 		SDL_Log("voice %s not found", rel);
 	}
 	free(d);
+}
+
+/* Offline check (nanpa2 --wav-check FILE...): decode through load_wav, the
+ * path of voices and WAV jingles, and compare the duration with the data
+ * chunk length / byte rate from the header, walking the RIFF chunks
+ * independently. Returns the number of failures. */
+static uint32_t le32(const unsigned char *p)
+{
+	return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+int sound_wav_check(int n, char **files)
+{
+	int bad = 0;
+	for (int i = 0; i < n; i++) {
+		FILE *f = fopen(files[i], "rb");
+		if (!f) {
+			printf("%s: cannot open\n", files[i]);
+			bad++;
+			continue;
+		}
+		fseek(f, 0, SEEK_END);
+		size_t len = (size_t)ftell(f);
+		fseek(f, 0, SEEK_SET);
+		unsigned char *d = malloc(len + 1);
+		if (fread(d, 1, len, f) != len)
+			len = 0;
+		fclose(f);
+		uint32_t rate = 0, brate = 0, dlen = 0;
+		unsigned ch = 0, bits = 0;
+		for (size_t p = 12; len >= 12 && p + 8 <= len;) {
+			uint32_t sz = le32(d + p + 4);
+			if (!memcmp(d + p, "fmt ", 4) && p + 24 <= len) {
+				ch = d[p + 10] | d[p + 11] << 8;
+				rate = le32(d + p + 12);
+				brate = le32(d + p + 16);
+				bits = d[p + 22] | d[p + 23] << 8;
+			} else if (!memcmp(d + p, "data", 4)) {
+				dlen = sz;
+				if (p + 8 + (size_t)dlen > len)
+					dlen = (uint32_t)(len - p - 8);
+				break;
+			}
+			p += 8 + (size_t)sz + (sz & 1);
+		}
+		struct clip c = { 0 };
+		int ok = brate && load_wav(d, len, &c);
+		double want = brate ? (double)dlen / brate : 0;
+		double got = ok ? (double)c.frames / c.rate : -1;
+		/* mixer output: source frames consumed at rate/RATE per output frame */
+		double mixed = ok ? ceil((double)c.frames / ((double)c.rate / RATE)) / RATE : -1;
+		int pass = ok && c.channels == (int)ch && (uint32_t)c.rate == rate && fabs(got - want) < 1e-4 &&
+			   fabs(mixed - want) < 1e-3;
+		printf("%s: %s ch %u rate %u bits %u | decoded ch %d rate %d frames %zu = %.4f s, mixed %.4f s, "
+		       "expected %.4f s\n",
+		       files[i], pass ? "ok" : "FAIL", ch, rate, bits, c.channels, c.rate, c.frames, got, mixed,
+		       want);
+		bad += !pass;
+		free(c.pcm);
+		free(d);
+	}
+	return bad;
 }

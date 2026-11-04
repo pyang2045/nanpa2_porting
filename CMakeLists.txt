@@ -135,3 +135,9 @@ set_tests_properties(selftest PROPERTIES TIMEOUT 30
   FAIL_REGULAR_EXPRESSION "MISMATCH|ECX KEPT|x86 trap")
 add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
 set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
+
+# WAV loader: decoded duration equals header length / byte rate for mono,
+# stereo, 11 kHz and files with extra chunks before data.
+add_test(NAME wavcheck COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/wavcheck.py"
+  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/wavcheck")
+set_tests_properties(wavcheck PROPERTIES TIMEOUT 30)

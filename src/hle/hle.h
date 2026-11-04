@@ -84,6 +84,7 @@ int sound_status(char *voice_out, size_t cap); /* music number or -1 */
 void sound_music_pause(int pause);
 void sound_voice_play(const char *rel);
 void sound_voice_stop(void);
+int sound_wav_check(int n, char **files); /* --wav-check; returns failures */
 
 /* Interface ids for COM thunks */
 enum {
