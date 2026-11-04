@@ -26,8 +26,46 @@ Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` 
 ## Run
 
 ```sh
-./build/nanpa2 --game game        # picture viewer for now: Left/Right, Esc
+./build/nanpa2 --game game        # play
+./build/nanpa2 --view             # picture viewer: Left/Right, Esc
 ```
+
+Without `--game` the game folder is looked up in this order: `NANPA2_GAME_DIR`; the folder
+remembered from an earlier choice; next to the executable or the `.app`, or in a `game` folder
+there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the repository's
+`game/`); `./game`. If none of them has `DATA/` and `nanpa2.exe`, a folder picker opens
+(macOS) and the choice is remembered in `game-folder.txt` in the save folder
+(`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
+`NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
+
+### macOS app (local use only)
+
+```sh
+ninja -C build nanpa2_app          # or configure with -DNANPA2_APP_BUNDLE=ON
+open build/同級生２.app             # or double-click it in Finder; it can be moved anywhere
+```
+
+`build/同級生２.app` holds the binary and the SDL libraries it needs, so it runs without
+Homebrew's paths: Homebrew's SDL2 is sdl2-compat, which loads SDL3 at run time, so
+`tools/bundle_macos.sh` copies both into `Contents/Frameworks`, rewrites the load paths to
+`@executable_path`/`@loader_path` and signs everything ad hoc. It runs on the macOS version
+the libraries were built for and later (`LSMinimumSystemVersion` is taken from them; with
+current Homebrew bottles that is macOS 26). It contains no game data, but **the binary
+contains code translated from your own `nanpa2.exe`: do not share or upload the app.** On
+the first start choose the game folder in the picker (or put the app next to a `game`
+folder).
+
+Started from Finder there is no terminal, so the log (stdout, stderr, `SDL_Log`) goes to
+`nanpa2.log` in the save folder, and the previous run's to `nanpa2.previous.log`:
+
+```sh
+cat ~/Library/Application\ Support/nanpa2/nanpa2/nanpa2.log
+```
+
+`NANPA2_LOG_FILE=PATH` sends the log to a file from any launch. To try the app without
+touching your saves: `open -n build/同級生２.app --env NANPA2_SAVE_DIR=/tmp/x --env
+NANPA2_GAME_DIR=$PWD/game`. To get the picker again, delete `game-folder.txt`. A launch from
+Finder also writes the status file (below); `$TMPDIR` is the same for Finder and Terminal.
 
 The window is raised at startup and the game keeps running (music too) when it is in the
 background; `--pause-inactive` restores the original behaviour of stopping it while the
@@ -89,3 +127,25 @@ Skipped) when the game checks passed but nobody could see the screen; `SMOKE FAI
 with the diagnosis and the last status otherwise. A startup hang is reported with its stage
 and the test never waits on a process it cannot kill. Set the game folder with
 `-DNANPA2_GAME_DIR=...`.
+
+## Platforms
+
+macOS (Intel, macOS 26; Metal, and SDL_Renderer with `-DNANPA2_SDL_RENDERER=ON`) is the only
+platform built and run so far. The code is meant to build on Linux and Windows with SDL2,
+but neither has been built or run. Known points:
+
+- Linux: CMake links libm. Big5 goes through iconv (`CP950`, falling back to `BIG5`, which
+  lacks Microsoft's extensions); whether glibc offers `CP950` is unchecked. Fonts come from
+  `/usr/share/fonts` (AR PL UMing, Noto Serif CJK) or `--font`. Game file names are matched
+  case-insensitively (`src/fsys.c`) and save files are always lower case, so a
+  case-sensitive file system is fine. No folder picker (`src/platform/dialog_none.c`): use
+  `--game`, `NANPA2_GAME_DIR` or a `game` folder next to the binary. The desktop state
+  (screen locked) is unknown there, so the smoke test cannot skip on it.
+- Windows: Big5 via `MultiByteToWideChar(950)`, MingLiU from `C:\Windows\Fonts`; the status
+  file goes to `%TEMP%`; the viewer lists `DATA\*.GP4` with `_findfirst`; stale status files
+  of killed instances are not removed. Unchecked: MSVC (the generated `recomp.c` is plain C11
+  with GCC/Clang flags, so MinGW-w64 or clang-cl is the safer bet), non-ASCII paths (the C
+  runtime's `fopen` takes the ANSI code page), no folder picker, and a console window next
+  to the game (the target is not `WIN32_EXECUTABLE`).
+- Both: the presenter is `src/platform/present_sdl.c` (SDL_Renderer); the status file works,
+  the smoke test's desktop checks are macOS only.

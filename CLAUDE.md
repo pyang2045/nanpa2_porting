@@ -40,15 +40,20 @@ imports, COM methods, CRT functions and a few hand-replaced game functions go to
   `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
   `crt.c` (MSVC CRT by address), `dev.c` (scripted input and screenshots).
 - `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
-  `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`.
+  `launch.c` (game folder lookup and picker, remembered path, log file for Finder launches),
+  `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`,
+  `platform/dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
 - `tools/`: `recomp.py`, `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
-  `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots).
+  `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots), `bundle_macos.sh`
+  (target `nanpa2_app`: `build/同級生２.app` with SDL inside; local use only, never share it).
 - `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
   minimp3, public domain).
 
 Dev hooks: `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
 (screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.
+`NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`; `NANPA2_SAVE_DIR` also
+holds `game-folder.txt` and `nanpa2.log`, so app tests leave the real save folder alone.
 
 ## Build and run
 

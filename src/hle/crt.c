@@ -38,8 +38,14 @@ static FILE *open_native(const char *path, const char *mode)
 		p++;
 	int writing = strchr(mode, 'w') != NULL;
 	if (is_save_name(p)) {
+		/* lower case in the save folder whatever case the game asks for,
+		 * so a case-sensitive file system (Linux) finds what was written */
 		char full[1200];
-		snprintf(full, sizeof full, "%s/%s", save_root, p);
+		int n = snprintf(full, sizeof full, "%s/", save_root);
+		for (const char *q = p; *q && n > 0 && n < (int)sizeof full - 1; q++)
+			full[n++] = (char)tolower((unsigned char)*q);
+		if (n > 0 && n < (int)sizeof full)
+			full[n] = 0;
 		FILE *f = fopen(full, writing ? "wb" : "rb");
 		if (f || writing)
 			return f;
