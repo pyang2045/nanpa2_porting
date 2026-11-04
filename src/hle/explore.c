@@ -115,12 +115,19 @@ static void click(uint32_t t, int x, int y)
 	push(t + 20, WM_LBUTTONUP, 0, x, y);
 }
 
+static void on_trap(void)
+{
+	fprintf(stderr, "explore: trap frame %u mes %s (last fetch %04x op %02x)\n", FRAME(), mes,
+		last_off, rd8(SCRIPT + last_off));
+}
+
 void explore_init(void)
 {
 	const char *s = getenv("NANPA2_EXPLORE");
 	if (!s)
 		return;
 	on = 1;
+	x86_trap_hook = on_trap;
 	rng = strtoull(s, NULL, 0) * 2654435761u + 1;
 	const char *e = getenv("NANPA2_EXPLORE_FRAMES");
 	if (e)
