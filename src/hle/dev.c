@@ -7,6 +7,7 @@
  *   NANPA2_INPUT="click,MS,X,Y;rclick,MS,X,Y;move,MS,X,Y;key,MS,VK;quit,MS"
  *       timed input in 640x480 screen coordinates, MS after start; clicks and
  *       keys are held for HOLD_MS
+ *       down,MS,X,Y / up,MS,X,Y   press / release the left button (held)
  *       sync,0,NAME   later events count from when the game opens file NAME
  *                     (e.g. DATA\NAME.GP4; case-insensitive substring);
  *                     unfired earlier events are dropped
@@ -268,7 +269,7 @@ void dev_inject(void)
 		uint32_t lp = ((uint32_t)e->y << 16) | (uint32_t)e->x;
 		if (!strcmp(e->kind, "move")) {
 			win32_post_message(0x200, 0, lp);
-		} else if (!strcmp(e->kind, "click")) {
+		} else if (!strcmp(e->kind, "click") || !strcmp(e->kind, "down")) {
 			win32_post_message(0x200, 0, lp);
 			win32_post_message(0x201, 1, lp);
 		} else if (!strcmp(e->kind, "up")) {
