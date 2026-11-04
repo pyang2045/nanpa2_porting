@@ -360,7 +360,10 @@ static void decide(uint32_t f)
 		next_decide = menu_frame + 21;
 		return;
 	}
-	if (menu_active) {
+	/* a menu that ignores its items (NAME.MES 0xb23 shows a one-entry
+	 * pop-up while the name grid takes the clicks): after a few tries,
+	 * act as if it were not there half of the time */
+	if (menu_active && (f - menu_frame < 400 || rnd(2))) {
 		if (nitems && rnd(20)) {
 			struct item *it = &items[choose(place(menu_off), (uint32_t)nitems)];
 			click(t, it->x + (int)rnd(40) - 20, it->y);
