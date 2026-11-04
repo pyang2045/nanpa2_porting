@@ -246,6 +246,8 @@ input, then ANI/A6/maps and sound.
   next-to-the-app and not-found headless; the picker opens on a launch with no game folder
   (a 884x448 window at the modal panel level owned by the app), but choosing in it was not
   automated. SIGTERM does not end the app while the picker is open (SDL only queues a quit).
+  A bad NANPA2_GAME_DIR in an `open -n` launch shows the error box (a 260x282 modal window,
+  before SDL_Init) and exits 1 when dismissed.
 - 514f15e, portability (nothing built on Linux or Windows): status.c `_environ` and
   TEMP/TMP on Windows; text.c declares MultiByteToWideChar instead of including windows.h;
   crt.c open_native lower-cases FLAG names in the save folder (the game's strings are
