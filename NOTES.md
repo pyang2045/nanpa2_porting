@@ -332,3 +332,37 @@ input, then ANI/A6/maps and sound.
   0x9df9 and TOWN.MES 0x22f1 in long main-game runs, both left again later), not frozen
   VMs: the status file kept polling (0x4075eb) with frames advancing.
 - Display and sound: nothing new found; the bot does not judge pictures or audio.
+
+## 2026-11-04 (transition speed check)
+
+Report: transitions look very slow. Checked against the code and measured; no port bug, so no
+code change.
+
+- The transitions are timer paced and do not depend on `--cpu-mips`: the palette fade
+  (0x401d30 start, 0x4028c0 steps, ext op 0x16 waits at 0x406f41) took 16 frames / 256 ms
+  at 25 MIPS, 100 MIPS and unthrottled (all 121 fades of a Prologue run: 16 frames). The
+  dissolve wipe 0x401a50 (script op `19 34`, 0x407382; first met in OPEN1.MES) waits 2 frames
+  per step at 0x401b7b-0x401ba4 for 128 steps: 256 frames = 4.1 s, on the original as well
+  (timeSetEvent(16, 16), 0x4028c0). That long dissolve is the likely complaint; it is the
+  original pacing. A step's work is about 0.22 M instructions (9 ms at 25 MIPS), under its
+  32 ms wait.
+- CPU-bound and so throttle-dependent: (1) the black gap between a fade-out and the next
+  fade-in (picture decompression 0x4075f0 and copies): first title change 9 frames at 25
+  MIPS, 3 at 100, 1 unthrottled (about 3.6 M instructions); Prologue gaps without a click
+  wait are at most 13 frames. (2) The wipe with a button held (bit 0x10/0x20 of 0x445d8f,
+  0x401b90; the bot's 120 ms clicks trigger it): measured 28.3 M and 29.5 M instructions,
+  69 frames (1.1 s) at 25 MIPS, about 0.3 s at 100.
+- Accounting checked: rep string ops count one per iteration (recomp.py), about right for a
+  486 (rep movsd 3 clocks per dword vs about 2.6 clocks per instruction assumed for 25 MIPS).
+  The presenter cannot lengthen a timer-paced wait: ddraw_present runs at most every 16 ms,
+  the timer catches up on wall-clock time (win32_run_timer, 8 ticks a call), and a present
+  that blocks only eats throttle sleep (the budget allows 50 ms catch-up). The only
+  per-frame GPU wait (`waitUntilCompleted`, present_metal.m) is in the luma probe, not the
+  frame path.
+- Original hardware estimate: fades 256-272 ms and the dissolve 4.1 s, the same as ours; load
+  gaps about 1-2 frames and a held-button wipe 0.15-0.3 s on a Pentium 133-200 (100-200 M
+  simple instructions per second), versus 9 frames and 1.1 s at our 486 default. Raising
+  the default to 100 would match a Pentium; left at 25 (a deliberate 486 setting) pending a
+  decision.
+- Not checked: a windowed Metal run (scripted runs are headless); its status file
+  (`present.worst_wait_ms`, `game.frame_still_ms`) would show a presenter stall.
