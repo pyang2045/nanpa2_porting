@@ -295,3 +295,40 @@ input, then ANI/A6/maps and sound.
   _findfirst on Windows. README "Platforms" lists what is unverified.
 - Smoke: Metal build Passed; SDL_Renderer build (-DNANPA2_SDL_RENDERER=ON, also builds the
   app) Skipped: game checks passed, "desktop not visible" during its run.
+
+## 2026-11-04 (engine stage 5: exploration bot, op 0x1f trap, Prologue checked by play)
+
+- c05662a, d1e4920, 7a758a0, 0105525, a152d92: `NANPA2_EXPLORE=seed` (src/hle/explore.c)
+  plays on its own through the dev hooks: it parses visible menus at the `04 13` fetch
+  (guards evaluated with 0x4037fc, items containing 結束 skipped) and waits until the VM
+  fetches the op after the menu (menus run their handlers while waiting, so the last fetch
+  is not the menu); clicks hotspots from the hit-test probe (0x4071bb) and, in scenes that
+  wait with op 0x11 first (OPEN1.MES), the current file's hotspots; walks on the town map
+  (`04 26 3c`, button held toward a point); otherwise clicks text, grid slots and title
+  buttons. It tries each choice at a place (file, offset, registers V and N) before
+  repeating. Diary saves happen when it picks them (bed, 儲存), not on a schedule: seeds 41, 42 (ex5) and 52 (ex7) rewrote flag1 and flag6, the Prologue runs flag0 and flag6; loads were not counted.
+  Logs `explore: reached NAME frame F f2010 N f2000 N`, `explore: stall ...` (no new script
+  offset for 40000 frames), `explore: trap frame F mes M` (3158c35, x86_trap_hook) and ends
+  at NANPA2_EXPLORE_FRAMES. tools/explore.py runs seeds (at most 3 jobs, each with its own
+  copy of --saves) and reports coverage of DATA/*.MES. Runs repeat only roughly (host-paced
+  timer); seed plus frame locate a problem.
+- e3635ff, the bug it found: script op 0x1f (call a MES file, 0x406fcd; 42.MES calling
+  TOMOMI.MES, the town calling TIME.MES) restores the label table with `mov cx, 0x1e` /
+  `rep movsd` (0x40705e, 0x40706e), which loads only CX. The native code works because the
+  message pump (0x401bf0, run at every fetch) ends in PeekMessageA/DispatchMessageA, which
+  change ECX. The HLE pump kept a stale heap pointer there, so the copy ran 0x0104001e dwords
+  and faulted (`x86 memory fault at 00445dbc`, eip 0). All three main-game seeds hit it
+  (ex4: seed 41 just after frame 36746, seed 42 after 135823, seed 43 after 332606; each when a sub-file returned). The pump now returns
+  ECX 0; NANPA2_SAVETEST also checks it (`pump selftest: ok`), run by `ctest -R selftest` (cf6dac4; fails with the fix taken out). The pump clears EDX too. With the fix, seeds 41/42 ran
+  700000 frames each through TOMOMI/TIME/QUIZ_SUB/16A_SUB calls without a trap.
+- Prologue by play: seeds 31-33 from an empty save folder (a new game) went START -> OPEN ->
+  NAME -> S1 ... S63 -> OPEN1.MES at frames 243526, 248317 and 250105 (ex4 seed 43:
+  241783), every time with F2010 = 0 and F2000 = 0 when OPEN1 loaded. So real players reach
+  OPEN1 with F2010 = 0, as the static reading said. The title's Main item (START1 F1 =
+  F[2026], set only by the 40.MES diary save at 0x91cc or on a second title of the session,
+  re-notes "Title menu") also leads to OPEN1 with F2010 = 0.
+- Coverage (DATA has 470 .MES): 140 of 470 over 11 seeds (ex3 31-33 from a new game, ex4-ex7 41-44 and 51-52 from a save with the Main item, 700000 frames each at NANPA2_TURBO=8): the Prologue (S1-S63, START, OPEN, NAME), OPEN1, 33 of the numbered scene files (01-63 with their a/b/_sub parts), TOWN/TOWN1/TIME, the quiz and sub files (QUIZ_SUB, PARA_SUB, 16A_SUB, SEN_SUB, URA_SUB) and first character files (TOMOMI, TOMOMI1, KOZUE, MINORI, AZUMI, the *_S files). Endings, SPECIAL/SPE*, TRAVEL, TENNIS and most character routes were not reached. On the fixed binaries (ex5-ex7, 5 seeds) no trap. No watchdog warnings in any run. Stalls were
+  the bot cycling known offsets (OPEN1 before 0105525, NAME.MES before 7a758a0, 35.MES
+  0x9df9 and TOWN.MES 0x22f1 in long main-game runs, both left again later), not frozen
+  VMs: the status file kept polling (0x4075eb) with frames advancing.
+- Display and sound: nothing new found; the bot does not judge pictures or audio.

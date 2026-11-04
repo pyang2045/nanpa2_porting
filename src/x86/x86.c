@@ -8,6 +8,7 @@ uint8_t *x86_mem;
 int x86_poll_countdown = 1;
 uint32_t x86_poll_pc;
 uint64_t x86_icount;
+void (*x86_trap_hook)(void);
 
 _Noreturn void x86_trap(uint32_t pc, const char *why)
 {
@@ -21,6 +22,8 @@ _Noreturn void x86_trap(uint32_t pc, const char *why)
 			fprintf(stderr, " %08x", rd32(cpu.r[ESP] + 4 * i));
 		fprintf(stderr, "\n");
 	}
+	if (x86_trap_hook)
+		x86_trap_hook();
 	abort();
 }
 

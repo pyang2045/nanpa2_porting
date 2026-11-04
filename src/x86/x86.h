@@ -29,6 +29,8 @@ extern uint8_t *x86_mem;
 #define X86_RET_SENTINEL 0xfffffff0u
 
 _Noreturn void x86_trap(uint32_t pc, const char *why);
+/* called by x86_trap after the register dump (dev logging), may be NULL */
+extern void (*x86_trap_hook)(void);
 _Noreturn void x86_fault(uint32_t addr);
 
 static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)

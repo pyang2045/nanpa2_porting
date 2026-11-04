@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "explore.h"
 #include "hle.h"
 #include "platform/present.h"
 
@@ -52,6 +53,7 @@ static unsigned ev_shot_n;
 
 void dev_init(void)
 {
+	explore_init();
 	t0 = SDL_GetTicks();
 	seg_started[0] = 1;
 	shot_dir = getenv("NANPA2_SHOT_DIR");
@@ -94,7 +96,7 @@ void dev_init(void)
 
 int dev_scripted(void)
 {
-	return ninput > 0;
+	return ninput > 0 || explore_on();
 }
 
 uint32_t dev_now(void)
@@ -210,11 +212,13 @@ static void sync_check(const char *name, int vm, uint32_t off)
 
 void dev_file_opened(const char *name)
 {
+	explore_file(name);
 	sync_check(name, 0, 0);
 }
 
 void dev_vm_fetch(uint32_t off)
 {
+	explore_vm(off);
 	if (nseg)
 		sync_check(NULL, 1, off);
 }
@@ -228,6 +232,7 @@ void dev_hit_table(uint32_t table)
 	static int on = -1;
 	static uint8_t last[1000];
 	static uint32_t last_at, last_len = ~0u;
+	explore_hits(table);
 	if (on < 0)
 		on = getenv("NANPA2_HOTSPOTS") != NULL;
 	if (!on)
@@ -252,6 +257,7 @@ void dev_hit_table(uint32_t table)
 
 void dev_inject(void)
 {
+	explore_tick();
 	uint32_t now = clock_now();
 	for (int i = first_live(); i < ninput; i++) {
 		struct ev *e = &input[i];
@@ -308,5 +314,14 @@ int dev_save_selftest(void)
 	x86_call(0x401050, 2, largs);
 	int ok = !memcmp(x86_ptr(src, 0xc00), x86_ptr(dst, 0xc00), 0xc00);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
-	return ok ? 0 : 1;
+	/* the message pump (0x401bf0) must leave ECX changed like the native
+	 * PeekMessageA does: script op 0x1f restores with "mov cx, N; rep
+	 * movsd" right after it (0x40705e) */
+	cpu.r[ECX] = 0x01040000u;
+	push32(0); /* return address, popped by hle_call (x86_call would
+		    * restore ECX) */
+	hle_call(0x401bf0);
+	int pump = (cpu.r[ECX] >> 16) == 0;
+	fprintf(stderr, "pump selftest: %s\n", pump ? "ok" : "ECX KEPT");
+	return ok && pump ? 0 : 1;
 }
