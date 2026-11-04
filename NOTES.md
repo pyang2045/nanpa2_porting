@@ -222,3 +222,42 @@ input, then ANI/A6/maps and sound.
   `frame` warning at pc 00406f48). The visible and covered-window paths were checked only
   with synthetic status samples (the screen stayed locked); run the smoke test once with the
   desktop visible and once with the app hidden.
+
+## 2026-11-04 (engine stage 4: the 40.MES right-click blocker, the town map)
+
+- The 40.MES blocker (no right-click menu, flag 2000 = 15) came from the synthetic test save,
+  not from the engine. The save was an S5 diary snapshot (flag 2010 = 1) renamed to OPEN1.MES.
+  Real diary saves set flag 2010 only around the save itself. A title load stashes flags
+  1978-2007 in script segment 3 (START1.MES 0x1290-0x1342), and the loaded scene's entry block
+  copies them back (40.MES 0x274a). OPEN1.MES has no entry block and loads pictures into
+  segment 3 first, so 40.MES restored picture bytes. See re-notes "Diary saves and the global
+  flags". Every flag-2010 write in the game's scripts was checked: each set is followed by a
+  clear in the same file.
+- Empirical checks (hidden headless runs, scratch NANPA2_SAVE_DIR):
+  - With flag 2010 cleared in the scratch save, 40.MES shows 到客廳去 and leads to 41.MES.
+  - A game-made save works end to end: in 40.MES, click the bed, 睡1小時, 寫日記, book 1 →
+    FLAG1 naming 40.mes, flag 2010 = 1. A fresh run then loads it from the title (Data Load,
+    book 1). 40.MES runs its restore block (START1 stash → 0x274a), the right-click menu
+    appears, and 到客廳去 leads to 41.MES and misako.mes.
+  - The S7 → S63 Prologue was not replayed; blind clicking stays on S5's menu forever.
+  - No engine bug was found, so there is no new regression check.
+- f59ca24: NANPA2_TURBO=N runs the game timer (hle_timer_callback; frame counter 0x446292) and
+  the CPU throttle N times faster. NANPA2_INPUT_CLOCK=frames schedules follow it, so long
+  scripted routes take about a quarter of the time at N = 4. The hotspot log now shows up to
+  100 rectangles (40.MES has more than 40).
+- bb39197: `down,MS,X,Y` / `up,MS,X,Y` input events hold the left button.
+- Town (TOWN.MES, ext op 0x26 → 0x403a70, subcommands through table 0x435576):
+  - 41.MES right-click, 4th item → TOWN.MES, which loads mati1.gp4, chara1.gp4, mati1.map
+    (128x72 16-bit cells after an 8-byte header) and mati1.c5.
+  - The walk loop is TOWN.MES 0x22b3-0x2320. `04 26 3c` (0x4051c2) returns S = 0xffff while
+    nothing happens. The player walks towards the mouse while the left button is held. A
+    click on an object near the player (0x40500e, within about 0x30-0x50 px) returns its
+    code. Standing on a trigger (0x404f8c) returns its code + 50. A click at (0xf8-0x187,
+    0x120-0x13f) returns 0xfffe. Any other value breaks the loop, and the script dispatches
+    on V = S.
+  - Clicking the house just above the start position (screen (300,130)) enters 39.MES (in
+    front of the house; first visit is an encounter scene). Its right-click menu offers
+    回到家裡 / 進咖啡廳 / 待在原地 / 到其他地方.
+- Timing: with NANPA2_INPUT_CLOCK=frames, inputs still land within a few frames of their
+  target (game time comes from a host-paced timer). One house click out of three missed, so
+  routes repeat such clicks until the next sync.
