@@ -68,7 +68,7 @@ static int menu_active;
 static struct hit {
 	int x0, y0, x1, y1;
 } hits[MAX_HITS];
-static int nhits;
+static int nhits, hits_file = -1;
 
 /* ---- coverage and novelty: one bit per script offset per MES file */
 #define MAX_MES 512
@@ -308,6 +308,7 @@ void explore_hits(uint32_t table)
 	if (!on)
 		return;
 	hit_frame = FRAME();
+	hits_file = cur_file;
 	nhits = 0;
 	while (nhits < MAX_HITS && rd16(table + 10 * nhits) != 0xffff) {
 		uint32_t e = table + 10 * nhits;
@@ -377,7 +378,15 @@ static void decide(uint32_t f)
 		return;
 	}
 	if (last_op == OP_TEXT) {
-		click(t, 320, 430);
+		/* scenes with hotspots wait with op 0x11 too and hit-test the
+		 * click afterwards (OPEN1.MES); a click outside every hotspot
+		 * opens the scene menu there */
+		if (nhits && hits_file == cur_file && rnd(100) < 70) {
+			struct hit *h = &hits[choose(place(0x10000 + (uint32_t)nhits), (uint32_t)nhits)];
+			click(t, (h->x0 + h->x1) / 2, (h->y0 + h->y1) / 2);
+		} else {
+			click(t, 320, 430);
+		}
 		next_decide = f + 15 + rnd(30);
 		return;
 	}
