@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "explore.h"
 #include "hle.h"
 #include "platform/present.h"
 
@@ -52,6 +53,7 @@ static unsigned ev_shot_n;
 
 void dev_init(void)
 {
+	explore_init();
 	t0 = SDL_GetTicks();
 	seg_started[0] = 1;
 	shot_dir = getenv("NANPA2_SHOT_DIR");
@@ -94,7 +96,7 @@ void dev_init(void)
 
 int dev_scripted(void)
 {
-	return ninput > 0;
+	return ninput > 0 || explore_on();
 }
 
 uint32_t dev_now(void)
@@ -210,11 +212,13 @@ static void sync_check(const char *name, int vm, uint32_t off)
 
 void dev_file_opened(const char *name)
 {
+	explore_file(name);
 	sync_check(name, 0, 0);
 }
 
 void dev_vm_fetch(uint32_t off)
 {
+	explore_vm(off);
 	if (nseg)
 		sync_check(NULL, 1, off);
 }
@@ -228,6 +232,7 @@ void dev_hit_table(uint32_t table)
 	static int on = -1;
 	static uint8_t last[1000];
 	static uint32_t last_at, last_len = ~0u;
+	explore_hits(table);
 	if (on < 0)
 		on = getenv("NANPA2_HOTSPOTS") != NULL;
 	if (!on)
@@ -252,6 +257,7 @@ void dev_hit_table(uint32_t table)
 
 void dev_inject(void)
 {
+	explore_tick();
 	uint32_t now = clock_now();
 	for (int i = first_live(); i < ninput; i++) {
 		struct ev *e = &input[i];

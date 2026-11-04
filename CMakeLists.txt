@@ -44,6 +44,7 @@ set(SOURCES
   src/cinepak.c
   src/hle/sound.c
   src/hle/dev.c
+  src/hle/explore.c
   src/hle/status.c
   "${GEN_C}"
 )
