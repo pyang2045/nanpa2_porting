@@ -169,6 +169,14 @@ static void override_call(uint32_t addr)
 	switch (addr) {
 	case 0x401bf0: /* message pump */
 		cpu.r[EAX] = (uint32_t)win32_pump();
+		/* The native pump returns from PeekMessageA/DispatchMessageA,
+		 * which leave ECX changed. Script op 0x1f (call a MES file,
+		 * 0x406fcd) relies on that: after the sub-file returns
+		 * through this pump it restores its state with
+		 * "mov cx, 0x1e / rep movsd" (0x40705e, 0x40706e), which loads
+		 * only CX. A stale heap pointer in ECX made that copy run off
+		 * memory (ecx 0x0104001e). */
+		cpu.r[ECX] = 0;
 		return;
 	case 0x401e20: /* LOGO.AVI through MCI (src/hle/logo.c) */
 		logo_play();

@@ -13,7 +13,8 @@ void dev_vm_fetch(uint32_t off);
 void dev_hit_table(uint32_t table);
 /* NANPA2_INPUT given: the host mouse, keyboard and focus are ignored */
 int dev_scripted(void);
-/* NANPA2_SAVETEST: round-trip a save through the lifted save/load code */
+/* NANPA2_SAVETEST: round-trip a save through the lifted save/load code, and
+ * check the message pump clobbers ECX (script op 0x1f) */
 int dev_save_selftest(void);
 
 #endif

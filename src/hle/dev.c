@@ -314,5 +314,14 @@ int dev_save_selftest(void)
 	x86_call(0x401050, 2, largs);
 	int ok = !memcmp(x86_ptr(src, 0xc00), x86_ptr(dst, 0xc00), 0xc00);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
-	return ok ? 0 : 1;
+	/* the message pump (0x401bf0) must leave ECX changed like the native
+	 * PeekMessageA does: script op 0x1f restores with "mov cx, N; rep
+	 * movsd" right after it (0x40705e) */
+	cpu.r[ECX] = 0x01040000u;
+	push32(0); /* return address, popped by hle_call (x86_call would
+		    * restore ECX) */
+	hle_call(0x401bf0);
+	int pump = (cpu.r[ECX] >> 16) == 0;
+	fprintf(stderr, "pump selftest: %s\n", pump ? "ok" : "ECX KEPT");
+	return ok && pump ? 0 : 1;
 }
