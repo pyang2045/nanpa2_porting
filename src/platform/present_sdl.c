@@ -32,6 +32,8 @@ Uint32 present_window_flags(void)
 	return 0;
 }
 
+static char name[64];
+
 static float smoothstep(float a, float b, float x)
 {
 	float t = (x - a) / (b - a);
@@ -121,6 +123,13 @@ static SDL_Texture *make_target(int w, int h, SDL_ScaleMode scale)
 
 int present_init(SDL_Window *win)
 {
+	if (present_headless()) {
+		/* no renderer (present_common.h) */
+		window = win;
+		soft = 1;
+		SDL_snprintf(name, sizeof name, "headless (software, no GPU)");
+		return 1;
+	}
 	window = win;
 	renderer = SDL_CreateRenderer(win, -1,
 				      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC |
@@ -217,6 +226,10 @@ static void draw(int ow, int oh)
 
 void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 {
+	if (soft) {
+		soft_frame(pixels, pal);
+		return;
+	}
 	for (int i = 0; i < SCREEN_W * SCREEN_H; i++)
 		rgba[i] = pal[pixels[i]];
 	present_frame_rgb(rgba);
@@ -224,6 +237,10 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 
 void present_frame_rgb(const uint32_t *xrgb)
 {
+	if (soft) {
+		soft_frame_rgb(xrgb);
+		return;
+	}
 	SDL_UpdateTexture(texture, NULL, xrgb, SCREEN_W * 4);
 	present_note_in(present_luma_rgb(xrgb));
 	int ow, oh;
@@ -250,6 +267,8 @@ void present_stats(struct present_stats *out)
 
 int present_capture(const char *bmp_path, int w, int h)
 {
+	if (soft)
+		return soft_capture(bmp_path, w, h);
 	if (w <= 0 || h <= 0)
 		if (SDL_GetRendererOutputSize(renderer, &w, &h))
 			return 0;
@@ -280,7 +299,6 @@ int present_get_crt(void)
 
 const char *present_name(void)
 {
-	static char name[64];
 	SDL_RendererInfo info;
 	if (renderer && !SDL_GetRendererInfo(renderer, &info))
 		SDL_snprintf(name, sizeof name, "SDL_Renderer (%s)", info.name);

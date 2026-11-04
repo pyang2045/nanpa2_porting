@@ -192,3 +192,33 @@ input, then ANI/A6/maps and sound.
   What is left is mostly the hidden window's event pump and the per-present frame copy
   (ddraw.c:85); the lifted game code itself is about 0.5 % of samples. Not the status thread.
 - `NANPA2_HOTSPOTS=1` logs the hit-test rectangles (probe 0x4071bb).
+
+## 2026-11-04 (smoke test whatever the desktop state, GPU-free headless)
+
+- The smoke test failed whenever nobody could see the screen (locked, display asleep, window
+  covered): presents are skipped then (correctly), so "frames presented" could not hold.
+  Worse, with the screen locked (seen 2026-11-03 17:30 UTC, CGSSessionScreenIsLocked set,
+  display awake) a windowed launch hangs in startup, even with NANPA2_HEADLESS: SDL_Init ->
+  Cocoa_AddDisplay -> CVDisplayLinkCreateWithCGDisplay -> IOServiceOpen (Metal build: also
+  CAMetalLayer setDevice), in process state U, so alarm/SIGKILL only land after the unlock.
+  Not checked whether the agent shell's sandbox contributes.
+- 1e3aaaf: the status file is written from before SDL_Init (`stage`: sdl_init, window,
+  present_init, game_init, running; watchdog key `init` names a stuck stage); desktop state
+  (src/platform/desktop_macos.c: CGSSessionScreenIsLocked, CGDisplayIsAsleep; NSApp.hidden);
+  `warning_key` and the cumulative `warned` list. Metal offscreen probe: while presents are
+  skipped for occlusion, the skipped frame is rendered offscreen (CRT off, so black stays
+  black) once a second and its luminance recorded.
+- 1e3aaaf: NANPA2_HEADLESS=1 now means SDL's dummy video driver and a software presenter path
+  chosen at run time in both presenters (no window server, no GPU); ddraw_present hands
+  headless frames to it, so luminance and NANPA2_SHOT_PRESENT captures (plain 640x480)
+  work. Runs fine with the screen locked: logo ~16 s, then frame counter 0x446292 ~65/s.
+- tests/smoke.py (1e3aaaf, fac2a65): reads the lock state first and skips the interactive run if locked or
+  asleep; a covered window is checked through the probe; a 24 s headless run checks game
+  progress and non-black frames; exit 77 (ctest SKIP_RETURN_CODE) = passed but on-screen
+  presentation not verified; never blocks on an unkillable child, reports the hang stage.
+- Checked with the screen locked: smoke Skipped ("SMOKE PASS (desktop screen locked ...)")
+  on the Metal and SDL_Renderer builds; broken builds (black frames; timer 0x4028c0 never
+  ticking) FAIL ("no non-black frame by T=20 s"; "frame counter does not advance" plus the
+  `frame` warning at pc 00406f48). The visible and covered-window paths were checked only
+  with synthetic status samples (the screen stayed locked); run the smoke test once with the
+  desktop visible and once with the app hidden.
