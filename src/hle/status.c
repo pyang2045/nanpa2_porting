@@ -8,7 +8,13 @@
  *
  * Game state: frame counter 0x446292 (16 ms timer 0x4028c0), active flag
  * 0x4ac4ec (WM_ACTIVATEAPP; the timer does nothing while it is 0), the last
- * X86_POLL pc. */
+ * X86_POLL pc.
+ *
+ * status_early() starts the thread before SDL_Init, so an instance that
+ * hangs in the video setup (seen with the screen locked: the main thread
+ * waits in CVDisplayLinkCreateWithCGDisplay / IOServiceOpen inside
+ * SDL_Init) still writes a file: phase "init", the desktop state and a
+ * warning. The game sections follow once status_init() has run. */
 #include "status.h"
 
 #include <errno.h>
@@ -28,6 +34,7 @@
 
 #include "dev.h"
 #include "hle.h"
+#include "platform/desktop.h"
 #include "platform/present.h"
 
 extern char **environ;
@@ -46,7 +53,10 @@ static SDL_Thread *thread;
 static SDL_mutex *lock;
 static SDL_atomic_t quit;
 static time_t start_wall;
-static uint32_t start_ticks;
+static uint32_t launch_ticks; /* status_early() */
+static uint32_t start_ticks;  /* status_init(): the game starts */
+static SDL_atomic_t phase;    /* 0 before status_init, 1 game */
+static const char *volatile stage = "start"; /* status_stage() */
 static int headless, scripted;
 static char env_json[2048];
 static SDL_atomic_t logo;
@@ -62,7 +72,8 @@ static struct snap {
 } snap;
 
 /* watchdog state (writer thread only) */
-static char warning[256], last_key[64];
+static char warning[256], last_key[64], warning_key[64];
+static char warned[512] = "[]"; /* every key warned about, a JSON array */
 static unsigned warnings;
 static uint32_t last_frame_value, last_frame_change;
 
@@ -121,8 +132,14 @@ static void warn(const char *key, const char *fmt, ...)
 		snprintf(last_key, sizeof last_key, "%s", key);
 		SDL_Log("WARNING: %s", msg);
 		warnings++;
+		char q[80];
+		snprintf(q, sizeof q, "\"%s\"", key);
+		size_t n = strlen(warned);
+		if (!strstr(warned, q) && n + strlen(q) + 3 < sizeof warned)
+			snprintf(warned + n - 1, sizeof warned - (n - 1), "%s%s]", n > 2 ? ", " : "", q);
 	}
 	snprintf(warning, sizeof warning, "%s", msg);
+	snprintf(warning_key, sizeof warning_key, "%s", key);
 }
 
 /* The watchdog: the most likely cause of a black or frozen window. */
@@ -146,7 +163,7 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 		last_frame_value = frame;
 		last_frame_change = now;
 	}
-	warning[0] = 0;
+	warning[0] = warning_key[0] = 0;
 	if (up < WATCH_MS)
 		return;
 	if (now - s->tick > WATCH_MAIN_MS) {
@@ -204,13 +221,55 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 	}
 }
 
+static void write_json(const char *text)
+{
+	FILE *f = fopen(tmp_path, "w");
+	if (!f)
+		return;
+	fputs(text, f);
+	fclose(f);
+	rename(tmp_path, path);
+}
+
+/* Before status_init: no window, presenter or game memory yet. */
+static void write_init_status(uint32_t now, int locked, int asleep)
+{
+	uint32_t up = now - launch_ticks;
+	warning[0] = warning_key[0] = 0;
+	if (up > WATCH_MAIN_MS)
+		warn("init", "startup stuck in stage %s for %u ms%s", stage, up,
+		     locked == 1 ? " with the screen locked (display or GPU setup waits for the unlock; "
+				   "NANPA2_HEADLESS runs avoid both)" : "");
+	if (!warning[0])
+		last_key[0] = 0;
+	char wq[600], started[32], buf[4096];
+	json_str(wq, sizeof wq, warning);
+	strftime(started, sizeof started, "%Y-%m-%dT%H:%M:%SZ", gmtime(&start_wall));
+	snprintf(buf, sizeof buf,
+		 "{\n"
+		 "  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u, \"stage\": \"%s\",\n"
+		 "  \"mode\": {\"headless\": %d, \"scripted\": -1, \"env\": %s},\n"
+		 "  \"desktop\": {\"locked\": %d, \"asleep\": %d, \"app_hidden\": -1},\n"
+		 "  \"warning\": \"%s\", \"warning_key\": \"%s\", \"warnings\": %u, \"warned\": %s\n"
+		 "}\n",
+		 (int)getpid(), started, up, stage, headless, env_json, locked, asleep, wq, warning_key, warnings, warned);
+	write_json(buf);
+}
+
 static void write_status(void)
 {
+	uint32_t now = SDL_GetTicks();
+	int locked, asleep;
+	desktop_state(&locked, &asleep);
+	if (!SDL_AtomicGet(&phase)) {
+		write_init_status(now, locked, asleep);
+		return;
+	}
 	struct snap s;
 	SDL_LockMutex(lock);
 	s = snap;
 	SDL_UnlockMutex(lock);
-	uint32_t now = SDL_GetTicks();
+	now = SDL_GetTicks(); /* not before the snapshot (s.tick <= now) */
 	uint32_t frame = rd32(0x446292), active = rd32(0x4ac4ec), pc = x86_poll_pc;
 	watchdog(&s, now, frame, active, pc);
 	if (!warning[0])
@@ -223,35 +282,37 @@ static void write_status(void)
 	json_str(wq, sizeof wq, warning);
 	strftime(started, sizeof started, "%Y-%m-%dT%H:%M:%SZ", gmtime(&start_wall));
 	uint32_t black = ps->last_nonblack ? now - ps->last_nonblack : now - start_ticks;
-	FILE *f = fopen(tmp_path, "w");
-	if (!f)
-		return;
-	fprintf(f,
+	static char buf[8192];
+	snprintf(buf, sizeof buf,
 		"{\n"
-		"  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u,\n"
+		"  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u, \"stage\": \"running\", \"init_ms\": %u,\n"
 		"  \"mode\": {\"headless\": %d, \"scripted\": %d, \"env\": %s},\n"
+		"  \"desktop\": {\"locked\": %d, \"asleep\": %d, \"app_hidden\": %d},\n"
 		"  \"window\": {\"count\": %d, \"os_windows\": %d, \"id\": %u, \"flags\": %u, \"shown\": %d, "
 		"\"hidden\": %d, \"size\": [%d, %d], \"pos\": [%d, %d], \"drawable\": [%d, %d], \"focus\": %d, "
 		"\"occluded\": %d},\n"
 		"  \"present\": {\"renderer\": \"%s\", \"frames_in\": %lu, \"presented\": %lu, "
 		"\"skipped\": {\"occluded\": %lu, \"no_drawable\": %lu, \"size0\": %lu}, "
 		"\"last_wait_ms\": %.1f, \"worst_wait_ms\": %.1f, \"since_present_ms\": %d, "
-		"\"luma_in\": %d, \"luma_shown\": %d, \"black_ms\": %u},\n"
+		"\"luma_in\": %d, \"luma_shown\": %d, \"black_ms\": %u, "
+		"\"probe\": {\"count\": %lu, \"luma\": %d, \"luma_src\": %d, \"age_ms\": %d, \"nonblack_age_ms\": %d}},\n"
 		"  \"game\": {\"frame\": %u, \"frame_still_ms\": %u, \"active_4ac4ec\": %u, \"timer\": %d, "
 		"\"poll_pc\": \"%08x\", \"mips\": %.1f, \"main_age_ms\": %u},\n"
 		"  \"logo\": %d, \"music\": %d, \"voice\": \"%s\",\n"
-		"  \"warning\": \"%s\", \"warnings\": %u\n"
+		"  \"warning\": \"%s\", \"warning_key\": \"%s\", \"warnings\": %u, \"warned\": %s\n"
 		"}\n",
-		(int)getpid(), started, now - start_ticks, headless, scripted, env_json, s.windows, ps->os_windows,
+		(int)getpid(), started, now - launch_ticks, start_ticks - launch_ticks, headless, scripted, env_json,
+		locked, asleep, ps->app_hidden, s.windows, ps->os_windows,
 		window ? SDL_GetWindowID(window) : 0, s.flags, !!(s.flags & SDL_WINDOW_SHOWN),
 		!!(s.flags & SDL_WINDOW_HIDDEN), s.w, s.h, s.x, s.y, ps->drawable_w, ps->drawable_h, s.focus,
 		ps->occluded, present_name(), ps->frames_in, ps->presented, ps->skip_occluded, ps->skip_drawable,
 		ps->skip_size, ps->last_wait_ms, ps->worst_wait_ms,
-		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black, frame,
+		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black,
+		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
+		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
 		now - last_frame_change, active, win32_timer_running(), pc, mips, now - s.tick,
-		SDL_AtomicGet(&logo), music, vq, wq, warnings);
-	fclose(f);
-	rename(tmp_path, path);
+		SDL_AtomicGet(&logo), music, vq, wq, warning_key, warnings, warned);
+	write_json(buf);
 }
 
 static int writer(void *ud)
@@ -328,15 +389,13 @@ void status_set_logo(int playing)
 	SDL_AtomicSet(&logo, playing);
 }
 
-void status_init(SDL_Window *win, double mips_setting)
+void status_early(void)
 {
-	window = win;
-	mips = mips_setting;
+	if (thread)
+		return;
 	start_wall = time(NULL);
-	start_ticks = SDL_GetTicks();
-	last_frame_change = start_ticks;
+	launch_ticks = SDL_GetTicks();
 	headless = getenv("NANPA2_HEADLESS") != NULL;
-	scripted = dev_scripted();
 	collect_env();
 	const char *dir = getenv("TMPDIR");
 	if (!dir || !*dir)
@@ -347,7 +406,6 @@ void status_init(SDL_Window *win, double mips_setting)
 	snprintf(tmp_path, sizeof tmp_path, "%s.tmp", path);
 	remove_stale(dir);
 	lock = SDL_CreateMutex();
-	status_main();
 	atexit(status_shutdown);
 	/* SIGINT and SIGTERM stay with SDL (SDL_QUIT: a clean exit, which
 	 * removes the file); SIGALRM is the perl alarm wrapper of test runs */
@@ -357,6 +415,24 @@ void status_init(SDL_Window *win, double mips_setting)
 #endif
 	thread = SDL_CreateThread(writer, "status", NULL);
 	SDL_Log("status: %s", path);
+}
+
+void status_stage(const char *name)
+{
+	stage = name;
+}
+
+void status_init(SDL_Window *win, double mips_setting)
+{
+	status_early();
+	window = win;
+	mips = mips_setting;
+	start_ticks = SDL_GetTicks();
+	last_frame_change = start_ticks;
+	scripted = dev_scripted();
+	status_main();
+	stage = "running";
+	SDL_AtomicSet(&phase, 1);
 }
 
 void status_shutdown(void)

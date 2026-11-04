@@ -55,6 +55,9 @@ if(APPLE AND NOT NANPA2_SDL_RENDERER)
 else()
   list(APPEND SOURCES src/platform/present_sdl.c)
 endif()
+if(APPLE)
+  list(APPEND SOURCES src/platform/desktop_macos.c)
+endif()
 
 add_executable(nanpa2 ${SOURCES})
 target_include_directories(nanpa2 PRIVATE src third_party)
@@ -69,7 +72,7 @@ if(TARGET SDL2::SDL2main)
 endif()
 if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
-  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" iconv)
+  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" "-framework CoreGraphics" "-framework CoreFoundation" iconv)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -81,10 +84,13 @@ endif()
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
 target_include_directories(decode_all PRIVATE src)
 
-# Smoke test of a plain interactive launch (a real window on this desktop,
-# about 45 s): ctest --test-dir build -R smoke --output-on-failure
+# Smoke test (about 60 s): a plain interactive launch (a real window on this
+# desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
+# Exit 77 = skipped: the game checks passed but nobody could see the screen
+# (locked, display asleep, window covered), so presentation was checked
+# offscreen only.
 set(NANPA2_GAME_DIR "${CMAKE_SOURCE_DIR}/game" CACHE PATH "Game folder for the tests")
 enable_testing()
 add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
-set_tests_properties(smoke PROPERTIES TIMEOUT 120)
+set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)

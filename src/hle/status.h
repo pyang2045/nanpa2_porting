@@ -9,7 +9,14 @@
 
 #include <SDL.h>
 
-/* Start the writer thread. mips: the throttle setting. */
+/* Start the writer thread before SDL_Init (phase "init": the file then
+ * shows an instance stuck in the video setup). */
+void status_early(void);
+/* The startup stage reached ("sdl_init", "window", "present_init", ...),
+ * shown in the file until the game runs (stage "running"). */
+void status_stage(const char *name);
+/* The game starts (starts the thread too if status_early was not called).
+ * mips: the throttle setting. */
 void status_init(SDL_Window *win, double mips);
 /* Main-thread heartbeat: cheap; refreshes the window and presenter numbers
  * a few times a second (they must be read on the main thread). */
