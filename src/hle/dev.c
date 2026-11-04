@@ -7,6 +7,7 @@
  *   NANPA2_INPUT="click,MS,X,Y;rclick,MS,X,Y;move,MS,X,Y;key,MS,VK;quit,MS"
  *       timed input in 640x480 screen coordinates, MS after start; clicks and
  *       keys are held for HOLD_MS
+ *       down,MS,X,Y / up,MS,X,Y   press / release the left button (held)
  *       sync,0,NAME   later events count from when the game opens file NAME
  *                     (e.g. DATA\NAME.GP4; case-insensitive substring);
  *                     unfired earlier events are dropped
@@ -14,7 +15,10 @@
  *                     HEX of the loaded script (0x40616e)
  *       shot,MS       save the next frame as dir/ev_NNN.bmp
  *   NANPA2_INPUT_CLOCK=frames  MS counts game time (16 ms ticks of 0x446292)
- *       instead of wall-clock time, for repeatable runs */
+ *       instead of wall-clock time, for repeatable runs
+ *   NANPA2_TURBO=N  run the game timer and the emulated CPU N times faster
+ *       (win32.c), for long scripted runs
+ *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
 #include "dev.h"
 
 #include <SDL.h>
@@ -222,14 +226,14 @@ void dev_vm_fetch(uint32_t off)
 void dev_hit_table(uint32_t table)
 {
 	static int on = -1;
-	static uint8_t last[400];
+	static uint8_t last[1000];
 	static uint32_t last_at, last_len = ~0u;
 	if (on < 0)
 		on = getenv("NANPA2_HOTSPOTS") != NULL;
 	if (!on)
 		return;
 	uint32_t n = 0;
-	while (n < 40 && rd16(table + 10 * n) != 0xffff)
+	while (n < 100 && rd16(table + 10 * n) != 0xffff)
 		n++;
 	uint32_t len = 10 * n;
 	if (table == last_at && len == last_len && !memcmp(last, x86_ptr(table, len), len))
@@ -265,7 +269,7 @@ void dev_inject(void)
 		uint32_t lp = ((uint32_t)e->y << 16) | (uint32_t)e->x;
 		if (!strcmp(e->kind, "move")) {
 			win32_post_message(0x200, 0, lp);
-		} else if (!strcmp(e->kind, "click")) {
+		} else if (!strcmp(e->kind, "click") || !strcmp(e->kind, "down")) {
 			win32_post_message(0x200, 0, lp);
 			win32_post_message(0x201, 1, lp);
 		} else if (!strcmp(e->kind, "up")) {

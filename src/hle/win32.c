@@ -24,7 +24,10 @@
 
 uint32_t win32_wndproc;
 static int timer_on;
-static uint32_t timer_next;
+static uint64_t timer_next; /* in 1/turbo ms */
+/* NANPA2_TURBO=N (testing): the 16 ms timer, which is the game's clock, and the
+ * emulated CPU run N times faster than real time, so long scripted runs finish sooner */
+static int turbo = 1;
 static int cursor_count;
 
 enum {
@@ -252,18 +255,24 @@ int win32_timer_running(void)
 	return timer_on;
 }
 
+/* game-timer clock in 1/turbo ms (SDL_GetTicks wraps only after 49 days) */
+static uint64_t timer_now(void)
+{
+	return (uint64_t)SDL_GetTicks() * (uint64_t)turbo;
+}
+
 void win32_run_timer(void)
 {
 	if (!timer_on)
 		return;
-	uint32_t now = SDL_GetTicks();
+	uint64_t now = timer_now();
 	int n = 0;
-	while ((int32_t)(now - timer_next) >= 0 && n < 8) {
+	while (now >= timer_next && n < 8 * turbo) {
 		hle_timer_callback();
 		timer_next += 16;
 		n++;
 	}
-	if ((int32_t)(now - timer_next) >= 0)
+	if (now >= timer_next)
 		timer_next = now + 16; /* fell far behind: drop ticks */
 }
 
@@ -278,7 +287,7 @@ static uint64_t base_count, base_ticks;
 
 void x86_set_speed(double ips)
 {
-	cpu_ips = ips;
+	cpu_ips = ips * turbo;
 	base_count = x86_icount;
 	base_ticks = SDL_GetPerformanceCounter();
 }
@@ -371,6 +380,8 @@ int win32_pump(void)
 void win32_init(void)
 {
 	cursor_count = 0;
+	const char *t = getenv("NANPA2_TURBO");
+	turbo = t && atoi(t) > 1 ? atoi(t) : 1;
 }
 
 int win32_call_import(int id)
@@ -482,7 +493,7 @@ int win32_call_import(int id)
 		break;
 	case F_timeSetEvent:
 		timer_on = 1;
-		timer_next = SDL_GetTicks() + 16;
+		timer_next = timer_now() + 16;
 		r = 1;
 		break;
 	case F_timeKillEvent:
