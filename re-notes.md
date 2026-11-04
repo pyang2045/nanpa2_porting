@@ -265,8 +265,8 @@ state in script segment 3 (`@[7] = 3`): the time triple, `B[100+I] = F[1978+I]` 
 save-point scene starts with `if F[2010] == 1` (S5.MES 0x2394, 40.MES 0x26a9): it copies the
 stash back into flags 1978-2007 (40.MES 0x274a, S5.MES 0x2435) and F[2030], then clears
 F[2010] (S5.MES 0x2477, 40.MES 0x278c). So F[1978-2007] (including 2000, the right-click
-gate) are global, not per diary. The title's Main item (shown once FLAG6 marks the Prologue
-done; START1.MES 0x9a5: S = 2 clears F[2029] and F[2033] and jumps to OPEN1.MES; F[2010] is
+gate) are global, not per diary. The title's Main item (seen once a 40.MES diary save wrote FLAG6
+exists; START1.MES 0x9a5: S = 2 clears F[2029] and F[2033] and jumps to OPEN1.MES; F[2010] is
 cleared at START1.MES 0x278) and S63.MES -> OPEN1.MES both reach OPEN1 with F[2010] = 0.
 OPEN1.MES has no restore block and cannot save: a FLAG file naming OPEN1.MES with F[2010] = 1
 makes 40.MES restore whatever OPEN1 loaded into segment 3 (picture bytes; flag 2000 = 15).
