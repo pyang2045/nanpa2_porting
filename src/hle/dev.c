@@ -14,7 +14,10 @@
  *                     HEX of the loaded script (0x40616e)
  *       shot,MS       save the next frame as dir/ev_NNN.bmp
  *   NANPA2_INPUT_CLOCK=frames  MS counts game time (16 ms ticks of 0x446292)
- *       instead of wall-clock time, for repeatable runs */
+ *       instead of wall-clock time, for repeatable runs
+ *   NANPA2_TURBO=N  run the game timer and the emulated CPU N times faster
+ *       (win32.c), for long scripted runs
+ *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
 #include "dev.h"
 
 #include <SDL.h>
@@ -222,14 +225,14 @@ void dev_vm_fetch(uint32_t off)
 void dev_hit_table(uint32_t table)
 {
 	static int on = -1;
-	static uint8_t last[400];
+	static uint8_t last[1000];
 	static uint32_t last_at, last_len = ~0u;
 	if (on < 0)
 		on = getenv("NANPA2_HOTSPOTS") != NULL;
 	if (!on)
 		return;
 	uint32_t n = 0;
-	while (n < 40 && rd16(table + 10 * n) != 0xffff)
+	while (n < 100 && rd16(table + 10 * n) != 0xffff)
 		n++;
 	uint32_t len = 10 * n;
 	if (table == last_at && len == last_len && !memcmp(last, x86_ptr(table, len), len))
