@@ -177,10 +177,20 @@ only WaitForVerticalBlank is in WM_PAINT (0x402570).
 - 0x403624: animation tick, at most once per frame (`0x4313bc` = last frame seen); steps the
   ten animation slots at `0x4312cc` (stride 0x18) through 0x403661. 0x4035a0 waits frame by
   frame until one slot finishes.
-- 0x401a50: dissolve wipe, 0x80 steps (a bit mask per 16-line band), each step waits 2 frames
-  (about 4 s); with a button (0x30) held it stops waiting and runs at CPU speed (about 16 M
-  instructions, 0.65 s at 25 MIPS).
-- 0x4028c0: palette fade, one step every `0x44628e` ticks, 16 steps.
+- 0x401a50: dissolve wipe, script op `19 34` (op 0x0f, 0x407204, sub-op 4 at 0x407382). 0x80
+  steps (a bit mask per 16-line band, 25 bands of 640 pixels per step); each step reads the
+  frame counter at its start (0x401adf) and waits until it has advanced by 2 (0x401b7b-0x401ba4),
+  so the wipe takes 256 frames (4.1 s) whatever the CPU speed, as long as a step's work stays
+  under 2 frames (it is about 0.22 M instructions). If button bit 0x10 or 0x20 of `0x445d8f`
+  is set at a step's wait (0x401b90) a sticky flag (`[esp+0x1c]`) drops the waits for the rest
+  of the wipe, which then runs at CPU speed: measured 28.3-29.5 M instructions, 69 frames (1.1
+  s) at 25 MIPS. Bit 0x10 is left button / Return / Space (0x40242f, 0x402434), bit 0x20 right
+  button / Esc / Insert (0x402446, 0x40244b); key-up and button-up clear them.
+- 0x4028c0: palette fade, started by 0x401d30 (`0x4ac504` = 1). The tick counter `0x4ac508`
+  advances every tick and ends the fade after 17 ticks; the palette is recomputed every
+  `0x44628e` ticks (1, set by ext op 0x16 at 0x406f32, which then waits at 0x406f41). Measured
+  16 frames from start to end probe (256 ms) for all 121 fades of a Prologue run, at any
+  `--cpu-mips`.
 - Script opcode at 0x4072c3/0x4072f2: frame-counter stopwatch (`0x446296`).
 
 CPU-bound: only the work between waits (script interpretation, picture decompression
