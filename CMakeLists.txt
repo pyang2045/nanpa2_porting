@@ -31,6 +31,7 @@ add_custom_command(
 
 set(SOURCES
   src/main.c
+  src/launch.c
   src/lzh.c
   src/gp4.c
   src/fsys.c
@@ -49,14 +50,18 @@ set(SOURCES
 )
 
 option(NANPA2_SDL_RENDERER "Use the SDL_Renderer presenter on macOS too" OFF)
-if(APPLE AND NOT NANPA2_SDL_RENDERER)
+if(APPLE)
   enable_language(OBJC)
+endif()
+if(APPLE AND NOT NANPA2_SDL_RENDERER)
   list(APPEND SOURCES src/platform/present_metal.m)
 else()
   list(APPEND SOURCES src/platform/present_sdl.c)
 endif()
 if(APPLE)
-  list(APPEND SOURCES src/platform/desktop_macos.c)
+  list(APPEND SOURCES src/platform/desktop_macos.c src/platform/dialog_macos.m)
+else()
+  list(APPEND SOURCES src/platform/dialog_none.c)
 endif()
 
 add_executable(nanpa2 ${SOURCES})
@@ -74,11 +79,36 @@ if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
   target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" "-framework CoreGraphics" "-framework CoreFoundation" iconv)
 endif()
+if(UNIX AND NOT APPLE)
+  target_link_libraries(nanpa2 PRIVATE m) # stb_truetype, minimp3
+endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
   # generated code: labels and comparisons it never uses
   set_source_files_properties("${GEN_C}" PROPERTIES COMPILE_OPTIONS
     "-Wno-unused-label;-Wno-unused-value;-Wno-unused-variable;-Wno-parentheses-equality;-O1")
+endif()
+
+# macOS app bundle for this machine only: build/同級生２.app with SDL inside
+# (tools/bundle_macos.sh). It holds the game code lifted from your
+# nanpa2.exe, so never share it; it holds no game data (the game folder is
+# found or asked for at run time, see src/launch.c).
+#   ninja -C build nanpa2_app        or configure with -DNANPA2_APP_BUNDLE=ON
+if(APPLE)
+  option(NANPA2_APP_BUNDLE "Build build/同級生２.app with the default target" OFF)
+  set(NANPA2_APP_NAME "同級生２")
+  set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
+  set(NANPA2_APP_DIR "${CMAKE_BINARY_DIR}/${NANPA2_APP_NAME}.app")
+  configure_file(cmake/Info.plist.in "${CMAKE_BINARY_DIR}/Info.plist" @ONLY)
+  if(NANPA2_APP_BUNDLE)
+    set(_app_all ALL)
+  endif()
+  add_custom_target(nanpa2_app ${_app_all}
+    COMMAND /bin/sh "${CMAKE_SOURCE_DIR}/tools/bundle_macos.sh"
+      "${NANPA2_APP_DIR}" $<TARGET_FILE:nanpa2> "${CMAKE_BINARY_DIR}/Info.plist"
+    DEPENDS nanpa2 "${CMAKE_SOURCE_DIR}/tools/bundle_macos.sh" "${CMAKE_BINARY_DIR}/Info.plist"
+    COMMENT "Bundling ${NANPA2_APP_NAME}.app"
+    VERBATIM)
 endif()
 
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)

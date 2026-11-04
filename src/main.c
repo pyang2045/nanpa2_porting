@@ -19,6 +19,10 @@
  *                                                       window is in the background
  *                                                       (the original behaviour)
  *
+ * Without --game the game folder is looked up (launch.c): NANPA2_GAME_DIR,
+ * the remembered choice, next to the executable or .app, ./game, then a
+ * folder picker.
+ *
  * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
  * hand-written Win32/DirectX layer in src/hle.
  */
@@ -34,6 +38,7 @@
 #include "hle/hle.h"
 #include "hle/logo.h"
 #include "hle/status.h"
+#include "launch.h"
 #include "x86/x86.h"
 
 #ifndef _WIN32
@@ -41,6 +46,7 @@
 #include <strings.h>
 #define stricmp strcasecmp
 #else
+#include <io.h>
 #define stricmp _stricmp
 #endif
 
@@ -58,25 +64,40 @@ static int cmp_name(const void *a, const void *b)
 	return strcmp(*(char *const *)a, *(char *const *)b);
 }
 
+static void add_name(const char *name)
+{
+	const char *dot = strrchr(name, '.');
+	if (!dot || stricmp(dot, ".GP4"))
+		return;
+	names = realloc(names, sizeof *names * (name_count + 1));
+	names[name_count++] = strdup(name);
+}
+
 static void list_gp4(void)
 {
-#ifndef _WIN32
+#ifdef _WIN32
+	char path[1100];
+	snprintf(path, sizeof path, "%s\\DATA\\*.GP4", fsys_root());
+	struct _finddata_t e;
+	intptr_t h = _findfirst(path, &e);
+	if (h == -1)
+		return;
+	do
+		add_name(e.name);
+	while (_findnext(h, &e) == 0);
+	_findclose(h);
+#else
 	char path[1100];
 	snprintf(path, sizeof path, "%s/DATA", fsys_root());
 	DIR *d = opendir(path);
 	if (!d)
 		return;
 	struct dirent *e;
-	while ((e = readdir(d))) {
-		const char *dot = strrchr(e->d_name, '.');
-		if (!dot || stricmp(dot, ".GP4"))
-			continue;
-		names = realloc(names, sizeof *names * (name_count + 1));
-		names[name_count++] = strdup(e->d_name);
-	}
+	while ((e = readdir(d)))
+		add_name(e->d_name);
 	closedir(d);
-	qsort(names, name_count, sizeof *names, cmp_name);
 #endif
+	qsort(names, name_count, sizeof *names, cmp_name);
 }
 
 static int show(const char *name)
@@ -194,12 +215,13 @@ static int run_game(const char *game, const char *exe, const char *font)
 
 int main(int argc, char **argv)
 {
-	const char *game = "game", *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
+	const char *game = NULL, *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
 	const char *crt_shot = NULL, *view_bmp = NULL;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
 	double mips = NANPA2_DEFAULT_MIPS;
+	launch_log_init(argc, argv);
 	if (getenv("NANPA2_CPU_MIPS"))
 		mips = atof(getenv("NANPA2_CPU_MIPS"));
 	for (int i = 1; i < argc; i++) {
@@ -237,6 +259,16 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--pause-inactive"))
 			SDL_setenv("NANPA2_PAUSE_INACTIVE", "1", 1);
 	}
+	/* the game folder: --game, or found or asked for (launch.c); message
+	 * boxes and the picker only for a launch someone watches */
+	if (!view_bmp) {
+		int interactive = !getenv("NANPA2_HEADLESS") && !getenv("NANPA2_INPUT") && !shot && !crt_shot;
+		int play = !viewer && logo_frame_n < 0;
+		game = launch_game_dir(game, play && !exe, interactive);
+		if (!game)
+			return 1;
+	} else if (!game)
+		game = "game";
 	fsys_set_root(game);
 
 	int cur = 0;
