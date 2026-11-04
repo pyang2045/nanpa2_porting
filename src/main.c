@@ -221,6 +221,8 @@ int main(int argc, char **argv)
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
 	double mips = NANPA2_DEFAULT_MIPS;
+	if (argc > 2 && !strcmp(argv[1], "--wav-check"))
+		return sound_wav_check(argc - 2, argv + 2) ? 1 : 0;
 	launch_log_init(argc, argv);
 	if (getenv("NANPA2_CPU_MIPS"))
 		mips = atof(getenv("NANPA2_CPU_MIPS"));

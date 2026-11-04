@@ -374,3 +374,17 @@ code change.
   match but have not been listened to.
 - Clip facts: 10,768 clips in `SPEECH/A..O`, RIFF WAV, 22050 Hz 8-bit mono, mixed `.WAV`/`.wav`
   case (handled by the case-insensitive `fsys.c`). Played by 0x403360 (see `re-notes.md`).
+
+## 2026-11-04 (WAV format check)
+
+- Surveyed every `SPEECH/*/*` clip and `MUSIC/*.wav`: 9824 + 771 mono 22050 Hz 8-bit, 185 stereo
+  22050 Hz 8-bit (all in folder I), 1 mono 11025 Hz (`SPEECH/I/I10457.WAV`). Chunk order is
+  always `fmt`, `data`, then `cue`/`LIST` after the data (voices only).
+- `load_wav` (used by the voice player replacing 0x403360 and by the WAV jingles of 0x402cb0)
+  was already correct: SDL_LoadWAV_RW walks chunks and reads fmt (channels, rate, bits), the
+  clip is converted to S16 keeping channels and rate, and `mix_clip` resamples by rate/44100
+  and duplicates mono to both sides. No sound.c behaviour changed.
+- Added an offline test: `nanpa2 --wav-check FILE...` (`sound_wav_check`, src/hle/sound.c)
+  decodes through `load_wav` and compares frames/rate with the header's data length / byte
+  rate; ctest `wavcheck` (tests/wavcheck.py) runs it on synthetic mono, stereo, 11 kHz and
+  extra-chunks-before-data files plus one real file of each format. All ok.
