@@ -19,7 +19,9 @@
  * It logs `explore: reached NAME frame F` the first time each MES file
  * loads and `explore: stall ...` when no new script offset has run for a
  * long time; NANPA2_EXPLORE_FRAMES ends the run (WM_QUIT) after that many
- * frames. Runs are repeatable only roughly (the game timer is host-paced):
+ * frames; NANPA2_EXPLORE_AFTER=F keeps it idle until frame F (so that
+ * NANPA2_INPUT can first load a save); NANPA2_EXPLORE_LOG=1 logs menus and
+ * clicks. Runs are repeatable only roughly (the game timer is host-paced):
  * the seed and frame numbers locate a problem, they do not replay it. */
 #include "explore.h"
 
@@ -38,9 +40,9 @@
 #define WM_RBUTTONDOWN 0x204
 #define WM_RBUTTONUP 0x205
 
-static int on;
+static int on, verbose;
 static uint64_t rng;
-static uint32_t end_frame, stall_frames = 40000;
+static uint32_t end_frame, start_frame, stall_frames = 40000;
 
 static uint32_t rnd(uint32_t n)
 {
@@ -59,7 +61,8 @@ static struct item {
 	int x, y;
 } items[MAX_ITEMS];
 static int nitems;
-static uint32_t menu_off;
+static uint32_t menu_off, menu_next, menu_frame;
+static int menu_active;
 
 #define MAX_HITS 100
 static struct hit {
@@ -104,6 +107,8 @@ static void push(uint32_t at, uint32_t msg, uint32_t wp, int x, int y)
 
 static void click(uint32_t t, int x, int y)
 {
+	if (verbose)
+		fprintf(stderr, "explore: frame %u %s click %d,%d\n", t, mes, x, y);
 	push(t, WM_MOUSEMOVE, 0, x, y);
 	push(t + 8, WM_MOUSEMOVE, 0, x, y);
 	push(t + 12, WM_LBUTTONDOWN, 1, x, y);
@@ -120,9 +125,13 @@ void explore_init(void)
 	const char *e = getenv("NANPA2_EXPLORE_FRAMES");
 	if (e)
 		end_frame = (uint32_t)strtoul(e, NULL, 0);
+	e = getenv("NANPA2_EXPLORE_AFTER"); /* idle until then (NANPA2_INPUT can load a save) */
+	if (e)
+		start_frame = (uint32_t)strtoul(e, NULL, 0);
 	e = getenv("NANPA2_EXPLORE_STALL");
 	if (e)
 		stall_frames = (uint32_t)strtoul(e, NULL, 0);
+	verbose = getenv("NANPA2_EXPLORE_LOG") != NULL;
 	fprintf(stderr, "explore: seed %s\n", s);
 }
 
@@ -146,6 +155,7 @@ void explore_file(const char *name)
 		if (*p >= 'A' && *p <= 'Z')
 			*p += 32;
 	int had = nfiles;
+	menu_active = 0;
 	cur_file = file_index(low);
 	snprintf(mes, sizeof mes, "%s", low);
 	/* flags 2010 (diary-save marker) and 2000 (40.MES right-click gate):
@@ -202,6 +212,16 @@ static void menu_seen(uint32_t off)
 {
 	uint32_t p = off + 2, list;
 	int popup = rd8(SCRIPT + p) == 0x01;
+	/* the op after this one: the menu is up until the VM gets there (while
+	 * it waits, the menu code runs script handlers, 0x4061cd) */
+	if (popup) {
+		menu_next = p + 1;
+		while (rd8(SCRIPT + menu_next) != 0x00 && menu_next - p < 1024)
+			menu_next++;
+		menu_next++;
+	} else {
+		menu_next = skip_expr(p);
+	}
 	if (popup) {
 		list = p + 1;
 	} else {
@@ -229,7 +249,9 @@ static void menu_seen(uint32_t off)
 			/* 結束 (end the game) in Big5 */
 			int quit = contains(text, list, "\xb5\xb2\xa7\xf4");
 			if (!quit && nitems < MAX_ITEMS) {
-				if (popup)
+				if (popup && !strcmp(mes, "start1.mes")) /* title: big buttons */
+					items[nitems] = (struct item){ 320, 170 + 42 * shown };
+				else if (popup)
 					items[nitems] = (struct item){ 150, 57 + 18 * shown };
 				else
 					items[nitems] = (struct item){ shown % 2 ? 420 : 215, 383 + 24 * (shown / 2) };
@@ -242,6 +264,12 @@ static void menu_seen(uint32_t off)
 		list++;
 	}
 	menu_off = off;
+	if (verbose) {
+		fprintf(stderr, "explore: menu at %04x %s, %d choices:", off, popup ? "pop-up" : "grid", nitems);
+		for (int i = 0; i < nitems; i++)
+			fprintf(stderr, " (%d,%d)", items[i].x, items[i].y);
+		fprintf(stderr, "\n");
+	}
 }
 
 void explore_vm(uint32_t off)
@@ -254,12 +282,16 @@ void explore_vm(uint32_t off)
 	uint8_t b0 = rd8(SCRIPT + off), b1 = rd8(SCRIPT + off + 1), b2 = rd8(SCRIPT + off + 2);
 	if (b0 == 0x04 && b1 == 0x13) {
 		last_op = OP_MENU;
+		menu_active = 1;
+		menu_frame = f;
 		menu_seen(off);
 	} else if (b0 == 0x11) {
 		last_op = OP_TEXT;
 	} else {
 		last_op = OP_OTHER;
 	}
+	if (off == menu_next)
+		menu_active = 0;
 	if (b0 == 0x04 && b1 == 0x26 && b2 == 0x3c)
 		town_frame = f;
 	if (cur_file >= 0) {
@@ -323,7 +355,12 @@ static uint32_t choose(uint32_t key, uint32_t n)
 static void decide(uint32_t f)
 {
 	uint32_t t = f + 2;
-	if (last_op == OP_MENU && f - last_fetch_frame > 20) {
+	if (menu_active && f - menu_frame <= 20) {
+		/* let it draw; a click now would take the highlighted item */
+		next_decide = menu_frame + 21;
+		return;
+	}
+	if (menu_active) {
 		if (nitems && rnd(20)) {
 			struct item *it = &items[choose(place(menu_off), (uint32_t)nitems)];
 			click(t, it->x + (int)rnd(40) - 20, it->y);
@@ -429,7 +466,7 @@ void explore_tick(void)
 		fprintf(stderr, "explore: stall frame %u mes %s: no new script offset since frame %u (last fetch %04x op %02x)\n",
 			f, mes, novel_frame, last_off, rd8(SCRIPT + last_off));
 	}
-	if (nq || (int32_t)(f - next_decide) < 0)
+	if (nq || (int32_t)(f - next_decide) < 0 || f < start_frame)
 		return;
 	decide(f);
 }
