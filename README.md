@@ -8,7 +8,7 @@ Linux and Windows. It needs your own copy of the game CD; no game data is in thi
 
 Playable from boot through the full Prologue and into the first town. Working: boot, the
 `LOGO.AVI` intro, name entry, the full Prologue, OPEN1 and walking around the town, save and
-load, MP3 music and voice, the Metal FD Trinitron CRT shader (window and fullscreen), pacing
+load, MP3 music and Chinese voice, the Metal FD Trinitron CRT shader (window and fullscreen), pacing
 at 486 speed, and a macOS `.app` bundle. See `NOTES.md` for the dated log.
 
 Tested: an exploration bot has reached 140 of the 470 MES script files, and it found the

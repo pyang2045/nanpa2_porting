@@ -16,7 +16,7 @@ GDI32 (CreateFontA/TextOutA) and KERNEL32.
 | `DATA/*.MAP`, `*.C5` (7 each) | town/school maps: GAKKO1-4, MATI1-2, SENRO |
 | `DATA/MOUSE.DAT` | cursor bitmaps, 8192 bytes |
 | `MUSIC/NN.mp3`, `NN.wav` | BGM, played through MCI (`MUSIC\%02d.MP3`, `.WAV`) |
-| `SPEECH/A..O/*.WAV` | 10,768 voice clips, 22 kHz 8-bit mono PCM |
+| `SPEECH/A..O/*.WAV` | 10,768 voice clips, 22 kHz 8-bit mono PCM; Chinese (Mandarin) dub, confirmed by ear on A10012 only |
 | `LOGO.AVI` | opening logo, Cinepak 640x480 + PCM, MCI `avivideo` |
 | `data1.cab` | InstallShield 5: `nanpa2.exe`, `FLAG0`..`FLAG6` (installed to the HD) |
 
@@ -101,7 +101,8 @@ buffer ever gets SetVolume/SetPan/SetFrequency (vtable calls used: 0x0c CreateSo
   - voice: buffer `0x4be564`, file image `0x4be574`. 0x403360(name): stop voice (0x403440),
     `SPEECH%s` (0x4312c0, name from the script, e.g. `\A\A10012.WAV`), 0x403020,
     SetCurrentPosition(0), Play once. Nothing ever polls the voice status, so the script never
-    waits for a voice to finish.
+    waits for a voice to finish. Language: the dub is Chinese (Mandarin); listened to
+    `A10012.WAV` only, the other clips are assumed the same.
 - Script music opcode (0x4073a5): arguments parsed by 0x40741b into words at `0x445d06`...;
   first argument 0 stops the music, otherwise music number = second argument (`0x445d08`,
   zero-extended).

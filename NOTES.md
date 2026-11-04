@@ -366,3 +366,11 @@ code change.
   decision.
 - Not checked: a windowed Metal run (scripted runs are headless); its status file
   (`present.worst_wait_ms`, `game.frame_still_ms`) would show a presenter stall.
+
+## 2026-11-04 (voice language)
+
+- The voice clips are spoken in Chinese (Mandarin): the Taiwan release has a Chinese dub. This
+  was confirmed by ear on one clip only, `SPEECH/A/A10012.WAV`; the other clips are assumed to
+  match but have not been listened to.
+- Clip facts: 10,768 clips in `SPEECH/A..O`, RIFF WAV, 22050 Hz 8-bit mono, mixed `.WAV`/`.wav`
+  case (handled by the case-insensitive `fsys.c`). Played by 0x403360 (see `re-notes.md`).
