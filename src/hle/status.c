@@ -37,7 +37,11 @@
 #include "platform/desktop.h"
 #include "platform/present.h"
 
+#ifdef _WIN32
+#define environ _environ /* stdlib.h */
+#else
 extern char **environ;
+#endif
 
 /* the screen may be black or unpresented this long (fades, the gap after
  * the logo movie) before the watchdog warns */
@@ -397,12 +401,17 @@ void status_early(void)
 	launch_ticks = SDL_GetTicks();
 	headless = getenv("NANPA2_HEADLESS") != NULL;
 	collect_env();
+	/* TMPDIR (macOS, Linux), TEMP (Windows) */
 	const char *dir = getenv("TMPDIR");
+	if (!dir || !*dir)
+		dir = getenv("TEMP");
+	if (!dir || !*dir)
+		dir = getenv("TMP");
 	if (!dir || !*dir)
 		dir = "/tmp";
 	size_t n = strlen(dir);
-	snprintf(path, sizeof path, "%s%snanpa2-status-%d.json", dir, n && dir[n - 1] == '/' ? "" : "/",
-		 (int)getpid());
+	snprintf(path, sizeof path, "%s%snanpa2-status-%d.json", dir,
+		 n && (dir[n - 1] == '/' || dir[n - 1] == '\\') ? "" : "/", (int)getpid());
 	snprintf(tmp_path, sizeof tmp_path, "%s.tmp", path);
 	remove_stale(dir);
 	lock = SDL_CreateMutex();

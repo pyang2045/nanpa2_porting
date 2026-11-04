@@ -261,3 +261,37 @@ input, then ANI/A6/maps and sound.
 - Timing: with NANPA2_INPUT_CLOCK=frames, inputs still land within a few frames of their
   target (game time comes from a host-paced timer). One house click out of three missed, so
   routes repeat such clicks until the next sync.
+
+## 2026-11-04 (packaging: macOS app, game folder lookup, log file, portability)
+
+- 015458c: `ninja -C build nanpa2_app` (or `-DNANPA2_APP_BUNDLE=ON`) builds
+  `build/同級生２.app` with tools/bundle_macos.sh. SDL here is Homebrew's sdl2-compat
+  (/usr/local/opt/sdl2-compat), which dlopens SDL3, first from `@loader_path/libSDL3.dylib`:
+  both go into Contents/Frameworks (SDL3 under that name), load commands rewritten to
+  @executable_path/@loader_path, ad-hoc signed; lsof on a running app shows only the
+  bundled copies. LSMinimumSystemVersion comes from the binaries' minos: 26.0 with these
+  bottles. No game data inside; the binary holds code lifted from nanpa2.exe, so local
+  use only.
+- 015458c, src/launch.c: game folder from --game, NANPA2_GAME_DIR, `<pref>/game-folder.txt`,
+  next to the executable/.app (also `game/`, up to the .app's grandparent), ./game, then an
+  NSOpenPanel picker (src/platform/dialog_macos.m, after SDL's video init so SDL owns NSApp)
+  whose choice is remembered. Valid = DATA/01.GP4 and, to play, nanpa2.exe (x86_load_image
+  reads it at run time), checked through fsys. `<pref>` = NANPA2_SAVE_DIR or
+  SDL_GetPrefPath("nanpa2","nanpa2"); `game-folder.txt` and `nanpa2.log` sit next to the
+  flag* saves without touching them. Inside a bundle stdout/stderr/SDL_Log go to
+  `<pref>/nanpa2.log` (previous run: nanpa2.previous.log); NANPA2_LOG_FILE anywhere.
+- Checked: `open -n` launches with NANPA2_GAME_DIR and with the remembered path (Metal,
+  status file stage running, frames presented, no warnings, log written, quit on SIGTERM);
+  next-to-the-app and not-found headless; the picker opens on a launch with no game folder
+  (a 884x448 window at the modal panel level owned by the app), but choosing in it was not
+  automated. SIGTERM does not end the app while the picker is open (SDL only queues a quit).
+  A bad NANPA2_GAME_DIR in an `open -n` launch shows the error box (a 260x282 modal window,
+  before SDL_Init) and exits 1 when dismissed.
+- 514f15e, portability (nothing built on Linux or Windows): status.c `_environ` and
+  TEMP/TMP on Windows; text.c declares MultiByteToWideChar instead of including windows.h;
+  crt.c open_native lower-cases FLAG names in the save folder (the game's strings are
+  "FLAG" and "flag0"; macOS saves are flag0..flag6), so a case-sensitive file system reads
+  what was written (NANPA2_SAVETEST ok); Linux links libm; main.c lists DATA/*.GP4 with
+  _findfirst on Windows. README "Platforms" lists what is unverified.
+- Smoke: Metal build Passed; SDL_Renderer build (-DNANPA2_SDL_RENDERER=ON, also builds the
+  app) Skipped: game checks passed, "desktop not visible" during its run.

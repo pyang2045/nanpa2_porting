@@ -17,7 +17,11 @@
 #include "stb_truetype.h"
 
 #ifdef _WIN32
-#include <windows.h>
+/* kernel32's MultiByteToWideChar (UINT, DWORD, LPCCH, int, LPWSTR, int),
+ * declared here rather than with <windows.h> and its macros (min, max,
+ * near, far, ERROR, ...) next to the emulator headers */
+__declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *s,
+							 int n, wchar_t *w, int wn);
 #else
 #include <iconv.h>
 #endif
