@@ -265,8 +265,8 @@ state in script segment 3 (`@[7] = 3`): the time triple, `B[100+I] = F[1978+I]` 
 save-point scene starts with `if F[2010] == 1` (S5.MES 0x2394, 40.MES 0x26a9): it copies the
 stash back into flags 1978-2007 (40.MES 0x274a, S5.MES 0x2435) and F[2030], then clears
 F[2010] (S5.MES 0x2477, 40.MES 0x278c). So F[1978-2007] (including 2000, the right-click
-gate) are global, not per diary. The title's Main item (seen once a 40.MES diary save wrote FLAG6
-exists; START1.MES 0x9a5: S = 2 clears F[2029] and F[2033] and jumps to OPEN1.MES; F[2010] is
+gate) are global, not per diary. The title's Main item (shown when F[2026] = 1, see below;
+START1.MES 0x9a5: S = 2 clears F[2029] and F[2033] and jumps to OPEN1.MES; F[2010] is
 cleared at START1.MES 0x278) and S63.MES -> OPEN1.MES both reach OPEN1 with F[2010] = 0.
 OPEN1.MES has no restore block and cannot save: a FLAG file naming OPEN1.MES with F[2010] = 1
 makes 40.MES restore whatever OPEN1 loaded into segment 3 (picture bytes; flag 2000 = 15).
@@ -276,3 +276,20 @@ offers 睡1小時 ... 睡8小時, then 寫日記 / 看日記 / 什麼都不做; 
 (books at screen (295,82) ... (533,82), book 1 = FLAG1). Pop-up items are 18 px apart from
 screen y 57. The title menu with Main shown: Prologue (320,170), Main (320,198), Data Load
 (320,254); the title's diary picker has book 1 at (200,170).
+
+### Title menu (START1.MES)
+
+On the first title of a session (`if F[2015] == 0`, START1.MES 0x1fd) the title loads FLAG6
+with ext op 0x21 mode 2 (`04 21 32 03 02 36`), which keeps the current first 32 bytes. FLAG6
+holds the global state. From flags it read (406, 540, 210 with 763 = 0, 781, 779, 780) it
+sets F[1978-1983] (0x2a0-0x300) and saves FLAG6 again (`04 21 31 03 02 36`, 0x306). F[2015]
+is set at 0x35a. With F[2026] = 0 and no diary (A = 0) it goes straight to OPEN.MES (0x360).
+The menu's item flags are set at 0x38c-0x3be:
+- F0 = 1: Prologue.
+- F1 = F[2026]: Main.
+- F2 = 1: Data Load.
+- F3 = F[1983] + ... (15 flags down from 1983): a further item.
+The only script write of F[2026] is in 40.MES's diary-save block (0x91cc, before the FLAG6
+save at 0x9260). Main therefore appears once the player has written a diary in the main game.
+Returning to the title in the same session also sets it (0x280: F[2015] = 1 -> F[2026] = 1).
+Choosing Main (S = 2, 0x9bf) clears F[2029] and F[2033] and jumps to OPEN1.MES.
