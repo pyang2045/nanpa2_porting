@@ -293,3 +293,19 @@ The only script write of F[2026] is in 40.MES's diary-save block (0x91cc, before
 save at 0x9260). Main therefore appears once the player has written a diary in the main game.
 Returning to the title in the same session also sets it (0x280: F[2015] = 1 -> F[2026] = 1).
 Choosing Main (S = 2, 0x9bf) clears F[2029] and F[2033] and jumps to OPEN1.MES.
+
+### Calling a MES file (ext ops 0x1e, 0x1f)
+
+`04 1e` (0x406f7c) jumps to another MES file: it loads it over the script buffer and restarts
+the VM at the file's entry with the native stack reset (`esp = [0x445cdc]`). `04 1f`
+(0x406fcd) calls one as a subroutine (42.MES calls TOMOMI.MES, the town calls TIME.MES, the
+quiz calls QUIZ_SUB.MES): it pushes the script offset, copies the label table (0x445dbc,
+0x1e dwords) to 0x445e36 and the file name (0x444e78, 8 dwords) to 0x445d46, saves the
+handler state (0x445ce1/ce2/ce4), loads the file and runs it with a nested `call 0x4060f9`.
+The sub-file returns with op 00/02 (0x4061aa, `ret` when esp is not the top level). Then
+the caller restores everything with `mov cx, 0x1e` / `mov cx, 0x8` + `rep movsd`
+(0x40705e, 0x40706e) and reloads its own file. Those count loads set only CX: the native
+code works because the last thing to run before them is the message pump (0x401bf0, called
+at every opcode fetch, 0x4060f9), whose PeekMessageA/DispatchMessageA leave ECX changed.
+A replacement pump has to clobber ECX (to a value with a zero high half) or the copy runs off
+memory.
