@@ -177,6 +177,7 @@ static void override_call(uint32_t addr)
 		 * only CX. A stale heap pointer in ECX made that copy run off
 		 * memory (ecx 0x0104001e). */
 		cpu.r[ECX] = 0;
+		cpu.r[EDX] = 0; /* also volatile across the stdcall APIs */
 		return;
 	case 0x401e20: /* LOGO.AVI through MCI (src/hle/logo.c) */
 		logo_play();

@@ -125,3 +125,13 @@ enable_testing()
 add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# Self-test (a few seconds, headless): a save round trip through the lifted
+# save/load code and the message pump's ECX (script op 0x1f).
+add_test(NAME selftest COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1 NANPA2_SAVETEST=1
+  "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/selftest-saves" $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
+set_tests_properties(selftest PROPERTIES TIMEOUT 30
+  FIXTURES_REQUIRED selftest_dir PASS_REGULAR_EXPRESSION "pump selftest: ok"
+  FAIL_REGULAR_EXPRESSION "MISMATCH|ECX KEPT|x86 trap")
+add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
+set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
