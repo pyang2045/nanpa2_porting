@@ -253,3 +253,26 @@ is the sprite code at 0x404484 (calls 0x405597 when [0x435573] != 0xff).
 40.MES 0x274a copies 30 values into flags 1978-2007 (`0b 08 7b eb ...`, value
 `B[100+I]` via op 0x2b, 0x403938: segment_base[@[7]] + register + 2*index), which includes
 flag 2000.
+
+### Diary saves and the global flags (flag 2010)
+
+Flag 2010 marks a snapshot taken by a diary save. Every save block sets it, saves and clears
+it again (S5/S7/S20/S23/S33/S35/S44/S46/S59/S60.MES 0x22d7 set, 0x2374 clear; 40.MES 0x9182
+set, 0x926e clear), so it is 1 in memory only between a diary load and the loaded scene's
+entry. Loading from the title (START1.MES 0x1290-0x1342) first stashes the current global
+state in script segment 3 (`@[7] = 3`): the time triple, `B[100+I] = F[1978+I]` for I = 0..29
+(`0d 42 08 07 93 49 20 03 08 7b eb 49 20 2e 03`) and F[2030], then runs `04 21 30 ... S`. Each
+save-point scene starts with `if F[2010] == 1` (S5.MES 0x2394, 40.MES 0x26a9): it copies the
+stash back into flags 1978-2007 (40.MES 0x274a, S5.MES 0x2435) and F[2030], then clears
+F[2010] (S5.MES 0x2477, 40.MES 0x278c). So F[1978-2007] (including 2000, the right-click
+gate) are global, not per diary. The title's Main item (shown once FLAG6 marks the Prologue
+done; START1.MES 0x9a5: S = 2 clears F[2029] and F[2033] and jumps to OPEN1.MES; F[2010] is
+cleared at START1.MES 0x278) and S63.MES -> OPEN1.MES both reach OPEN1 with F[2010] = 0.
+OPEN1.MES has no restore block and cannot save: a FLAG file naming OPEN1.MES with F[2010] = 1
+makes 40.MES restore whatever OPEN1 loaded into segment 3 (picture bytes; flag 2000 = 15).
+
+Own room (40.MES): the bed is hotspot 0x16 (58,186)-(244,239) (picture coordinates). It
+offers 睡1小時 ... 睡8小時, then 寫日記 / 看日記 / 什麼都不做; 寫日記 opens the six-book picker
+(books at screen (295,82) ... (533,82), book 1 = FLAG1). Pop-up items are 18 px apart from
+screen y 57. The title menu with Main shown: Prologue (320,170), Main (320,198), Data Load
+(320,254); the title's diary picker has book 1 at (200,170).
