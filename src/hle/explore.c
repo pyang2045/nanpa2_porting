@@ -294,6 +294,9 @@ void explore_vm(uint32_t off)
 		menu_seen(off);
 	} else if (b0 == 0x11) {
 		last_op = OP_TEXT;
+		/* a menu left by a jump never fetches menu_next; a wait for a
+		 * click means it is gone (35.MES 0x9df9 stalled seed 41) */
+		menu_active = 0;
 	} else {
 		last_op = OP_OTHER;
 	}
