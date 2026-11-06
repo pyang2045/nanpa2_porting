@@ -4,14 +4,17 @@
  * 32, weights 700, 700, 400; text colour 0xf0f0f0 on 0, opaque), then
  * copies an N x N cell (N = 8 * size + 16: 16, 24, 32) to the primary at
  * (x, y): fg where the scratch is non-zero, bg elsewhere, and clears the
- * scratch. There is no shadow pass. Glyphs come from a TrueType Ming font
- * via stb_truetype, unantialiased like GDI on an 8-bit DC; bold is GDI's
- * 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
+ * scratch. There is no shadow pass. Glyphs come from a Ming font: its
+ * embedded bitmap strike when it has one for the size (EBLC/EBDT, or Apple's
+ * bloc/bdat; MingLiU and Apple LiSung have hand-made strikes), otherwise its
+ * outline through stb_truetype, unantialiased like GDI on an 8-bit DC; bold
+ * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
 #include "hle.h"
 
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
@@ -23,21 +26,43 @@
 __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *s,
 							 int n, wchar_t *w, int wn);
 #else
+#include <dirent.h>
 #include <iconv.h>
 #endif
 
 #define MAX_FONTS 8
-#define INK 110 /* coverage threshold: GDI draws 8-bit DCs without antialiasing */
 #define MAX_DC 16
 
-static stbtt_fontinfo font;
-static unsigned char *font_data;
-static int have_font;
+/* Outline rasterization. A plain coverage threshold (INK) of an unhinted Ming
+ * outline at 15 px gives strokes of 1 or 2 pixels at random and breaks or
+ * merges the thin horizontals, which GDI's emboldening then turns into
+ * blots. Instead a pixel is ink when its coverage is at least INK_HI, or at
+ * least INK_LO and a ridge (a local maximum across the stroke, horizontally
+ * or vertically): each stroke comes out one pixel wide, like a hand-made
+ * bitmap. NANPA2_TEXT=threshold restores the plain threshold and
+ * NANPA2_TEXT=outline ignores bitmap strikes. */
+#define INK 110
+#define INK_LO 64
+#define INK_HI 192
+
+/* faces[0] is the font; faces[1] a fallback for the characters it lacks
+ * (Apple LiSung has no kana and no ～, U+FF5E from Big5 A1E3) */
+#define MAX_FACES 2
+static struct face {
+	stbtt_fontinfo info;
+	unsigned char *data;
+	size_t size;
+	uint32_t loc, dat; /* embedded bitmap location and data tables (offsets into data), 0: none */
+	char path[1024];
+	int base[MAX_FONTS];   /* baseline row in the cell, 0: not computed yet */
+	int strike[MAX_FONTS]; /* BitmapSize record (offset into data), 0: none, -1: not looked up */
+} faces[MAX_FACES];
+static int nfaces;
+static int raster_threshold, no_strikes;
 
 static struct {
 	int height; /* em height in pixels (CreateFontA with negative height) */
 	int bold;
-	int base;   /* baseline row in the cell, 0: not computed yet */
 } fonts[MAX_FONTS];
 static int nfonts;
 
@@ -47,29 +72,69 @@ static struct {
 	int opaque;
 } dcs[MAX_DC];
 
+/* Apple LiSung Light (Dynalab's Ming, the foundry of MingLiU) is a macOS font
+ * downloaded on demand to <asset dir>/<hash>.asset/AssetData; it has 1-bit
+ * strikes at 9, 12, 16 and 24 pixels. */
+static const char *const asset_dirs[] = {
+	"/System/Library/AssetsV2/com_apple_MobileAsset_Font8",
+	"/System/Library/AssetsV2/com_apple_MobileAsset_Font7",
+	"/System/Library/AssetsV2/com_apple_MobileAsset_Font9",
+	NULL,
+};
+
+/* '@': a file name looked up in asset_dirs */
 static const char *const font_candidates[] = {
+	"C:\\Windows\\Fonts\\mingliu.ttc",
+	"/Library/Fonts/AppleLiSung-Light.ttf",
+	"@AppleLiSung-Light.ttf",
 	"/System/Library/Fonts/Supplemental/Songti.ttc",
 	"/Library/Fonts/Songti.ttc",
 	"/usr/share/fonts/truetype/arphic/uming.ttc",
 	"/usr/share/fonts/arphic-uming/uming.ttc",
 	"/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
 	"/usr/share/fonts/noto-cjk/NotoSerifCJK-Regular.ttc",
-	"C:\\Windows\\Fonts\\mingliu.ttc",
 	NULL,
 };
 
+/* A face's full name (name ID 4, Windows Unicode or Mac Roman) as ASCII. */
+static void face_name(const stbtt_fontinfo *fi, char *out, int n)
+{
+	int len, k = 0;
+	const char *s = stbtt_GetFontNameString(fi, &len, STBTT_PLATFORM_ID_MICROSOFT, STBTT_MS_EID_UNICODE_BMP,
+						STBTT_MS_LANG_ENGLISH, 4);
+	if (s) {
+		for (int i = 1; i < len && k < n - 1; i += 2)
+			out[k++] = s[i - 1] ? '?' : s[i];
+	} else if ((s = stbtt_GetFontNameString(fi, &len, STBTT_PLATFORM_ID_MAC, 0, 0, 4))) {
+		for (int i = 0; i < len && k < n - 1; i++)
+			out[k++] = s[i];
+	}
+	out[k] = 0;
+}
+
+/* Load the font file path as faces[nfaces]. */
 static int load_font(const char *path)
 {
+	if (nfaces >= MAX_FACES)
+		return 0;
+	for (int i = 0; i < nfaces; i++)
+		if (!strcmp(faces[i].path, path))
+			return 0;
 	size_t n;
 	void *d = SDL_LoadFile(path, &n);
 	if (!d)
 		return 0;
-	/* pick the first face of a collection that covers Traditional-only
-	 * characters (時 張 麼 聲 噹); name matching misses Songti TC */
+	/* Of the faces that cover Traditional-only characters (時 張 麼 聲 噹),
+	 * take a Traditional Chinese one ("TC" or "HK" in the name: SC faces
+	 * cover them too, with mainland glyph forms elsewhere) of regular weight
+	 * (OS/2 usWeightClass nearest 400: MingLiU is a light Ming, and bold
+	 * fonts get GDI's emboldening on top). The first covering face of
+	 * Songti.ttc is Songti SC Bold. */
 	static const int probe[] = { 0x6642, 0x5f35, 0x9ebc, 0x8072, 0x5679 };
-	int off = -1;
+	int off = -1, best = 1 << 30;
+	char best_name[64] = "";
 	int nf = stbtt_GetNumberOfFonts(d);
-	for (int i = 0; i < (nf > 0 ? nf : 1) && off < 0; i++) {
+	for (int i = 0; i < (nf > 0 ? nf : 1); i++) {
 		int o = stbtt_GetFontOffsetForIndex(d, i);
 		stbtt_fontinfo fi;
 		if (o < 0 || !stbtt_InitFont(&fi, d, o))
@@ -77,28 +142,100 @@ static int load_font(const char *path)
 		int ok = 1;
 		for (size_t k = 0; k < sizeof probe / sizeof probe[0]; k++)
 			ok &= stbtt_FindGlyphIndex(&fi, probe[k]) != 0;
-		if (ok)
+		if (!ok)
+			continue;
+		char nm[64];
+		face_name(&fi, nm, sizeof nm);
+		stbtt_uint32 os2 = stbtt__find_table(d, (stbtt_uint32)o, "OS/2");
+		int weight = os2 && os2 + 6 <= n ? ttUSHORT((unsigned char *)d + os2 + 4) : 400;
+		int score = (strstr(nm, " TC") || strstr(nm, " HK") ? 0 : strstr(nm, " SC") ? 2000 : 1000) +
+			    abs(weight - 400);
+		if (score < best) {
+			best = score;
 			off = o;
+			snprintf(best_name, sizeof best_name, "%s", nm);
+		}
 	}
-	if (off < 0 || !stbtt_InitFont(&font, d, off)) {
+	struct face *f = &faces[nfaces];
+	if (off < 0 || !stbtt_InitFont(&f->info, d, off)) {
 		SDL_free(d);
 		return 0;
 	}
-	font_data = d;
-	have_font = 1;
-	SDL_Log("Font: %s", path);
+	f->data = d;
+	f->size = n;
+	snprintf(f->path, sizeof f->path, "%s", path);
+	f->loc = stbtt__find_table(d, (stbtt_uint32)off, "EBLC");
+	f->dat = stbtt__find_table(d, (stbtt_uint32)off, "EBDT");
+	if (!f->loc || !f->dat) {
+		f->loc = stbtt__find_table(d, (stbtt_uint32)off, "bloc");
+		f->dat = stbtt__find_table(d, (stbtt_uint32)off, "bdat");
+	}
+	if (!f->loc || !f->dat || f->loc + 8 > n)
+		f->loc = f->dat = 0;
+	for (int i = 0; i < MAX_FONTS; i++)
+		f->strike[i] = -1;
+	SDL_Log("Font%s: %s (%s%s)", nfaces ? " (fallback)" : "", path, best_name, f->loc ? ", bitmap strikes" : "");
+	nfaces++;
 	return 1;
+}
+
+#ifndef _WIN32
+/* The font file name in one of asset_dirs' assets. */
+static int load_asset_font(const char *name)
+{
+	for (int i = 0; asset_dirs[i]; i++) {
+		DIR *dir = opendir(asset_dirs[i]);
+		if (!dir)
+			continue;
+		struct dirent *e;
+		int ok = 0;
+		while (!ok && (e = readdir(dir))) {
+			if (e->d_name[0] == '.')
+				continue;
+			char path[1024];
+			snprintf(path, sizeof path, "%s/%s/AssetData/%s", asset_dirs[i], e->d_name, name);
+			FILE *f = fopen(path, "rb");
+			if (f) {
+				fclose(f);
+				ok = load_font(path);
+			}
+		}
+		closedir(dir);
+		if (ok)
+			return 1;
+	}
+	return 0;
+}
+#endif
+
+/* The first loadable candidate not loaded yet. */
+static int load_candidate(void)
+{
+	for (int i = 0; font_candidates[i]; i++) {
+		if (font_candidates[i][0] == '@') {
+#ifndef _WIN32
+			if (load_asset_font(font_candidates[i] + 1))
+				return 1;
+#endif
+			continue;
+		}
+		if (load_font(font_candidates[i]))
+			return 1;
+	}
+	return 0;
 }
 
 int text_init(const char *font_path)
 {
-	if (font_path && load_font(font_path))
-		return 1;
-	for (int i = 0; font_candidates[i]; i++)
-		if (load_font(font_candidates[i]))
-			return 1;
-	SDL_Log("no CJK font found; text will be blank (use --font)");
-	return 0;
+	const char *mode = getenv("NANPA2_TEXT");
+	raster_threshold = mode && strstr(mode, "threshold");
+	no_strikes = mode && strstr(mode, "outline");
+	if (!(font_path && load_font(font_path)) && !load_candidate()) {
+		SDL_Log("no CJK font found; text will be blank (use --font)");
+		return 0;
+	}
+	load_candidate(); /* the fallback */
+	return 1;
 }
 
 uint32_t text_create_font(int height, int weight)
@@ -165,16 +302,179 @@ static uint32_t big5_to_ucs(const unsigned char *s, int len)
 #endif
 }
 
-/* Thresholded ink rows of a glyph relative to the baseline. */
+/* The face text_out is drawing from (set there; the helpers below read it). */
+static struct face *F;
+
+/* ---- embedded bitmap strikes (OpenType EBLC/EBDT, Apple bloc/bdat) ---- */
+
+static int in_font(uint32_t o, uint32_t len)
+{
+	return o <= F->size && len <= F->size - o;
+}
+
+static uint32_t be32(uint32_t o)
+{
+	return in_font(o, 4) ? ttULONG(F->data + o) : 0;
+}
+
+static unsigned be16(uint32_t o)
+{
+	return in_font(o, 2) ? ttUSHORT(F->data + o) : 0;
+}
+
+/* The BitmapSize record of the 1-bit strike of ppem pixels, 0 if none. */
+static int find_strike(int ppem)
+{
+	uint32_t n = be32(F->loc + 4);
+	for (uint32_t i = 0; i < n && i < 256; i++) {
+		uint32_t r = F->loc + 8 + 48 * i;
+		if (!in_font(r, 48))
+			break;
+		if (F->data[r + 45] == ppem && F->data[r + 46] == 1)
+			return (int)r;
+	}
+	return 0;
+}
+
+struct sbit {
+	int w, h, bx, by, adv; /* bearings from the pen position on the baseline, y up */
+	uint32_t bits;          /* image data offset */
+	int byte_aligned;       /* rows padded to bytes (image formats 1, 6) */
+};
+
+static void sbit_metrics(uint32_t o, struct sbit *g)
+{
+	g->h = F->data[o];
+	g->w = F->data[o + 1];
+	g->bx = (signed char)F->data[o + 2];
+	g->by = (signed char)F->data[o + 3];
+	g->adv = F->data[o + 4];
+}
+
+/* Glyph gid of the strike at record r: index subtable formats 1-5, image
+ * formats 1, 2, 5, 6, 7 (Apple LiSung: 1+6 and 2+5). */
+static int sbit_glyph(uint32_t r, int gid, struct sbit *g)
+{
+	if (gid < (int)be16(r + 40) || gid > (int)be16(r + 42))
+		return 0;
+	uint32_t arr = F->loc + be32(r), nsub = be32(r + 8);
+	for (uint32_t k = 0; k < nsub && in_font(arr + 8 * k, 8); k++) {
+		uint32_t e = arr + 8 * k;
+		int first = (int)be16(e), last = (int)be16(e + 2);
+		if (gid < first || gid > last)
+			continue;
+		uint32_t st = arr + be32(e + 4);
+		unsigned ifmt = be16(st), imfmt = be16(st + 2);
+		uint32_t base = F->dat + be32(st + 4), off = 0;
+		int i = gid - first, have_met = 0;
+		switch (ifmt) {
+		case 1: {
+			uint32_t o0 = be32(st + 8 + 4 * i), o1 = be32(st + 12 + 4 * i);
+			if (o1 <= o0)
+				return 0;
+			off = base + o0;
+			break;
+		}
+		case 3: {
+			uint32_t o0 = be16(st + 8 + 2 * i), o1 = be16(st + 10 + 2 * i);
+			if (o1 <= o0)
+				return 0;
+			off = base + o0;
+			break;
+		}
+		case 2:
+			if (!in_font(st + 12, 8))
+				return 0;
+			off = base + be32(st + 8) * (uint32_t)i;
+			sbit_metrics(st + 12, g);
+			have_met = 1;
+			break;
+		case 4: {
+			uint32_t ng = be32(st + 8), j;
+			for (j = 0; j < ng && be16(st + 12 + 4 * j) != (unsigned)gid; j++)
+				;
+			if (j >= ng || be16(st + 18 + 4 * j) <= be16(st + 14 + 4 * j))
+				return 0;
+			off = base + be16(st + 14 + 4 * j);
+			break;
+		}
+		case 5: {
+			uint32_t ng = be32(st + 20), j;
+			for (j = 0; j < ng && be16(st + 24 + 2 * j) != (unsigned)gid; j++)
+				;
+			if (j >= ng || !in_font(st + 12, 8))
+				return 0;
+			off = base + be32(st + 8) * j;
+			sbit_metrics(st + 12, g);
+			have_met = 1;
+			break;
+		}
+		default:
+			return 0;
+		}
+		if (imfmt == 1 || imfmt == 2) {
+			if (!in_font(off, 5))
+				return 0;
+			sbit_metrics(off, g);
+			off += 5;
+		} else if (imfmt == 6 || imfmt == 7) {
+			if (!in_font(off, 8))
+				return 0;
+			sbit_metrics(off, g);
+			off += 8;
+		} else if (imfmt != 5 || !have_met) {
+			return 0;
+		}
+		g->bits = off;
+		g->byte_aligned = imfmt == 1 || imfmt == 6;
+		uint32_t bytes = g->byte_aligned ? (uint32_t)((g->w + 7) / 8 * g->h) : (uint32_t)((g->w * g->h + 7) / 8);
+		return in_font(off, bytes);
+	}
+	return 0;
+}
+
+static int sbit_pixel(const struct sbit *g, int x, int y)
+{
+	uint32_t i = g->byte_aligned ? (uint32_t)(y * ((g->w + 7) / 8) * 8 + x) : (uint32_t)(y * g->w + x);
+	return F->data[g->bits + i / 8] >> (7 - i % 8) & 1;
+}
+
+/* ---- outlines ---- */
+
+/* Coverage (w x h) to ink in place: 1 ink, 0 paper (see INK_LO). */
+static void ink_mask(unsigned char *bm, int w, int h)
+{
+	unsigned char *c = malloc((size_t)w * (size_t)h);
+	if (!c)
+		return;
+	memcpy(c, bm, (size_t)w * (size_t)h);
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++) {
+			int v = c[y * w + x];
+			int ink;
+			if (raster_threshold) {
+				ink = v >= INK;
+			} else {
+				int l = x > 0 ? c[y * w + x - 1] : 0, r = x < w - 1 ? c[y * w + x + 1] : 0;
+				int u = y > 0 ? c[(y - 1) * w + x] : 0, d = y < h - 1 ? c[(y + 1) * w + x] : 0;
+				ink = v >= INK_HI || (v >= INK_LO && ((v >= l && v > r) || (v >= u && v > d)));
+			}
+			bm[y * w + x] = (unsigned char)ink;
+		}
+	free(c);
+}
+
+/* Ink rows of a glyph relative to the baseline. */
 static void ink_rows(float scale, int ch, int *top, int *bot)
 {
 	int w, h, xo, yo;
-	unsigned char *bm = stbtt_GetCodepointBitmap(&font, scale, scale, ch, &w, &h, &xo, &yo);
+	unsigned char *bm = stbtt_GetCodepointBitmap(&F->info, scale, scale, ch, &w, &h, &xo, &yo);
 	if (!bm)
 		return;
+	ink_mask(bm, w, h);
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++)
-			if (bm[y * w + x] >= INK) {
+			if (bm[y * w + x]) {
 				if (yo + y < *top) *top = yo + y;
 				if (yo + y > *bot) *bot = yo + y;
 			}
@@ -189,10 +489,10 @@ static void ink_rows(float scale, int ch, int *top, int *bot)
  * em, so at 32 px they would lose their bottom row). */
 static int baseline(int em)
 {
-	float scale = stbtt_ScaleForMappingEmToPixels(&font, (float)em);
+	float scale = stbtt_ScaleForMappingEmToPixels(&F->info, (float)em);
 	int asc, desc, gap;
-	if (!stbtt_GetFontVMetricsOS2(&font, &asc, &desc, &gap))
-		stbtt_GetFontVMetrics(&font, &asc, &desc, &gap);
+	if (!stbtt_GetFontVMetricsOS2(&F->info, &asc, &desc, &gap))
+		stbtt_GetFontVMetrics(&F->info, &asc, &desc, &gap);
 	int base = (int)(asc * scale + 0.5f);
 	int cell = (em + 7) & ~7;
 	static const int probe[] = { 0x570b, 0x9ad4, 0x8072, 0x9f8d, 0x53e3, 0x76ee, 0x9b31 };
@@ -206,6 +506,18 @@ static int baseline(int em)
 	return base;
 }
 
+/* The strike for an em-high font: one of em pixels (GDI's choice), else one
+ * of the cell size (Apple LiSung has 16 for MingLiU's 15: its ideographs
+ * span columns 1-14 and rows 0-15 of 16, so the emboldened glyph fits the
+ * 16-pixel cell of 0x401900). */
+static int strike_for(int em)
+{
+	if (!F->loc || no_strikes)
+		return 0;
+	int r = find_strike(em);
+	return r ? r : find_strike((em + 7) & ~7);
+}
+
 void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 {
 	int di = dc_index(hdc);
@@ -215,12 +527,23 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 		return;
 	unsigned char s[2] = { (unsigned char)rd8(str), len > 1 ? (unsigned char)rd8(str + 1) : 0 };
 	uint32_t ch = big5_to_ucs(s, len > 1 ? 2 : 1);
-	if (getenv("NANPA2_LOG") && (ch == 0x3000 || (have_font && !stbtt_FindGlyphIndex(&font, (int)ch))))
+	/* the first face that has the character */
+	int have_font = nfaces > 0;
+	F = &faces[0];
+	for (int i = 0; i < nfaces; i++)
+		if (stbtt_FindGlyphIndex(&faces[i].info, (int)ch)) {
+			F = &faces[i];
+			break;
+		}
+	if (getenv("NANPA2_LOG") && (ch == 0x3000 || (have_font && !stbtt_FindGlyphIndex(&F->info, (int)ch))))
 		fprintf(stderr, "text: %02x %02x len %d -> U+%04X (missing)\n", s[0], s[1], len, ch);
-	int em = fonts[dcs[di].font].height, bold = fonts[dcs[di].font].bold;
-	if (have_font && !fonts[dcs[di].font].base)
-		fonts[dcs[di].font].base = baseline(em);
-	int base = fonts[dcs[di].font].base;
+	int fi = dcs[di].font;
+	int em = fonts[fi].height, bold = fonts[fi].bold;
+	if (have_font && !F->base[fi])
+		F->base[fi] = baseline(em);
+	if (have_font && F->strike[fi] < 0)
+		F->strike[fi] = strike_for(em);
+	int base = F->base[fi], strike = have_font ? F->strike[fi] : 0;
 	/* GDI uses palette indices on an 8-bit DC; the native caller only tests
 	 * for zero, so map any non-black colour to 0xff */
 	uint32_t fg = dcs[di].fg ? 0xff : 0, bg = dcs[di].bg ? 0xff : 0;
@@ -234,9 +557,29 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 	if (!have_font || ch == ' ' || ch == 0x3000)
 		return;
 
-	float scale = stbtt_ScaleForMappingEmToPixels(&font, (float)em);
+	/* bitmap strike; proportional Latin wider than the half-width cell
+	 * goes through the narrowed outline below */
+	struct sbit sb;
+	if (strike > 0 && sbit_glyph((uint32_t)strike, stbtt_FindGlyphIndex(&F->info, (int)ch), &sb) &&
+	    (len > 1 || sb.adv <= cell_w)) {
+		int sbase = (signed char)F->data[strike + 16]; /* hori.ascender */
+		int gx = x + (cell_w - sb.adv) / 2 + sb.bx, gy = y + sbase - sb.by;
+		for (int yy = 0; yy < sb.h; yy++)
+			for (int xx = 0; xx < sb.w; xx++) {
+				if (!sbit_pixel(&sb, xx, yy))
+					continue;
+				for (int b = 0; b <= bold; b++) {
+					int px = gx + xx + b, py = gy + yy;
+					if (px >= 0 && px < sw && py >= 0 && py < sh)
+						wr8(pixels + (uint32_t)(py * pitch + px), fg);
+				}
+			}
+		return;
+	}
+
+	float scale = stbtt_ScaleForMappingEmToPixels(&F->info, (float)em);
 	int adv, lsb;
-	stbtt_GetCodepointHMetrics(&font, (int)ch, &adv, &lsb);
+	stbtt_GetCodepointHMetrics(&F->info, (int)ch, &adv, &lsb);
 	/* MingLiU's ASCII is fixed half-width; Songti's Latin is proportional
 	 * and wider, so narrow it to the half-width cell (the next character's
 	 * cell would cover the overhang: 0x401900 copies whole cells) */
@@ -244,14 +587,15 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 	if (len == 1 && adv * scale > cell_w)
 		sx = cell_w / (float)adv;
 	int gw, gh, xo, yo;
-	unsigned char *bm = stbtt_GetCodepointBitmap(&font, sx, scale, (int)ch, &gw, &gh, &xo, &yo);
+	unsigned char *bm = stbtt_GetCodepointBitmap(&F->info, sx, scale, (int)ch, &gw, &gh, &xo, &yo);
 	if (!bm)
 		return;
+	ink_mask(bm, gw, gh);
 	int gx = x + (cell_w - (int)(adv * sx + 0.5f)) / 2 + xo;
 	int gy = y + base + yo;
 	for (int yy = 0; yy < gh; yy++)
 		for (int xx = 0; xx < gw; xx++) {
-			if (bm[yy * gw + xx] < INK)
+			if (!bm[yy * gw + xx])
 				continue;
 			for (int b = 0; b <= bold; b++) {
 				int px = gx + xx + b, py = gy + yy;
