@@ -414,4 +414,7 @@ code change.
 - Checked: Prologue frames before/after (LiSung strike; Songti TC Regular with `--font`),
   `NANPA2_LOG=1` shows no missing glyphs; ctest selftest, selftest_dir, wavcheck pass, smoke
   skipped (screen locked). The name-entry grid is a picture, not text, and did not change.
-  Not checked: the 24 and 32 px fonts on screen (not reached in the Prologue).
+  Not checked: the 24 and 32 px fonts on screen (not reached in the Prologue). Offline
+  renders of the same glyph strip at 32 px showed ridge strokes too thin for the 32 px
+  weight-400 font (no bold, no LiSung strike), so outlines from em 28 up keep the plain
+  threshold (`RIDGE_MAX_EM`, follow-up commit).

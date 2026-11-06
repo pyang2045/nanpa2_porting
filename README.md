@@ -50,8 +50,8 @@ there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the 
 The game draws its text in MingLiU (細明體) at 15, 24 and 32 pixels. The port reads a font
 installed on the system (none is shipped): `--font PATH` (any TrueType file or collection,
 e.g. a copy of `mingliu.ttc`), else Apple LiSung Light, a Ming font with hand-made 16 and 24
-pixel bitmaps that macOS downloads on demand (Font Book: search "LiSung" and choose
-Download), else Songti TC Regular, drawn from its outline. The log line `Font:` names the
+pixel bitmaps that macOS downloads on demand (it is listed in Font Book before it is
+downloaded), else Songti TC Regular, drawn from its outline. The log line `Font:` names the
 choice; a second font fills in characters the first lacks (LiSung has no kana or ～).
 `NANPA2_TEXT=outline` ignores bitmaps and `NANPA2_TEXT=threshold` restores the old plain
 outline threshold, for comparison.

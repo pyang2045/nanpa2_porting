@@ -39,11 +39,14 @@ __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigne
  * blots. Instead a pixel is ink when its coverage is at least INK_HI, or at
  * least INK_LO and a ridge (a local maximum across the stroke, horizontally
  * or vertically): each stroke comes out one pixel wide, like a hand-made
- * bitmap. NANPA2_TEXT=threshold restores the plain threshold and
+ * bitmap. From RIDGE_MAX_EM up (the 32 px weight-400 font, drawn without
+ * the bold) stems are about 2 pixels and the plain threshold keeps them.
+ * NANPA2_TEXT=threshold restores the plain threshold everywhere and
  * NANPA2_TEXT=outline ignores bitmap strikes. */
 #define INK 110
 #define INK_LO 64
 #define INK_HI 192
+#define RIDGE_MAX_EM 28
 
 /* faces[0] is the font; faces[1] a fallback for the characters it lacks
  * (Apple LiSung has no kana and no ～, U+FF5E from Big5 A1E3) */
@@ -442,7 +445,7 @@ static int sbit_pixel(const struct sbit *g, int x, int y)
 /* ---- outlines ---- */
 
 /* Coverage (w x h) to ink in place: 1 ink, 0 paper (see INK_LO). */
-static void ink_mask(unsigned char *bm, int w, int h)
+static void ink_mask(unsigned char *bm, int w, int h, int em)
 {
 	unsigned char *c = malloc((size_t)w * (size_t)h);
 	if (!c)
@@ -452,7 +455,7 @@ static void ink_mask(unsigned char *bm, int w, int h)
 		for (int x = 0; x < w; x++) {
 			int v = c[y * w + x];
 			int ink;
-			if (raster_threshold) {
+			if (raster_threshold || em >= RIDGE_MAX_EM) {
 				ink = v >= INK;
 			} else {
 				int l = x > 0 ? c[y * w + x - 1] : 0, r = x < w - 1 ? c[y * w + x + 1] : 0;
@@ -465,13 +468,13 @@ static void ink_mask(unsigned char *bm, int w, int h)
 }
 
 /* Ink rows of a glyph relative to the baseline. */
-static void ink_rows(float scale, int ch, int *top, int *bot)
+static void ink_rows(float scale, int em, int ch, int *top, int *bot)
 {
 	int w, h, xo, yo;
 	unsigned char *bm = stbtt_GetCodepointBitmap(&F->info, scale, scale, ch, &w, &h, &xo, &yo);
 	if (!bm)
 		return;
-	ink_mask(bm, w, h);
+	ink_mask(bm, w, h, em);
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++)
 			if (bm[y * w + x]) {
@@ -498,7 +501,7 @@ static int baseline(int em)
 	static const int probe[] = { 0x570b, 0x9ad4, 0x8072, 0x9f8d, 0x53e3, 0x76ee, 0x9b31 };
 	int top = 0, bot = 0;
 	for (size_t i = 0; i < sizeof probe / sizeof probe[0]; i++)
-		ink_rows(scale, probe[i], &top, &bot);
+		ink_rows(scale, em, probe[i], &top, &bot);
 	if (base + bot > cell - 1)
 		base = cell - 1 - bot;
 	if (base + top < 0)
@@ -590,7 +593,7 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 	unsigned char *bm = stbtt_GetCodepointBitmap(&F->info, sx, scale, (int)ch, &gw, &gh, &xo, &yo);
 	if (!bm)
 		return;
-	ink_mask(bm, gw, gh);
+	ink_mask(bm, gw, gh, em);
 	int gx = x + (cell_w - (int)(adv * sx + 0.5f)) / 2 + xo;
 	int gy = y + base + yo;
 	for (int yy = 0; yy < gh; yy++)
