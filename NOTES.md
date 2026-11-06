@@ -388,3 +388,30 @@ code change.
   decodes through `load_wav` and compares frames/rate with the header's data length / byte
   rate; ctest `wavcheck` (tests/wavcheck.py) runs it on synthetic mono, stereo, 11 kHz and
   extra-chunks-before-data files plus one real file of each format. All ok.
+
+## 2026-11-06 (sharper text)
+
+- Report: the Chinese text is not sharp. Cause, from 640x480 headless shots of the Prologue
+  dialogue (MingLiU em 15, weight 700, 16-pixel cells; 0x401900, fonts 0x402620): the glyphs
+  themselves. `load_font` took the first face of Songti.ttc that covers the Traditional
+  probe characters, which is **Songti SC Bold** (face 1), and text.c drew its unhinted
+  outline with a plain coverage threshold (110) and then GDI's 1-pixel bold: bold on bold,
+  strokes of 1 or 2 pixels at random, thin horizontals lost or merged (要 天 報 unreadable).
+- The CRT is secondary: a numpy model of `fs_crt` at 1280x960 shows the old blots stay blots
+  and the new glyphs stay legible through scanlines, grille and glow. The Metal output itself
+  was not captured (screen locked; windowed Metal can hang then), so present_metal.m is
+  unchanged.
+- Fix (29e2243, src/hle/text.c): (1) embedded 1-bit bitmap strikes (EBLC/EBDT, Apple
+  bloc/bdat; index formats 1-5, image formats 1/2/5/6/7) at the em size, else the cell size;
+  Apple LiSung Light, a Dynalab Ming like MingLiU and an on-demand macOS font found under
+  `/System/Library/AssetsV2/com_apple_MobileAsset_Font8`, has hand-made 16 and 24 px
+  strikes and is now the first choice on macOS (MingLiU first on Windows). (2) The face
+  choice prefers TC/HK names and OS/2 weight nearest 400 (Songti TC Regular). (3) Outlines
+  use a ridge rasterizer: ink at coverage >= 192, or >= 64 at a local maximum across the
+  stroke, so strokes are 1 pixel wide before the bold. (4) A second face fills in characters
+  the first lacks (LiSung has no kana and no U+FF5E ～, Big5 A1E3, used in the Prologue).
+  `NANPA2_TEXT=threshold` / `=outline` keep the old raster / skip strikes.
+- Checked: Prologue frames before/after (LiSung strike; Songti TC Regular with `--font`),
+  `NANPA2_LOG=1` shows no missing glyphs; ctest selftest, selftest_dir, wavcheck pass, smoke
+  skipped (screen locked). The name-entry grid is a picture, not text, and did not change.
+  Not checked: the 24 and 32 px fonts on screen (not reached in the Prologue).
