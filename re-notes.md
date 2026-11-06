@@ -147,6 +147,18 @@ negative heights, i.e. em heights 15/24/32, weights 700/700/400, charset CHINESE
 cells are 16/24/32 for ems 15/24/32. ASCII uses the same N x N cell at 8-pixel columns, so a
 glyph wider than 8 pixels is overwritten by the next character's cell.
 
+Port fonts (not game data, read from the system): Apple LiSung Light (`AppleLiSung-Light.ttf`,
+a macOS download under `/System/Library/AssetsV2/com_apple_MobileAsset_Font8/<hash>.asset/
+AssetData/`) has Apple `bloc`/`bdat` tables (same layout as OpenType EBLC/EBDT) with 1-bit
+strikes at 9, 12, 16, 24 ppem; index subtables are format 1 with image format 6 (big
+metrics, byte-aligned rows) and format 2 with image format 5 (bit-aligned, metrics in the
+index). The 16 ppem strike has ascender 13, descender 3; ideographs (advance 16) use columns
+1-14 and rows 0-15, so with the 1-pixel bold they fit the 16-pixel cell of 0x401900. It
+covers 13457 of 13752 CP950 codes; the missing ones are kana, a few symbols and U+FF5E ～
+(Big5 A1E3, frequent in the script). Songti.ttc face order: 0 SC Black, 1 SC Bold, 2 TC
+Bold, 3 SC Light, 4 STSong, 5 TC Light, 6 SC Regular, 7 TC Regular; faces 1-7 cover the
+Traditional-only probe characters.
+
 ## Input (WndProc 0x4021c0)
 
 Button/key state byte `0x445d8f`, set on WM_KEYDOWN/WM_*BUTTONDOWN and cleared on the
