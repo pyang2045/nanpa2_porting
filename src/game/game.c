@@ -240,6 +240,8 @@ static uint32_t compare(const struct game_unit *u)
 	static struct diff_record rec;
 	struct unit_stats *s = &stats[u - game_units];
 	s->calls++;
+	if (getenv("NANPA2_DIFF_TRACE"))
+		fprintf(stderr, "diffcall %08x %s esi %08x\n", u->addr, u->name, cpu.r[ESI]);
 
 	/* the state on entry, as the original sees it (for a called unit the
 	 * return address on top) */

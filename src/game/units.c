@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "game/expr.h"
+#include "game/map.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -14,33 +15,39 @@
  * with AL, so EAX is live there too. */
 #define AFTER_BLOCK (REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
 
-#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0 }
-#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0 }
+#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0, 0 }
+#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0, 0 }
 /* the rest of a handler after a call exit, with `words` pushed before it */
-#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words }
+#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words, 0 }
 /* a handler that calls native routines (src/game/ops_sys.c); native: the
  * cases it leaves to the original handler, or NULL */
-#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0 }
+#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0, 0 }
+
+/* a called unit whose result is AL (the rest of EAX is scratch) */
+#define CALL_AL(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 0, 0, 0xff }
 
 /* a RESUME piece that calls native routines (file loads, 0x403624) */
-#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words }
+#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words, 0 }
 
 /* Stage 4 (src/game/loop.c, text.c, anim.c). Called units that call
  * native routines, or with cases left to the original (native) */
-#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0 }
-#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0 }
+#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0, 0 }
+#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0, 0 }
 /* a piece of the VM loop or of a wait: the words pushed before it, whether
  * a caller reads the flags it leaves (it ends with a `ret`), whether it
  * calls native routines (text drawing, the animation blits), the cases
  * left to the native code */
 #define PIECE(addr, name, fn, scratch, words, flags, sys, native) \
-	{ addr, name, NULL, fn, scratch, flags, native, sys, words }
+	{ addr, name, NULL, fn, scratch, flags, native, sys, words, 0 }
 
 /* Where the fetch dispatches to: handlers (EDX reaches the native map
  * code of 04 26, EAX is the opcode index), the end of a block (`ret` with
  * AL, ECX's and EDX's upper halves), the frame wait (ECX) or the input
  * test (AL). EBX and EDI are dead at all of them. */
 #define AT_FETCH (REG_BIT(EBX) | REG_BIT(EDI))
+
+/* the movers (src/game/map_move.c): AL is the result, ECX, EDX, EBX are scratch */
+#define MAP_MOVER_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX))
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -53,6 +60,28 @@ const struct game_unit game_units[] = {
 	CALL_SYS(0x403661, "anim_run_slot", game_anim_run_slot, 0),
 	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
 	CALL(0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0),
+	/* Stage 5A (src/game/map*.c) */
+	CALL(0x403b28, "map_fill_grid", game_map_fill_grid,
+		REG_BIT(EAX) | REG_BIT(EBX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
+	CALL(0x403bd2, "map_overlay_sprites", game_map_overlay_sprites,
+		REG_BIT(EAX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 0),
+	CALL_SYS(0x403d45, "map_redraw_changed", game_map_redraw_changed,
+		REG_BIT(EAX) | REG_BIT(ESI) | REG_BIT(EDI)),
+	CALL(0x403eff, "map_cell_draw", game_map_cell_draw, 0, 0),
+	CALL(0x4040f0, "map_cell_clear_bit3", game_map_cell_clear_bit3, 0, 0),
+	CALL_NATIVE(0x40431b, "map_sprite_step", game_map_sprite_step, MAP_MOVER_SCRATCH,
+		game_native_sprite_step),
+	CALL_AL(0x404731, "map_move_up", game_map_move_up, MAP_MOVER_SCRATCH),
+	CALL_AL(0x404937, "map_move_down", game_map_move_down, MAP_MOVER_SCRATCH),
+	CALL_AL(0x404a9a, "map_move_left", game_map_move_left, MAP_MOVER_SCRATCH),
+	CALL_AL(0x404c9f, "map_move_right", game_map_move_right, MAP_MOVER_SCRATCH),
+	CALL(0x404f8c, "map_area_trigger", game_map_area_trigger,
+		REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
+	CALL(0x40500e, "map_collision", game_map_collision, REG_BIT(ESI) | REG_BIT(EDI), 0),
+	CALL(0x405691, "map_walk_step", game_map_walk_step,
+		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX), 0),
+	CALL(0x405966, "map_plan_walk", game_map_plan_walk,
+		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 0),
 	PIECE(0x4060d4, "vm_entry", game_vm_entry, AT_LOOP, -1, 0, 1, NULL),
 	PIECE(0x4060f9, "vm_loop", game_vm_loop, 0, 0, 0, 0, NULL),
 	PIECE(0x4060fe, "vm_pumped", game_vm_pumped, AT_FETCH, 0, 0, 1, NULL),
