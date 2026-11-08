@@ -206,17 +206,12 @@ uint32_t game_op_wait_clear(void)
 {
 	cpu.r[EBX] = rd16(VM_TEXT_COLOUR);
 	X86_COUNT(2);
-	uint32_t esp = cpu.r[ESP];
-	push32(X86_RET_SENTINEL);
-	x86_exec(0x406b24); /* clear the text window: draws, no waiting */
-	if (cpu.r[ESP] != esp)
-		x86_trap(0x406b24, "text window clear did not return");
+	game_clear_text_window(); /* 0x406b24: draws, no waiting */
 	return loop_at(0x406607);
 }
 
 /* 16 [n]: wait n/4 + 1 frames (0x4075c6, ECX = n), or with no argument for
- * a click (0x406acc). The code after either call is `jmp 0x4060f9`, left
- * native. */
+ * a click (0x406acc); after either, go on (game_op_delay_done). */
 uint32_t game_op_delay(void)
 {
 	game_parse_args_regs();
@@ -227,6 +222,19 @@ uint32_t game_op_delay(void)
 		return call_exit(WAIT_FRAMES, 0x406abd);
 	}
 	return call_exit(WAIT_CLICK, 0x406ac7);
+}
+
+/* 0x406abd and 0x406ac7: `jmp 0x4060f9` */
+uint32_t game_op_delay_done(void)
+{
+	X86_COUNT(1);
+	return loop_at(0x406abd);
+}
+
+uint32_t game_op_delay_click_done(void)
+{
+	X86_COUNT(1);
+	return loop_at(0x406ac7);
 }
 
 /* ---- calling into the native routines that load files and draw */
@@ -277,7 +285,7 @@ static void movsd(uint32_t n, uint32_t esi, uint32_t edi)
 static uint32_t restart(void)
 {
 	load(MES_NAME, VM_SCRIPT);
-	ncall(0x406dff);
+	game_anim_reset();
 	wr8(CLICK_BUSY, 0);
 	wr16(VM_CLICK_HANDLERS, 0);
 	wr16(VM_CLICK_HANDLERS + 2, 0);
@@ -509,7 +517,6 @@ uint32_t game_op_call_mes_done(void)
 #define MENU_FRAME 0x445e0au /* label 39 */
 #define PUMP 0x401bf0u
 #define INPUT_TEST 0x4074d5u
-#define ANIM_STEP 0x403624u
 
 static const struct menu_input {
 	uint32_t bit, handler, ra_test, ra_block, ra_wait;
@@ -570,7 +577,7 @@ static uint32_t menu_scan(int k)
 static uint32_t menu_wait(int k)
 {
 	if (k == 5)
-		ncall(ANIM_STEP);
+		game_anim_step();
 	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | (uint32_t)k;
 	X86_COUNT(1);
 	return call_exit(INPUT_TEST, menu_inputs[k].ra_wait);
@@ -589,7 +596,7 @@ uint32_t game_op_menu_pumped(void) /* 0x4066bd */
 		X86_COUNT(1);
 		return 0x406393;
 	}
-	ncall(ANIM_STEP);
+	game_anim_step();
 	X86_COUNT(2);
 	if (!rd16(MENU_RUN)) {
 		cpu.r[ESI] = pop32();

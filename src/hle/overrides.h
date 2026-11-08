@@ -125,7 +125,7 @@ HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
 
 /* Handlers that run a block, a script or a wait, split at those calls
  * (src/game/ops_vm.c): each call is a call exit, the code after it a
- * jump unit (16's continuations are `jmp 0x4060f9` and stay native) */
+ * jump unit */
 HLE_GAME_JUMP(0x40659e, "op 0f: if")
 HLE_GAME_JUMP(0x4065ae, "op 0f: after the block of a true condition")
 HLE_GAME_JUMP(0x4065ed, "op 0f: after the else block")
@@ -138,6 +138,8 @@ HLE_GAME_JUMP(0x40666b, "op 13: after the label's block")
 HLE_GAME_JUMP(0x406a9a, "op 14: call offset")
 HLE_GAME_JUMP(0x406aa7, "op 14: after the script")
 HLE_GAME_JUMP(0x406aad, "op 16: wait")
+HLE_GAME_JUMP(0x406abd, "op 16: after the frames")
+HLE_GAME_JUMP(0x406ac7, "op 16: after the click")
 HLE_GAME_JUMP(0x406671, "op 04 13: menu loop")
 HLE_GAME_JUMP(0x4066b8, "op 04 13: round start (pump)")
 HLE_GAME_JUMP(0x4066bd, "op 04 13: after the pump")
@@ -197,6 +199,57 @@ HLE_GAME_CALL_EXIT(0x406822, "op 04 13: run label 37 (0x4061cd)")
 HLE_GAME_CALL_EXIT(0x40683b, "op 04 13: test right again (0x4074d5)")
 HLE_GAME_CALL_EXIT(0x4069f7, "op 15: run the digits as a script (0x4060f9)")
 HLE_GAME_CALL_EXIT(0x40704a, "op 04 1f: run the called file (0x4060f9)")
+
+/* Stage 4: the text, the animation slots and the palette copy
+ * (src/game/text.c, anim.c); 0x403510 leaves sub-op 4 (run a slot to its
+ * end, spinning on the frame counter) to the original */
+HLE_GAME_OVERRIDE(0x401900, "draw one character (src/game/text.c)")
+HLE_GAME_OVERRIDE(0x403510, "animation slot control (src/game/anim.c)")
+HLE_GAME_OVERRIDE(0x403624, "animation step, once a frame (src/game/anim.c)")
+HLE_GAME_OVERRIDE(0x403661, "run one animation slot (src/game/anim.c)")
+HLE_GAME_OVERRIDE(0x4063ee, "text cursor advance (src/game/text.c)")
+HLE_GAME_OVERRIDE(0x406b24, "clear the text window (src/game/text.c)")
+HLE_GAME_OVERRIDE(0x406dff, "reset the animation slots (src/game/anim.c)")
+HLE_GAME_OVERRIDE(0x40752c, "copy a picture palette (src/game/anim.c)")
+
+/* Stage 4: the VM loop and the waits (src/game/loop.c), split at the calls
+ * that pump messages, wait or run a block like the handlers above. They
+ * are entered by call too (0x4060d4 from WinMain, 0x4061cd, 0x4074d5,
+ * 0x4075c6 and 0x406acc from the handlers): recomp.py sends such calls
+ * through dispatch. The click handler path after 0x406124/0x406134
+ * (0x40613f-0x40616c) stays native with ext 20. */
+HLE_GAME_JUMP(0x4060d4, "VM entry: set up, load the MES file")
+HLE_GAME_JUMP(0x4060f9, "VM loop head (pump)")
+HLE_GAME_JUMP(0x4060fe, "VM loop: after the pump, animate, test the left button or fetch")
+HLE_GAME_JUMP(0x406124, "VM loop: after testing the left button")
+HLE_GAME_JUMP(0x406134, "VM loop: after testing the right button")
+HLE_GAME_JUMP(0x4061c2, "VM: after a block, skip it")
+HLE_GAME_JUMP(0x4061cd, "VM: run a block (nested loop)")
+HLE_GAME_JUMP(0x4061d3, "VM: return from a block")
+HLE_GAME_JUMP(0x406315, "VM text: after an ASCII character, the next")
+HLE_GAME_JUMP(0x406383, "VM text: after a Big5 character")
+HLE_GAME_JUMP(0x4074d5, "input test: pump")
+HLE_GAME_JUMP(0x4074db, "input test: after the pump, test the input")
+HLE_GAME_JUMP(0x4075c6, "frame wait: pump")
+HLE_GAME_JUMP(0x4075d7, "frame wait: after the pump, animate, wait on")
+HLE_GAME_JUMP(0x406acc, "click wait: Ctrl, or a frame")
+HLE_GAME_JUMP(0x406adf, "click wait: after the frame, test")
+HLE_GAME_JUMP(0x406ae6, "click wait: after the test")
+HLE_GAME_JUMP(0x406afb, "click wait for the release: after the frame, test")
+HLE_GAME_JUMP(0x406b02, "click wait for the release: after the test")
+HLE_GAME_CALL_EXIT(0x4060fe, "VM loop: pump messages (0x401bf0)")
+HLE_GAME_CALL_EXIT(0x406124, "VM loop: test the left button (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406134, "VM loop: test the right button (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x4061c2, "VM: run the block at an 01 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4061d3, "VM: the block as a nested loop (0x4060f9)")
+HLE_GAME_CALL_EXIT(0x406315, "VM text: the character delay (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x406383, "VM text: the Big5 character delay (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x4074db, "input test: pump messages (0x401bf0)")
+HLE_GAME_CALL_EXIT(0x4075d7, "frame wait: pump messages (0x401bf0)")
+HLE_GAME_CALL_EXIT(0x406adf, "click wait: a frame (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x406ae6, "click wait: test the button (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406afb, "click wait for the release: a frame (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x406b02, "click wait for the release: test (0x4074d5)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the

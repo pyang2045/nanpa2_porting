@@ -25,14 +25,47 @@
 /* a RESUME piece that calls native routines (file loads, 0x403624) */
 #define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words }
 
+/* Stage 4 (src/game/loop.c, text.c, anim.c). Called units that call
+ * native routines, or with cases left to the original (native) */
+#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0 }
+#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0 }
+/* a piece of the VM loop or of a wait: the words pushed before it, whether
+ * a caller reads the flags it leaves (it ends with a `ret`), whether it
+ * calls native routines (text drawing, the animation blits), the cases
+ * left to the native code */
+#define PIECE(addr, name, fn, scratch, words, flags, sys, native) \
+	{ addr, name, NULL, fn, scratch, flags, native, sys, words }
+
+/* Where the fetch dispatches to: handlers (EDX reaches the native map
+ * code of 04 26, EAX is the opcode index), the end of a block (`ret` with
+ * AL, ECX's and EDX's upper halves), the frame wait (ECX) or the input
+ * test (AL). EBX and EDI are dead at all of them. */
+#define AT_FETCH (REG_BIT(EBX) | REG_BIT(EDI))
+
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
  * at each function. */
 const struct game_unit game_units[] = {
+	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
+		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
+	CALL_NATIVE(0x403510, "anim_control", game_anim_control_regs, 0, game_native_anim_control),
+	CALL_SYS(0x403624, "anim_step", game_anim_step, 0),
+	CALL_SYS(0x403661, "anim_run_slot", game_anim_run_slot, 0),
 	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
 	CALL(0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0),
+	PIECE(0x4060d4, "vm_entry", game_vm_entry, AT_LOOP, -1, 0, 1, NULL),
+	PIECE(0x4060f9, "vm_loop", game_vm_loop, 0, 0, 0, 0, NULL),
+	PIECE(0x4060fe, "vm_pumped", game_vm_pumped, AT_FETCH, 0, 0, 1, NULL),
+	PIECE(0x406124, "vm_click_tested0", game_vm_click_tested0, AT_FETCH, 0, 0, 1, game_native_click0),
+	PIECE(0x406134, "vm_click_tested1", game_vm_click_tested1, AT_FETCH, 0, 0, 1, game_native_click1),
+	PIECE(0x4061c2, "vm_block_done", game_vm_block_done, AT_LOOP, 1, 0, 0, NULL),
+	PIECE(0x4061cd, "vm_run_block", game_vm_run_block, AT_LOOP, 0, 0, 0, NULL),
+	PIECE(0x4061d3, "vm_block_return", game_vm_block_return, AFTER_BLOCK, 0, 0, 0, NULL),
 	CALL(0x4061d4, "vm_skip_block", game_skip_block_regs, 0, 0),
+	PIECE(0x406315, "vm_string_next", game_vm_string_next, AT_FETCH, 0, 0, 1, NULL),
+	PIECE(0x406383, "vm_big5_next", game_vm_big5_next, AT_LOOP, 0, 0, 0, NULL),
 	CALL(0x406395, "vm_init", game_vm_init_regs, REG_BIT(EAX), 0),
+	CALL(0x4063ee, "text_advance", game_text_advance, 0, 0),
 	CALL(0x406455, "script_set_flag", game_set_flag_regs, 0, 0),
 	JUMP(0x406491, "op_0a_set_flags", game_op_set_flags, AT_LOOP),
 	JUMP(0x4064b5, "op_0b_set_flags_expr", game_op_set_flags_expr, AT_LOOP),
@@ -84,7 +117,15 @@ const struct game_unit game_units[] = {
 	RESUME(0x406aa7, "op_14_call_offset_done", game_op_call_offset_done, AT_LOOP, 1),
 	/* ECX (the frame count) goes into 0x4075c6 */
 	JUMP(0x406aad, "op_16_delay", game_op_delay, AT_LOOP & ~REG_BIT(ECX)),
+	RESUME(0x406abd, "op_16_delay_done", game_op_delay_done, AT_LOOP, 0),
+	RESUME(0x406ac7, "op_16_delay_click_done", game_op_delay_click_done, AT_LOOP, 0),
+	PIECE(0x406acc, "wait_click", game_wait_click, 0, 0, 0, 0, NULL),
+	PIECE(0x406adf, "wait_click_framed", game_wait_click_framed, 0, 0, 0, 0, NULL),
+	PIECE(0x406ae6, "wait_click_tested", game_wait_click_tested, 0, 0, 0, 0, NULL),
+	PIECE(0x406afb, "wait_click_release_framed", game_wait_click_release_framed, 0, 0, 0, 0, NULL),
+	PIECE(0x406b02, "wait_click_release_tested", game_wait_click_release_tested, 0, 0, 0, 0, NULL),
 	JUMP_SYS(0x406b05, "op_17_clear_text", game_op_clear_text, NULL),
+	CALL_SYS(0x406b24, "text_clear_window", game_clear_text_window, 0),
 	JUMP_SYS(0x406b76, "op_0417_fill_rect", game_op_fill_rect, NULL),
 	JUMP_SYS(0x406bcb, "op_0418_xor_rect", game_op_xor_rect, NULL),
 	JUMP_SYS(0x406c20, "op_0419_copy_rect", game_op_copy_rect, NULL),
@@ -92,6 +133,7 @@ const struct game_unit game_units[] = {
 	JUMP_SYS(0x406cea, "op_041b_masked_rect", game_op_masked_rect, NULL),
 	JUMP_SYS(0x406d8b, "op_041c_load_file", game_op_load_file, NULL),
 	CALL(0x406dc4, "vm_string_arg", game_string_arg_regs, 0, 0),
+	CALL(0x406dff, "anim_reset", game_anim_reset, 0, 0),
 	JUMP_SYS(0x406e11, "op_041d_picture", game_op_picture, NULL),
 	JUMP_SYS(0x406f06, "op_0416_palette", game_op_palette, game_native_palette),
 	JUMP_SYS(0x406f7c, "op_041e_jump_mes", game_op_jump_mes, NULL),
@@ -110,6 +152,11 @@ const struct game_unit game_units[] = {
 	JUMP_SYS(0x4073cd, "op_0425_voice", game_op_voice, NULL),
 	JUMP_SYS(0x4073ee, "op_0426_map", game_op_map, game_native_map),
 	CALL(0x40741b, "vm_parse_args", game_parse_args_regs, REG_BIT(EDX), 0),
+	PIECE(0x4074d5, "input_test", game_input_test, 0, 0, 0, 0, NULL),
+	PIECE(0x4074db, "input_tested", game_input_tested, 0, 1, 1, 0, NULL),
+	CALL(0x40752c, "palette_copy", game_palette_copy_regs, 0, 0),
+	PIECE(0x4075c6, "wait_frames", game_wait_frames, 0, 0, 0, 0, NULL),
+	PIECE(0x4075d7, "wait_frames_pumped", game_wait_frames_pumped, 0, 1, 0, 1, NULL),
 };
 const int game_unit_count = (int)(sizeof game_units / sizeof game_units[0]);
 

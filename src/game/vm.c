@@ -208,3 +208,12 @@ void game_parse_args_regs(void)
 	cpu.r[EBX] = VM_ARG_TYPES + n;
 	cpu.r[EDI] = VM_ARG_VALUES + 2 * n;
 }
+
+void game_ncall(uint32_t addr, uint32_t popped)
+{
+	uint32_t esp = cpu.r[ESP] + 4 * popped;
+	push32(X86_RET_SENTINEL);
+	x86_exec(addr);
+	if (cpu.r[ESP] != esp)
+		x86_trap(addr, "native routine called by reimplemented code did not return");
+}
