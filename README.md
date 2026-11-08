@@ -18,10 +18,49 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 ## Build
 
-Needs CMake, a C11 compiler and SDL2 (`brew install sdl2 cmake ninja`).
+The build reads your own `nanpa2.exe` (default `game/nanpa2.exe`, see Game data):
+`tools/recomp.py` lifts its game code to C in the build folder, with Python and capstone. No
+public CI can build it for that reason. The scripts check the tools, name the packages
+when something is missing (they never run `sudo`), and pass `--exe`, `--game-dir`,
+`--build-dir`, `--release` (default) or `--debug`, `--test` (ctest) and `--backend` (passed as
+`-DNANPA2_BACKEND`) through to CMake. Re-running reuses the venv and the build folder.
+
+### macOS (verified)
 
 ```sh
-cmake -S . -B build -G Ninja
+brew install sdl2 cmake ninja python
+tools/build.sh                 # build/nanpa2; creates tools/.venv with capstone on first run
+tools/build.sh --test --app    # plus ctest and build/同級生２.app (this machine only)
+```
+
+### Linux (not built or run yet)
+
+```sh
+sudo apt install build-essential cmake ninja-build pkg-config libsdl2-dev python3 python3-venv
+# Fedora: sudo dnf install gcc cmake ninja-build pkgconf-pkg-config SDL2-devel python3
+tools/build.sh --test
+```
+
+### Windows (not built or run yet)
+
+In an MSYS2 MINGW64 shell (MinGW-w64 GCC; MSVC is unchecked, see Platforms):
+
+```sh
+pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja \
+  mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-python \
+  mingw-w64-x86_64-python-capstone
+tools/build_msys2.sh --test
+```
+
+It builds `nanpa2-port.exe` (a GUI program, so no console; set `NANPA2_LOG_FILE` for the
+log), named so it never replaces the game's own `nanpa2.exe`, and copies it with `SDL2.dll`
+and the MinGW runtime DLLs into `build/dist`. Like the `.app`, it holds code lifted from
+your `nanpa2.exe`: for your machine only, never share it.
+
+### By hand
+
+```sh
+cmake -S . -B build -G Ninja   # -DNANPA2_EXE=... -DNANPA2_PYTHON=... (Python with capstone)
 ninja -C build
 ```
 
@@ -169,7 +208,8 @@ but neither has been built or run. Known points:
   file goes to `%TEMP%`; the viewer lists `DATA\*.GP4` with `_findfirst`; stale status files
   of killed instances are not removed. Unchecked: MSVC (the generated `recomp.c` is plain C11
   with GCC/Clang flags, so MinGW-w64 or clang-cl is the safer bet), non-ASCII paths (the C
-  runtime's `fopen` takes the ANSI code page), no folder picker, and a console window next
-  to the game (the target is not `WIN32_EXECUTABLE`).
+  runtime's `fopen` takes the ANSI code page) and no folder picker. The target is a
+  `WIN32_EXECUTABLE` named `nanpa2-port.exe` (SDL2main supplies WinMain), so no console
+  opens; the log goes to `NANPA2_LOG_FILE`.
 - Both: the presenter is `src/platform/present_sdl.c` (SDL_Renderer); the status file works,
   the smoke test's desktop checks are macOS only.

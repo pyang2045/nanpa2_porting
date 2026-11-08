@@ -455,3 +455,29 @@ code change.
   over_image 1` with the pointer over the image and focus, and `host_shown 1` after the
   window lost focus; ctest smoke, selftest, selftest_dir, wavcheck pass. Not checked by
   eye: fullscreen letterbox (code path only).
+
+## 2026-11-08 (build scripts)
+
+- 09e5ca1: `tools/build.sh` (macOS and Linux, POSIX sh) and `tools/build_msys2.sh` (Windows,
+  MSYS2 MINGW64 shell). Both check the tools and print the packages to install (brew; apt,
+  dnf, pacman; MSYS2 pacman), never run `sudo`, check `--exe` (default `game/nanpa2.exe`)
+  and pass `NANPA2_EXE`, `NANPA2_PYTHON`, `NANPA2_GAME_DIR` (default: the exe's folder) and
+  `CMAKE_BUILD_TYPE` (`--release` default, `--debug`) on every run, so a reused build
+  folder keeps no stale cache values. build.sh creates `tools/.venv` with
+  `capstone>=5.0.1,<6` when its Python cannot import capstone; MSYS2 uses pacman's
+  `mingw-w64-x86_64-python-capstone`. `--backend interp|recomp` goes to `-DNANPA2_BACKEND`
+  (option not in CMake yet: until CMakeLists.txt names it, `--backend` stops with a
+  message, c67a93d); only recomp, or no `--backend`, needs the exe and capstone. When the
+  option lands with interp as default, the no-`--backend` case (`recomp=1`) should follow
+  the CMake default.
+- MSYS2 rather than MSVC: CMakeLists passes GCC/Clang flags and `recomp.c` has only been
+  compiled with Clang. On WIN32 only, the target is `WIN32_EXECUTABLE` (SDL2main gives
+  WinMain; configure fails without SDL2main) and named `nanpa2-port.exe`, so a copy in the
+  game folder can never replace the game's `nanpa2.exe`, which the port reads at run time
+  (src/main.c). `build/dist` gets it plus the DLLs it imports from `/mingw64/bin`, read
+  with `objdump -p` to a fixed point (nothing is run), and a "this machine only" README.
+- Checked on macOS only: a clean build folder with `--test` (fresh venv, capstone 5.0.7;
+  smoke, selftest, selftest_dir, wavcheck pass), `--app` (bundle with libSDL2 and libSDL3,
+  `codesign -v` ok), a re-run is `ninja: no work to do`; a missing exe and a bad
+  `--backend` fail with a message; `sh -n` passes on both (shellcheck not installed).
+  Linux and Windows have not been built or run.

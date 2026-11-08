@@ -76,6 +76,17 @@ endif()
 if(TARGET SDL2::SDL2main)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2main)
 endif()
+# Windows (untested, tools/build_msys2.sh): a GUI program, so no console
+# window opens next to the game (set NANPA2_LOG_FILE for the log); SDL2main
+# supplies WinMain and calls main (src/main.c includes <SDL.h>). Named
+# nanpa2-port.exe so it can never overwrite the game's own nanpa2.exe, which
+# the port reads at run time.
+if(WIN32)
+  if(NOT TARGET SDL2::SDL2main AND NOT SDL2_LIBRARIES MATCHES "SDL2main")
+    message(FATAL_ERROR "SDL2main not found: the GUI program needs it for WinMain")
+  endif()
+  set_target_properties(nanpa2 PROPERTIES WIN32_EXECUTABLE ON OUTPUT_NAME nanpa2-port)
+endif()
 if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
   target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" "-framework CoreGraphics" "-framework CoreFoundation" iconv)
