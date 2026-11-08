@@ -872,3 +872,61 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 - Not done: the dissolve wipe 0x401a50 (op 19 sub-op 4: reached twice in the seed 43 run, so it
   matters; needs pieces with its frame at the native addresses), the click path
   0x40613f-0x40616c, the map (04 26 sub-ops 5, 7, 12, 0x403a70; another agent).
+
+## 2026-11-08 (reimplementation stage 5B, file + input + start-up part)
+
+- f9e5923: `src/game/file.c`: 0x401000 open, 0x401050 load, 0x401160 save as C and as units
+  (CALL_SYS, scratch EAX ECX EDX). The C runtime replacement is called by address through
+  `game_ncall`; the stack locals, the ECX/EDX effects (ECX = buf after a plain read, the path buffer
+  after a retry) and the charges follow the native code. VM entry 102 against 103 instructions,
+  as before. VM entry, ops 04 1c/1d/1e/1f/21 and the picture load call the C directly.
+- 466532a: `src/game/startup.c`: WinMain 0x402090 (jump unit, call exit 0x4021a3 around the
+  script VM, then the shutdown), CD search 0x402590, display/DirectDraw/fonts/timer init 0x402620,
+  shutdown 0x402a20, window procedure 0x4021c0 (called unit, from the HLE pump) with WM_PAINT
+  0x402570. `NANPA2_HLETRACE=1` logs the HLE calls. reimpl_status: 0x401fd0 (the logo's window
+  procedure, installed only by the HLE logo player) is dead.
+- 895c230: merge of the screen part (the other agent's branch); the window procedure calls the C
+  cursor routines. 7f7610f: WaitForVerticalBlank (ddraw.c) does not run the timer while the
+  harness holds it off.
+- Found by the long runs: the first 300k-frame runs gave 12 mismatches `[0x446292] want N got
+  N-1` in the window procedure: its repaint waits for the vertical blank, which runs the host
+  timer; a tick landed in one of the two runs of the comparison. Also found while writing it: the
+  harness flags a read of any argument the original does not read (read each message argument
+  only where the original does), and ECX's upper half is live (ECX ends as the original leaves it
+  on each message path). A units table out of address order (binary search) made 0x401900
+  "no HLE".
+- Start-up is not compared by the harness (window, DirectDraw, palette and timer creation cannot
+  be done twice; `uncompared()` in game.c). Checks: the HLE call trace of the first 250 calls
+  (start-up and the first VM frames) equals the original's except for the lines of the units
+  that replace native code and junk in unused argument slots; every run reaches the title and
+  the game on the C start-up; the native counter shows no start-up routine.
+- Sabotage: MOUSE_X written + 1 in the window procedure: 414 of 688 calls mismatched
+  (reverted).
+- Pacing (diff report, native against reimpl insns per call): window procedure 2758.7 / 2760.5
+  (seed 31, 25379 calls, mostly the cursor draw), 2939.6 / 2941.4 (seed 33); VM entry 103 / 102;
+  op 04 1c 331463.7 / 331452.5; op 04 1e 266 / 258; op 04 21 164 / 156 (the rest is the
+  handlers' own charges, as in stage 4).
+- Not compared as units: 0x401000/0x401050/0x401160 (called directly by the C, compared inside
+  their callers: 04 1c, 1d, 1e, 1f, 21 and the VM entry), WinMain's two pieces (above).
+- ctest 9/9 on interp and on recomp builds.
+- Results (interp builds poison + diff, headless; recomp one diff run, one lockstep run), all on
+  7f7610f: 0 mismatches, no trap, no watchdog warning, exit 0:
+
+  | Build | Seed (start) | Turbo | Frames | Reached |
+  |---|---|---|---|---|
+  | interp | 31 (new game) | 8 | 300000 | Prologue to S20 |
+  | interp | 33 (new game) | 8 | 300000 | Prologue to S29 |
+  | interp | 42 (saves32) | 2 | 300000 | Prologue to OPEN1 (265541), 40.MES at 289176 |
+  | interp | 43 (saves32) | 2 | 300000 | main game: 40.MES at 25940, MISAKO, TOWN at 180408, to 35.MES |
+  | recomp | 44 (saves32) | 8 | 150000 | Prologue S48-S49, OPEN1 at 114114 |
+  | recomp lockstep | 9 (new game) | 8 | 120000 | to S19, no divergence |
+
+  Op 04 21 (save and load of FLAG files through the C file routines) ran 3-16 times per run and
+  op 04 1c/1d/1e/1f hundreds, all inside the compare. The window procedure was compared 12.7k to
+  30.4k times per run (mouse moves, buttons, activation). Units never run as units: 0x401000,
+  0x401050, 0x401160 (called by the C), WinMain's pieces (uncompared). Native instructions
+  (NANPA2_NATIVE_REPORT): seeds 31 and 33, 83 in 300000 frames (the VM end 0x40638d tail 2,
+  81 after the op 04 1e exit at quit); seed 42 46.4 M, all in the dissolve wipe 0x401a50; seed 43
+  (main game) 677 M, mostly the map module (0x403d45 208 M, 0x403b28 136 M, ...).
+- ctest 9/9 on the interp build and the recomp build (lockstep, diffcapture, diffreplay).
+- Not done here: 0x40609c (the map's pump, module input) stays with the map module.
