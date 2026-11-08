@@ -826,3 +826,95 @@ code change.
   - the click handler path 0x40613f-0x40616c and ext 20 0x4070bc (never reached; left
     native by predicates, and the C traps if it gets there without them);
   - 0x403510 sub-op 4 (spins on the frame counter).
+
+## 2026-11-08 (reimplementation stage 5A: the town map)
+
+- 94b8a1c: `tools/liveness.py` `LIVENESS_ROOTS=hex,...` (roots for code whose caller is C now, so
+  `--after` still finds the call sites inside native code); `tools/reimpl_status.py` reads
+  `HLE_GAME_DEAD` lines of overrides.h as barriers of the live walk.
+- 4e29bbf: the map module in C: `src/game/map.c`, `map_draw.c`, `map_move.c`, `map_path.c`,
+  `map_sprite.c`.
+  - Sub-ops 0, 1, 2, 3, 4, 6, 8, 9, 10, 11, 13-16, 30, 32 (0x403a87, 0x403ae9, 0x403b28, 0x403bd2,
+    0x403d45, 0x4042e7, 0x404f8c, 0x40500e, 0x40502c, 0x405113, 0x4053a6, 0x4053de, 0x405415,
+    0x40548f, 0x405542, 0x40558f); the cell draw 0x403eff with 0x403f44-0x404056, 0x404132,
+    0x4041f9, 0x404281 and 0x4040f0; the movers 0x404731, 0x404937, 0x404a9a, 0x404c9f with
+    0x404e06 and 0x404e25; the walk planner 0x405966, 0x405691, 0x40562b, 0x405acd, 0x405b07 and
+    its eight order cases, 0x405fb6; the sprite scripts 0x40431b, 0x404410 and the kind stubs.
+  - `game_op_map` (ops_sys.c) runs the C dispatcher instead of calling 0x403a70 natively; its
+    `native` predicate sends sub-ops 5, 7, 12 (and any sub-op not in `game_map_op_in_c`) to the
+    original handler. 0x403a70 is not a unit: a call unit's native fallback runs nested in a host
+    frame, which the pump's WM_QUIT stack reset would abandon, and only this handler calls it.
+  - Units are the functions with a native caller left (0x403b28, 0x403bd2, 0x403d45, 0x403eff,
+    0x4040f0, the movers, 0x404f8c, 0x40500e, 0x405691, 0x405966, 0x40431b); the rest is static C
+    below them, listed as `HLE_GAME_DEAD`.
+  - Harness: `game_unit.eax_live` (the movers' result is AL, and liveness conservatively says
+    every register is live after them), `NANPA2_DIFF_TRACE`.
+  - Left native (reach the message pump, whose WM_QUIT resets ESP): 0x4042f7, 0x404450 (kind 6,
+    the player), 0x4051c2, 0x405216, 0x405597, 0x403e30, 0x40442e's alternate entry 0x404448:
+    1,505 bytes, plus 0x403a70 and 0x404410 which the fallback still runs. 0x40431b runs the
+    original only when its sprite's step is kind 6 (`game_native_sprite_step` looks ahead in the
+    script without writing).
+- 75ac4e9, 7a0009c: `NANPA2_FUZZ=N` (`src/game/map_fuzz.c`, driver in game.c): each of the first
+  `NANPA2_FUZZ_CALLS` (30) compared calls of a map unit is compared N more times from random
+  states (sprites, walls, view limits, walk grid, a 04 26 op's arguments written over the script,
+  a cell with 0-3 sprite tiles), with the data memory, the locked screen, the stack and the CPU put
+  back after each. `NANPA2_FUZZ_DUMP=1` prints the state of a mismatch, `NANPA2_FUZZ_TRACE=1`
+  each state's seed.
+- a518ded, the bug the fuzzing found: the native right mover's edge test adds the sprite's
+  height, not its width, to x before comparing with the map width (0x404cb8, and 0x4048d7 in the
+  slide to the right). 55 mismatches in 600 states of 0x404c9f, a few more in 0x404731, 0x404937
+  and the units calling the movers. No explore or route run puts a sprite whose width differs from
+  its height at the right edge of the map. The C keeps the quirk.
+- Test route (`NANPA2_INPUT` with `sync` events, `NANPA2_INPUT_CLOCK=frames`, turbo 2): the title's
+  Data Load of a diary saved in 40.MES (a copy of stage 3's seed 43 save), 40.MES's right-click
+  menu (到客廳去), 41.MES's right-click menu (出去), then in the town (TOWN.MES, mati1.gp4) holds of the
+  left button toward points and right clicks on roads, and a click on a house. Starting the town
+  cold by naming TOWN.MES in the diary does not work: the map state record is set up by the scenes
+  before it, and the native fill loops run 2^32 times over zeros. Sub-ops TOWN.MES runs (the
+  fetch trace of the route): 0, 1, 2, 3, 5, 10, 12, 13, 14 and one coded `07 xx`; sub-ops 4, 6, 8, 9
+  as sub-ops, 11, 15, 16 are never called by a script in these runs and only run in the fuzzing.
+- Results, all with the online diff and poison (map = the units of 0x403b28-0x405966, 0x40431b and
+  the 04 26 handler 0x4073ee):
+
+  | Build, commit | Run | Frames | Reached | Mismatches |
+  |---|---|---|---|---|
+  | interp a518ded | route, turbo 2 | 14,000 | town, walks, right clicks, 33.MES | 0 |
+  | recomp a518ded | route, lockstep | 14,000 | the same | 0 (188.8 M instructions compared, no divergence) |
+  | interp a518ded | seed 64, F43 saves, turbo 2 | 300,000 | 16 MES, town at 49,773 | 0 |
+  | interp a518ded | seed 62, F43 saves, turbo 2 | 300,000 | 29 MES, town at 110,748 | 0 |
+  | interp a518ded | seed 63, F43 saves, turbo 2 | 300,000 | 25 MES, town at 28,321 | 0 |
+  | recomp a518ded | seed 64, F43 saves, turbo 2 | 300,000 | 18 MES, town at 36,252 | 0 |
+  | interp 7a0009c | route + fuzz, 6,000 states of each map unit | 14,000 | | 0 |
+
+  No trap or watchdog warning (the fuzz runs print stall warnings while the timer is held off).
+  Compared calls of one run (seed 64, interp): fill grid 21,409, overlay sprites 21,409, redraw
+  21,409, cell draw 24,192, clear bit 3 24,192, area trigger and collision 21,451, sprite step
+  42,818 (half of them left to the native player step), movers up 1,234 / down 1,989 / left 1,340 /
+  right 1,630, plan walk 68, walk step 87, 04 26 handler 21,505 (plus 21,451 left to the native
+  sub-ops 5, 7, 12). The four runs: movers 866-2,111 each, plan walk 60-73, walk step 87-140.
+  Never run outside the fuzzing: the C dispatcher's cases for sub-ops 4, 6, 8 and 9 (their
+  functions ran as units), sub-ops 11, 15, 16, the sprite-script kinds and the 0xc / 0xe / 0xf
+  script bytes (TOWN's sprites other than the player are idle), cells with two or three sprite
+  tiles. gcov of the route run with the fuzzing (before the cell-draw fuzzer): map.c 95.6%,
+  map_draw.c 88.1%, map_move.c 96.3%, map_path.c 99.2%, map_sprite.c 82.4% of lines; the rest is
+  the traps, those cases and the cell layers 2 and 3.
+- Sabotage (on 4e29bbf): `+ 2` for `+ 1` in the sprite tile number of 0x403bd2 gave 1,780
+  mismatches in 1,780 calls (and 1 in 0x4073ee); reverted. The fuzzing is the other sabotage
+  test: it caught the right-mover quirk.
+- Pacing: the C units' charges total 1.0000-1.0007 of the original's per run (map units 1.0000
+  over all four, 7.1e8 native instructions in seed 64); per unit: fill grid, redraw, cell draw,
+  clear bit 3, area trigger and sprite step agree to 0.1; movers within 1-3 of 100-230, plan walk
+  within 0.05%.
+- ctest 9 of 9 (smoke skipped: screen not visible) on the interp and the recomp build at 7a0009c
+  (no_game_bytes, diffcapture, diffreplay, lockstep).
+- reimpl_status: 21,145 of 25,597 bytes (82.6%, was 50.4%), 121 of 142 functions; game logic 17,349
+  bytes (67.8%, was 35.6%): 31 functions and 88 opcode handlers and pieces. Map: 56 of 63 functions,
+  8,266 of 9,764 bytes (84.7%, was 1 and 23 bytes, 0.2%). An upper bound, as before: 0x403a70 and
+  0x404410 (53 bytes) are counted and still run by the native fallback, and the native screen
+  routines the C calls (lock, unlock) are counted in their module.
+- Not done:
+  - The pumping chain (0x4042f7, 0x404450, 0x4051c2, 0x405216, 0x405597, 0x403e30): split into jump
+    units at its eleven pump sites (0x404486, 0x4044a4, 0x4044b2, 0x4045e6; 0x4051de, 0x40520a;
+    0x40522e, 0x40526e, 0x405399; 0x405598), from the 04 26 handler down, with 0x40609c (input
+    module) as a piece; docs/reimpl.md "Stage 5A".
+  - sub-ops 4, 6, 8, 9, 11, 15, 16 are verified by the fuzzing only.
