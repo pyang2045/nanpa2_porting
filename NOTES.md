@@ -466,7 +466,10 @@ code change.
   folder keeps no stale cache values. build.sh creates `tools/.venv` with
   `capstone>=5.0.1,<6` when its Python cannot import capstone; MSYS2 uses pacman's
   `mingw-w64-x86_64-python-capstone`. `--backend interp|recomp` goes to `-DNANPA2_BACKEND`
-  (option not in CMake yet); only recomp, or no `--backend`, needs the exe and capstone.
+  (option not in CMake yet: until CMakeLists.txt names it, `--backend` stops with a
+  message, c67a93d); only recomp, or no `--backend`, needs the exe and capstone. When the
+  option lands with interp as default, the no-`--backend` case (`recomp=1`) should follow
+  the CMake default.
 - MSYS2 rather than MSVC: CMakeLists passes GCC/Clang flags and `recomp.c` has only been
   compiled with Clang. On WIN32 only, the target is `WIN32_EXECUTABLE` (SDL2main gives
   WinMain; configure fails without SDL2main) and named `nanpa2-port.exe`, so a copy in the
