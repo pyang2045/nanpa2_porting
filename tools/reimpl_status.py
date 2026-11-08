@@ -181,7 +181,9 @@ def main():
     pe = recomp.PE(args.exe)
     w = Walker(pe)
     full = w.walk(set())
-    barriers = set(recomp.HLE_OVERRIDES)
+    # HLE_GAME_DEAD (src/hle/overrides.h): native code nothing enters any more
+    dead = set(recomp.read_hooks('GAME_DEAD'))
+    barriers = set(recomp.HLE_OVERRIDES) | dead
     live = w.walk(barriers)
     # what the C side still runs natively counts as not done: routines it
     # calls (game_ncall) and the original bodies behind its native predicates

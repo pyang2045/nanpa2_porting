@@ -464,7 +464,7 @@ backward and polls; each loop over a 02 list polls at its own backward jump.
 | 04 1c | 0x406d8b | name, off: load the file into segment @[7] at off (0x401050) |
 | 04 1d | 0x406e11 | [name]: picture to surface @[6] (0x406e20; no argument: the one at 0x4662be) |
 | 04 24 / 04 25 | 0x4073a5 / 0x4073cd | music (0x402cb0 / stop 0x4032c0) / voice clip (0x403360) |
-| 04 26 | 0x4073ee | n, args: map sub-op n through 0x403a70 with ESI = the argument values, S = AX after; 4 and 5 first reset the slots (0x406dff) |
+| 04 26 | 0x4073ee | n, args: map sub-op n through 0x403a70 with ESI = the argument values, S = AX after; 4 and 5 first reset the slots (0x406dff); see "Town map" |
 
 ### Animation slots (0x403510, 0x403624, 0x403661; reimplemented in src/game/anim.c)
 
@@ -484,6 +484,66 @@ sub-op, EBX slot): 0 ECX = n load script n stopped; 1 start; 2 stop at the next 
 running; 3 stop; 4 start and wait (spinning on the frame counter) until it stops; 5 x, y;
 6 slots 1-7 stop at their next mark; 7 every slot stopped at the idle script 0x4313c0
 (0x406dff: sub-op 7 with slot 0).
+
+### Town map (ext op 04 26; reimplemented in src/game/map*.c)
+
+04 26 n, args (handler 0x4073ee) calls 0x403a70 with ESI = the argument values: it copies
+arguments 1-6 (u16) to 0x43555e and calls sub-op n through the table at 0x435576; S = AX
+afterwards (so the result of a sub-op is whatever AX it leaves). The scripts use 04 26 3c
+(sub-op 12) as the walk loop's frame. Sub-ops: 0 init (0x403a87), 1 patch sprite script 0
+(0x403ae9), 2 grid from the layer (0x403b28), 3 sprite tiles over the grid (0x403bd2), 4 draw
+changed cells (0x403d45), 5 draw all cells and check events (0x403e30), 6 = 2, 3, 4 (0x4042e7),
+7 step the sprites (0x4042f7), 8 area under sprite a (0x404f8c), 9 collision for sprite a
+(0x40500e), 10 enter at entry a (0x40502c), 11 history reset (0x405113), 12 one frame (0x4051c2:
+step, 2-4, pump, event check 0x405216), 13 sprite a runs script b (0x4053a6), 14 enable /
+disable sprite a (0x4053de), 15 unpack a run-length layer (0x405415), 16 copy a rectangle of
+cells (0x40548f), 30 plan a walk for sprite a (0x405542), 32 stop the walk (0x40558f).
+
+The map state record M is in script segment 1 (0x4462be) at the word @[5] (0x4452d8): u16 at
++0 the offset of the layer block (u16 w, u16 h, w*h u16 tiles, bit 15 = wall, then the walk grid,
+w*h bytes), +2/+4 and +6/+8 the lowest and highest view column / row the view may scroll to, +0xa
+the view's x on screen in 16-pixel cells, +0xc its y in pixels, +0xe/+0x10 its size in cells,
++0x12/+0x14/+0x16/+0x18 the scroll margins left/top/right/bottom, +0x1a/+0x1c the map cell at the
+view's top left, +0x1e/+0x20 the map size (copied from the layer), +0x28 the sprite pattern
+pointer table, +0x2a the frame table, +0x2c the script pointer table, +0x2e the sprite table, +0x30
+the area table (x0, y0, x1, y1, code: 10 bytes, ended by x0 = 0xffff), +0x32 the entry table (18
+bytes: view x, y; player x, y, frame; the four limits). A sprite is 16 bytes (sprite 0 is the
+player, 1 and 2 follow it; a record whose flags are 0xff ends the table): +0 flags (1 active,
+2 drawn, 4 the view follows it, 8 no sliding, 0x10 nothing collides with it, 0x20 not solid, 0x80
+off), +1/+3 cell x, y, +5 and +0xf destination, +6 pattern set, +7 script, +8 position in it,
++0xa frame (direction * 2: up, down, left, right; bit 0 flips every step), +0xb/+0xc footprint,
++0xd kind, +0xe steps left.
+
+Drawing: the view is a grid of 16 x 16 cells; 0x4313c8 holds 4 words per cell (the layer tile and
+up to three sprite tiles, +1), 0x433308 what was drawn. Tiles and sprite tiles are 4-bit pixel
+blocks in two locked surfaces (0x43554c, 0x435550; 0x4355fa maps a tile number to the block's
+offset in eighths, sheets 640 pixels wide). A cell without sprite tiles is the tile's low 3 bits
+over the screen's bit 3; with them the cell is composed in three work planes at 0x435248: a
+sprite pixel with bit 3 clear replaces the pixel, one with bit 3 set is transparent; a tile pixel
+with bit 3 set stays in front of the sprites; only the low 3 bits reach the screen.
+
+Movement (0x404731 up, 0x404937 down, 0x404a9a left, 0x404c9f right; AL = 0xff moved, 0 blocked):
+turn (frame = step bit + direction * 2), refuse at the map edge or if another sprite is in the
+way (0x404e25: the cell ahead in the facing; sprites 1 and 2 and ghost, off, not drawn sprites
+excluded), walls count only on the feet row (across the width when going up or down, the one
+cell ahead sideways); a blocked step slides to a side that is open (0x4047f7 / 0x404a29: cells
+left, first, last, right of the footprint; 0x404b55 / 0x404d8a: rows above and below). The
+tails scroll the view when the sprite comes within the margin and the view is not at its limit.
+Quirk kept: the right mover's test for the map's right edge (0x404cb8, and 0x4048d7 in the slide
+to the right) adds the sprite's height, not its width, to x before comparing with the map width
+(the fuzzing found it; the walls and the scroll below use the width).
+Sprite scripts (0x40431b): high nibble kind (1-4 move, 5 / 7 stand, 6 the player, 8-11
+diagonals as two steps, 13 walk to the destination, 0xc history record, 0xe random kind 1-4
+with the generator at 0x435e60, 0xf set frame / show / hide), low nibble the count.
+
+Walking (0x405966, 0x405691): the walk grid is built from the layer (a cell is blocked, 0xff, if the
+tile below it or the one right of that has the wall bit; else 0xfe); the sprite's cell is cleared
+to 0 and a recursive search from the goal (0x405b07, depth 0xfd down, neighbour order by a 3-bit
+mask of the direction toward the sprite) marks the cells on the first route it finds with their
+depth and the ones it tried 0xff. A step goes to the neighbour with a higher mark below 0xfe
+(diagonals first, as two orthogonal steps). If the goal is a wall and 0x435e61 bit 0 is set,
+0x405fb6 marks free cells around it outward. Quirk kept: the second pass reads the goal's row from
+DX, which the first `mul` clobbered (row 0 in practice). 0x435573 = 0xff while a route is walked.
 
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 
