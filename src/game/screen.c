@@ -400,8 +400,8 @@ uint32_t game_surface_lock(uint32_t surf)
 		cpu.r[ECX] = rd32(SCREEN_SHIFT);
 		X86_COUNT(3);
 		if (cpu.r[ECX]) {
-			cpu.r[ECX] = rd32(PITCHES);
-			p += SHIFT_LINES * cpu.r[ECX];
+			cpu.r[ECX] = rd32(PITCHES) * 5; /* lea ecx, [ecx + 4*ecx] */
+			p += 8 * cpu.r[ECX];
 			X86_COUNT(3);
 		}
 	}
