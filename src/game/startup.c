@@ -426,14 +426,8 @@ static void voice_stop(void)
  * again). The cursor routines are native until the screen module is C. */
 static void paint(void)
 {
-	/* the wait runs the host's timer and may present a frame: a time-driven
-	 * effect that the harness's second run must not repeat */
-	if (game_replaying()) {
-		X86_COUNT(7);
-	} else {
-		uint32_t dd = rd32(DDRAW);
-		COM(dd, DD_WAITVBLANK, 1, 0);
-	}
+	uint32_t dd = rd32(DDRAW);
+	COM(dd, DD_WAITVBLANK, 1, 0);
 	X86_COUNT(2);
 	game_cursor_restore();
 	X86_COUNT(2);
