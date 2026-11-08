@@ -267,9 +267,37 @@ uint32_t hle_jump(uint32_t addr)
 	x86_trap(addr, msg);
 }
 
+/* NANPA2_HLETRACE=1: every call into the HLE layer (imports, COM methods,
+ * C runtime, HLE overrides) with its first six arguments, before it runs.
+ * Stack addresses are written STK so that two builds' traces compare (the
+ * start-up check of docs/reimpl.md, Stage 5B). */
+static void hle_trace(uint32_t addr)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_HLETRACE") != NULL;
+	if (!on)
+		return;
+	fprintf(stderr, "hle %08x", addr);
+	int n = 1; /* arguments known: imports have their count, others show the first */
+	if (addr >= THUNK_IMPORT && addr < THUNK_COM) {
+		int k = (int)((addr - THUNK_IMPORT) / 16);
+		n = k < nimports ? imports[k].nargs : 1;
+	}
+	for (int i = 1; i <= n; i++) {
+		uint32_t v = rd32(cpu.r[ESP] + 4u * (uint32_t)i);
+		if (v >= 0x00f00000u && v < 0x01000000u)
+			fprintf(stderr, " STK");
+		else
+			fprintf(stderr, " %x", v);
+	}
+	fputc('\n', stderr);
+}
+
 void hle_call(uint32_t addr)
 {
 	X86_LOCKSTEP_POINT(LS_HLE, addr);
+	hle_trace(addr);
 	pop32(); /* return address: the caller continues there */
 	if (addr >= THUNK_COM && addr < THUNK_END) {
 		uint32_t iface = (addr - THUNK_COM) >> 8, method = ((addr - THUNK_COM) & 0xff) >> 2;

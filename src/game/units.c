@@ -4,6 +4,7 @@
 
 #include "game/expr.h"
 #include "game/file.h"
+#include "game/startup.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -67,6 +68,10 @@ const struct game_unit game_units[] = {
 	CALL_SYS(0x401160, "file_save", game_file_save_regs, FILE_SCRATCH),
 	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
+	/* Stage 5B startup/input/file; WinMain's pieces run uncompared (game.c) */
+	PIECE(0x402090, "winmain", game_winmain, REG_BIT(ECX) | REG_BIT(EDX), 0, 0, 1, NULL),
+	PIECE(0x4021a3, "winmain_done", game_winmain_done, REG_BIT(ECX) | REG_BIT(EDX), 11, 0, 1, NULL),
+	CALL_SYS(0x4021c0, "wndproc", game_wndproc, REG_BIT(ECX) | REG_BIT(EDX)),
 	PIECE(0x403510, "anim_control", game_anim_control_piece, 0, 0, 0, 1, NULL),
 	SPIN(0x4035b5, "anim_wait", game_anim_wait_piece, 0),
 	CALL_SYS(0x403624, "anim_step", game_anim_step, 0),

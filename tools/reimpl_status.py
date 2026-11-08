@@ -127,6 +127,11 @@ SRC_GAME = os.path.join(os.path.dirname(HERE), 'src', 'game')
 FALLBACK_STOPS = {0x40616e}
 
 
+# Entries the lifter keeps but nothing runs: the logo's window procedure is
+# installed (SetWindowLongA) only by the logo player 0x401e20, an HLE override.
+DEAD_ENTRIES = {0x401fd0}
+
+
 def native_calls():
     """Native game routines the C side calls (game_ncall / ncall / blit / colour_rect with
     a game code address or a #define of one): they run, so they are needed."""
@@ -182,7 +187,7 @@ def main():
     w = Walker(pe)
     full = w.walk(set())
     barriers = set(recomp.HLE_OVERRIDES)
-    live = w.walk(barriers)
+    live = w.walk(barriers, [r for r in w.roots() if r not in DEAD_ENTRIES])
     # what the C side still runs natively counts as not done: routines it
     # calls (game_ncall) and the original bodies behind its native predicates
     ncalls = native_calls()
