@@ -88,10 +88,10 @@ class Walker:
                     r.append(v)
         return r
 
-    def walk(self, barriers):
+    def walk(self, barriers, roots=None):
         """address -> insn for all code reachable from the roots"""
         seen = {}
-        work = [r for r in self.roots()]
+        work = list(self.roots() if roots is None else roots)
         while work:
             a = work.pop()
             while recomp.in_code(a) and a not in seen and a not in barriers:
@@ -121,6 +121,43 @@ class Walker:
         return seen
 
 
+SRC_GAME = os.path.join(os.path.dirname(HERE), 'src', 'game')
+# Where the C side stops being "the fallback": the fetch of the VM loop is
+# C (loop.c); the click path that precedes it is the native part.
+FALLBACK_STOPS = {0x40616e}
+
+
+def native_calls():
+    """Native game routines the C side calls (game_ncall / ncall / blit / colour_rect with
+    a game code address or a #define of one): they run, so they are needed."""
+    out = {}
+    for fn in sorted(os.listdir(SRC_GAME)):
+        if not fn.endswith('.c'):
+            continue
+        src = open(os.path.join(SRC_GAME, fn), encoding='utf-8').read()
+        defs = dict((m.group(1), int(m.group(2), 16)) for m in
+                    re.finditer(r'#define\s+(\w+)\s+(0x[0-9a-fA-F]+)u?\b', src))
+        for m in re.finditer(r'\b(?:game_ncall|ncall|blit|colour_rect)\(\s*(\w+)', src):
+            a = m.group(1)
+            v = int(a, 16) if a.startswith('0x') else defs.get(a)
+            if v is not None and recomp.in_code(v):
+                out.setdefault(v, set()).add(fn)
+    return out
+
+
+def native_fallbacks():
+    """Units whose `native` predicate sends cases to the original code
+    (units.c: JUMP_SYS / CALL_NATIVE / PIECE with a last argument other than
+    NULL): their original body still runs."""
+    out = []
+    src = open(os.path.join(SRC_GAME, 'units.c'), encoding='utf-8').read()
+    for m in re.finditer(r'^\s*(JUMP_SYS|CALL_NATIVE|PIECE)\((0x[0-9a-f]+),.*,\s*(\w+)\),?\s*$',
+                         src, re.M):
+        if m.group(3) != 'NULL':
+            out.append(int(m.group(2), 16))
+    return out
+
+
 def load_modules(doc):
     mods, purpose = {}, {}
     if not os.path.exists(doc):
@@ -144,7 +181,16 @@ def main():
     pe = recomp.PE(args.exe)
     w = Walker(pe)
     full = w.walk(set())
-    live = w.walk(set(recomp.HLE_OVERRIDES))
+    barriers = set(recomp.HLE_OVERRIDES)
+    live = w.walk(barriers)
+    # what the C side still runs natively counts as not done: routines it
+    # calls (game_ncall) and the original bodies behind its native predicates
+    ncalls = native_calls()
+    extra = [a for a in ncalls if a not in barriers]
+    live.update(w.walk(barriers, extra))
+    fallbacks = native_fallbacks()
+    for fb in fallbacks:
+        live.update(w.walk((barriers - {fb}) | FALLBACK_STOPS, [fb]))
     iat = imports(pe)
 
     # functions
@@ -252,6 +298,9 @@ def main():
     print('  by the reimplemented game logic (src/game, %d functions and %d opcode handlers):'
           ' %d bytes (%.1f%%)' % (len(recomp.GAME_OVERRIDES), len(recomp.GAME_JUMP_OVERRIDES),
                                   total - left - hb, 100.0 * (total - left - hb) / total))
+    print('  still run natively from the C: %s called by src/game (game_ncall), %s original bodies behind '
+          'native predicates' % (' '.join('%x' % a for a in sorted(extra)),
+                                 ' '.join('%x' % a for a in sorted(fallbacks))))
     print()
     print('%-12s %5s %5s %7s %7s %6s' % ('module', 'funcs', 'done', 'bytes', 'done', '%'))
     per = {}

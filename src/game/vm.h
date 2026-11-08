@@ -193,14 +193,13 @@ uint32_t game_op_load_file(void);       /* 04 1c 0x406d8b */
 uint32_t game_op_picture(void);         /* 04 1d 0x406e11 */
 uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
 uint32_t game_op_anim(void);            /* 1a 0x407096 */
+uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
 uint32_t game_op_map(void);             /* 04 26 0x4073ee */
 /* the cases each leaves to the native handler (struct game_unit.native) */
 int game_native_misc(void);
-int game_native_anim(void);
-int game_native_palette(void);
 int game_native_map(void);
 
 /* ---- src/game/loop.c: the VM loop, blocks, text, waits (stage 4) ---- */
@@ -226,6 +225,33 @@ uint32_t game_wait_click_release_tested(void); /* 0x406b02 */
 int game_native_click0(void);
 int game_native_click1(void);
 
+/* ---- src/game/screen.c (stage 5B): palette and fades ---- */
+void game_palette_save(void);           /* 0x40756c */
+void game_palette_restore(void);        /* 0x407599 */
+void game_palette_fill(uint32_t v);     /* 0x40754d */
+void game_palette_upload(void);         /* 0x401ca0 */
+void game_fade_start(void);             /* 0x401d30 */
+uint32_t game_fade_active(void);        /* 0x401e10 */
+uint32_t game_palette_wait_piece(void); /* 0x406f41: 04 16 3 waits for the fade */
+
+/* surfaces, cursor, rectangles (cdecl arguments at ESP, results in EAX) */
+void game_lock_regs(void);              /* 0x401190 */
+void game_unlock_regs(void);            /* 0x4012b0 */
+uint32_t game_surface_lock(uint32_t surf);
+void game_surface_unlock(uint32_t surf);
+void game_cursor_restore(void);         /* 0x4011f0 */
+void game_cursor_restore_regs(void);
+void game_cursor_draw(void);            /* 0x4012e0 */
+void game_cursor_show(void);            /* 0x401c40 */
+void game_cursor_hide(void);            /* 0x401c60 */
+void game_cursor_setpos(void);          /* 0x401c80 (cdecl x, y) */
+void game_blit_copy(void);              /* 0x401430 (dx, dy, sx, sy, w, h, surfaces) */
+void game_blit_masked(void);            /* 0x4014f0 */
+void game_blit_swap(void);              /* 0x401670 */
+void game_fill_rect(void);              /* 0x4017b0 (x, y, w, h, colour << 4, surface) */
+void game_xor_rect(void);
+void game_picture_load(void);           /* 0x406e20, ECX = load the file named by arg 0 */               /* 0x401870 */
+
 /* ---- src/game/text.c ---- */
 void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
                     uint32_t bg);       /* 0x401900 */
@@ -238,7 +264,8 @@ void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
 void game_anim_step(void);              /* 0x403624 */
 void game_anim_run_slot(void);          /* 0x403661, ESI = slot offset */
 void game_anim_control_regs(void);      /* 0x403510, EAX sub-op, EBX slot */
-int game_native_anim_control(void);
+uint32_t game_anim_control_piece(void); /* 0x403510 as a jump unit (any sub-op) */
+uint32_t game_anim_wait_piece(void);    /* 0x4035b5: sub-op 4's wait loop */
 void game_anim_reset(void);             /* 0x406dff */
 void game_palette_copy(uint32_t src);   /* 0x40752c */
 void game_palette_copy_regs(void);

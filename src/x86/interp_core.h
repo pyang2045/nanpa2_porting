@@ -85,6 +85,9 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 				if (x86_is_oracle_pc(pc)) {
 					pc &= ~X86_ORACLE_TAG;
 					native = pc;
+#ifdef NATIVE_ENTRY
+					NATIVE_ENTRY(pc); /* a native fallback of a C handler */
+#endif
 				}
 				continue;
 			}

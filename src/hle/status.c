@@ -288,6 +288,8 @@ static void write_status(void)
 	strftime(started, sizeof started, "%Y-%m-%dT%H:%M:%SZ", gmtime(&start_wall));
 	uint32_t black = ps->last_nonblack ? now - ps->last_nonblack : now - start_ticks;
 	static char buf[8192];
+	char native[600];
+	x86_native_summary(native, sizeof native);
 	snprintf(buf, sizeof buf,
 		"{\n"
 		"  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u, \"stage\": \"running\", \"init_ms\": %u,\n"
@@ -305,6 +307,7 @@ static void write_status(void)
 		"  \"game\": {\"frame\": %u, \"frame_still_ms\": %u, \"active_4ac4ec\": %u, \"timer\": %d, "
 		"\"poll_pc\": \"%08x\", \"mips\": %.1f, \"main_age_ms\": %u},\n"
 		"  \"logo\": %d, \"music\": %d, \"voice\": \"%s\",\n"
+		"  \"native_game_insns\": %s,\n"
 		"  \"warning\": \"%s\", \"warning_key\": \"%s\", \"warnings\": %u, \"warned\": %s\n"
 		"}\n",
 		(int)getpid(), started, now - launch_ticks, start_ticks - launch_ticks, headless, scripted, env_json,
@@ -318,7 +321,7 @@ static void write_status(void)
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
 		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
 		now - last_frame_change, active, win32_timer_running(), pc, mips, now - s.tick,
-		SDL_AtomicGet(&logo), music, vq, wq, warning_key, warnings, warned);
+		SDL_AtomicGet(&logo), music, vq, native[0] ? native : "null", wq, warning_key, warnings, warned);
 	write_json(buf);
 }
 
