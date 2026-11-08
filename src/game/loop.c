@@ -200,7 +200,7 @@ uint32_t game_vm_click_done(void)
 {
 	wr8(CLICK_BUSY, 0);
 	cpu.r[ESI] = pop32();
-	X86_COUNT(2);
+	X86_COUNT(3); /* mov [busy], pop esi, jmp 0x4060f9 */
 	X86_POLL(0x40616c);
 	return VM_LOOP;
 }

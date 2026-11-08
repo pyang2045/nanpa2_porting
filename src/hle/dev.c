@@ -266,7 +266,7 @@ static void click_test(void)
 		on = getenv("NANPA2_CLICKTEST") != NULL;
 	if (!on)
 		return;
-	enum { BLOCK = 0x10000 };
+	enum { BLOCK = 0xf000 }; /* above the largest MES file, within a u16 offset */
 	wr8(0x435e78u + BLOCK, 0x01);
 	wr8(0x435e78u + BLOCK + 1, 0x10);
 	wr8(0x435e78u + BLOCK + 2, 0x00);
