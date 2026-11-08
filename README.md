@@ -108,7 +108,8 @@ It is written from before `SDL_Init`: `stage` names the startup step reached (`s
 setup still shows where (and a `WARNING: startup stuck in stage …`). It holds the pid and start time, the desktop
 (screen locked, display asleep, app hidden), the mode (headless, scripted, every `NANPA2_*` variable
 set), the window (SDL and on-screen window counts, flags, size, drawable size, focus,
-occlusion), the presenter (frames given and presented, presents skipped as occluded / no
+occlusion), the cursor (the game's ShowCursor count, host cursor shown, pointer over the
+image), the presenter (frames given and presented, presents skipped as occluded / no
 drawable / size 0, worst `nextDrawable` wait, mean luminance of the last frame, how long the
 screen has been black, and the offscreen probe: while presents are skipped because the
 window is covered, the skipped frame is rendered through the Metal pipeline offscreen, CRT

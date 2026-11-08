@@ -30,6 +30,7 @@
 
 #include "cinepak.h"
 #include "fsys.h"
+#include "hle.h"
 #include "platform/present.h"
 #include "status.h"
 
@@ -181,8 +182,6 @@ void logo_play(void)
 		return;
 	}
 	status_set_logo(1);
-	int cursor = SDL_ShowCursor(SDL_QUERY);
-	SDL_ShowCursor(SDL_DISABLE); /* native ShowCursor(0) */
 	SDL_AudioDeviceID dev = open_audio(&a);
 	if (dev)
 		SDL_PauseAudioDevice(dev, 0);
@@ -204,6 +203,7 @@ void logo_play(void)
 		shown++;
 		status_main();
 		SDL_Event ev;
+		win32_cursor_update(); /* the pointer may have left the image */
 		while (SDL_PollEvent(&ev)) {
 			if (ev.type == SDL_QUIT) {
 				SDL_PushEvent(&ev); /* for the game's own loop */
@@ -225,7 +225,6 @@ void logo_play(void)
 		SDL_CloseAudioDevice(dev);
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
-	SDL_ShowCursor(cursor);
 	status_set_logo(0);
 	cvid_free(&dec);
 	avi_free(&a);
