@@ -4,22 +4,25 @@
 #   tools/build.sh [--backend interp|recomp] [--exe PATH] [--game-dir DIR]
 #                  [--build-dir DIR] [--release | --debug] [--test] [--app]
 #
-#   --backend B      passed on as -DNANPA2_BACKEND=B. recomp lifts the game
-#                    code from your nanpa2.exe at build time (tools/recomp.py)
-#                    and needs --exe and Python with capstone; interp needs
-#                    neither. Without --backend nothing is passed and the
-#                    recomp checks run (the build as it is today).
+#   --backend B      passed on as -DNANPA2_BACKEND=B (default interp, as in
+#                    CMakeLists.txt). interp runs the game code of the
+#                    player's nanpa2.exe at run time and needs neither the
+#                    exe nor capstone to build; the result holds nothing of
+#                    the game. recomp lifts the game code from your
+#                    nanpa2.exe at build time (tools/recomp.py) and needs
+#                    --exe and Python with capstone (development only).
 #   --exe PATH       recomp: your nanpa2.exe (default: game/nanpa2.exe); it
 #                    is read, never run.
 #   --game-dir DIR   game folder for the tests (default: the folder of the
-#                    exe, or game/ with --backend interp)
+#                    exe with --backend recomp, else game/; interp builds
+#                    need it only with --test)
 #   --build-dir DIR  build folder (default: build/)
 #   --release        CMAKE_BUILD_TYPE=Release (default)
 #   --debug          CMAKE_BUILD_TYPE=Debug
 #   --test           run ctest afterwards (the smoke test opens a window for
 #                    about a minute; "Skipped" means passed, screen not seen)
 #   --app            macOS only: also build the app bundle (target nanpa2_app,
-#                    BUILD_DIR/同級生２.app; for this machine only, never share it)
+#                    BUILD_DIR/同級生２.app; a recomp app is for this machine only)
 #
 # Needs a C compiler, CMake, Ninja, SDL2 and Python 3. Missing tools are
 # named with the install command for this system; nothing is installed with
@@ -57,12 +60,8 @@ case $backend in
 '' | recomp | interp) ;;
 *) echo "build.sh: --backend is interp or recomp" >&2; exit 2 ;;
 esac
-recomp=1
-[ "$backend" = interp ] && recomp=0
-if [ -n "$backend" ] && ! grep -q NANPA2_BACKEND "$here/CMakeLists.txt"; then
-	echo "build.sh: --backend needs the NANPA2_BACKEND option in CMakeLists.txt (not there yet)" >&2
-	exit 2
-fi
+recomp=0
+[ "$backend" = recomp ] && recomp=1
 
 os=$(uname -s)
 case $os in
@@ -142,14 +141,19 @@ if [ "$recomp" = 1 ]; then
 else
 	[ -n "$game" ] || game=$here/game
 fi
-[ -d "$game" ] || { echo "build.sh: game folder $game not found" >&2; exit 1; }
-game=$(cd "$game" && pwd)
+# interp builds need the game folder only for the tests
+if [ -d "$game" ]; then
+	game=$(cd "$game" && pwd)
+elif [ "$recomp" = 1 ] || [ "$test" = 1 ]; then
+	echo "build.sh: game folder $game not found" >&2
+	exit 1
+fi
 
 # --- configure and build (both no-ops when nothing changed). The cache
 # variables are passed every time so a reused build folder never keeps stale
 # values.
-set -- -DCMAKE_BUILD_TYPE="$type" -DNANPA2_GAME_DIR="$game"
-[ -z "$backend" ] || set -- "$@" -DNANPA2_BACKEND="$backend"
+set -- -DCMAKE_BUILD_TYPE="$type" -DNANPA2_BACKEND="${backend:-interp}"
+[ ! -d "$game" ] || set -- "$@" -DNANPA2_GAME_DIR="$game"
 [ "$recomp" = 0 ] || set -- "$@" -DNANPA2_EXE="$exe" -DNANPA2_PYTHON="$py"
 cmake -S "$here" -B "$dir" -G Ninja "$@"
 ninja -C "$dir"
@@ -161,5 +165,9 @@ if [ "$test" = 1 ]; then
 fi
 
 echo "build.sh: built $dir/nanpa2 ($type)"
-[ "$app" = 1 ] && echo "build.sh: app $dir/同級生２.app (this machine only, never share it)"
+if [ "$app" = 1 ] && [ "$recomp" = 1 ]; then
+	echo "build.sh: app $dir/同級生２.app (recomp: holds code lifted from your nanpa2.exe; this machine only, never share it)"
+elif [ "$app" = 1 ]; then
+	echo "build.sh: app $dir/同級生２.app (interp: no game code or data inside; the player supplies the game folder)"
+fi
 echo "build.sh: play with: $dir/nanpa2 --game \"$game\""
