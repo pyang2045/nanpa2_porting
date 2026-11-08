@@ -10,8 +10,11 @@
  * (only ESP, EBP and ESI are live there, tools/liveness.py). */
 #define AT_LOOP (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
 
-#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags }
-#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0 }
+#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0 }
+#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0 }
+/* a handler that calls native routines (src/game/ops_sys.c); native: the
+ * cases it leaves to the original handler, or NULL */
+#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1 }
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -30,13 +33,29 @@ const struct game_unit game_units[] = {
 	JUMP(0x406638, "op_0411_continue", game_op_continue, 0),
 	JUMP(0x40663b, "op_0412_break", game_op_break, 0),
 	JUMP(0x40663e, "op_12_set_label", game_op_set_label, AT_LOOP),
+	JUMP_SYS(0x406842, "op_0414_menu_items", game_op_menu_items, NULL),
 	CALL(0x4068e1, "vm_menu_item", game_menu_item_regs, REG_BIT(EDX), 0),
+	JUMP_SYS(0x406916, "op_0415_cursor", game_op_cursor, NULL),
 	JUMP(0x4069be, "op_18_text_colour", game_op_text_colour, AT_LOOP),
+	JUMP_SYS(0x406b05, "op_17_clear_text", game_op_clear_text, NULL),
+	JUMP_SYS(0x406b76, "op_0417_fill_rect", game_op_fill_rect, NULL),
+	JUMP_SYS(0x406bcb, "op_0418_xor_rect", game_op_xor_rect, NULL),
+	JUMP_SYS(0x406c20, "op_0419_copy_rect", game_op_copy_rect, NULL),
+	JUMP_SYS(0x406c85, "op_041a_swap_rect", game_op_swap_rect, NULL),
+	JUMP_SYS(0x406cea, "op_041b_masked_rect", game_op_masked_rect, NULL),
+	JUMP_SYS(0x406d8b, "op_041c_load_file", game_op_load_file, NULL),
 	CALL(0x406dc4, "vm_string_arg", game_string_arg_regs, 0, 0),
+	JUMP_SYS(0x406e11, "op_041d_picture", game_op_picture, NULL),
+	JUMP_SYS(0x406f06, "op_0416_palette", game_op_palette, game_native_palette),
+	JUMP_SYS(0x407096, "op_1a_anim", game_op_anim, game_native_anim),
 	/* not enabled in overrides.h yet (no call seen under the diff) */
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
 	JUMP(0x4071a4, "op_0423_hit_test", game_op_hit_test, AT_LOOP),
+	JUMP_SYS(0x407204, "op_19_misc", game_op_misc, game_native_misc),
 	JUMP(0x40739b, "op_0422_args_only", game_op_args_only, AT_LOOP),
+	JUMP_SYS(0x4073a5, "op_0424_music", game_op_music, NULL),
+	JUMP_SYS(0x4073cd, "op_0425_voice", game_op_voice, NULL),
+	JUMP_SYS(0x4073ee, "op_0426_map", game_op_map, game_native_map),
 	CALL(0x40741b, "vm_parse_args", game_parse_args_regs, REG_BIT(EDX), 0),
 };
 const int game_unit_count = (int)(sizeof game_units / sizeof game_units[0]);

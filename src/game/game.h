@@ -28,6 +28,14 @@ struct game_unit {
 	uint32_t scratch_regs;
 	/* 1 if a caller reads the arithmetic flags after the call */
 	int flags_out;
+	/* jump units: if set and it returns 1 for the CPU on entry, the
+	 * original handler runs instead (hle_jump continues at the tagged
+	 * entry), with no comparison: the cases the C handler leaves to the
+	 * native code (sub-ops that wait on the timer or pump messages) */
+	int (*native)(void);
+	/* the C side runs native game code (x86_exec): its diff records
+	 * cannot be replayed offline, so none are written */
+	int calls_native;
 };
 
 extern const struct game_unit game_units[];

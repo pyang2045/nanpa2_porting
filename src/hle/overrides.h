@@ -89,6 +89,25 @@ HLE_GAME_JUMP(0x4069be, "op 18: text colour")
 HLE_GAME_JUMP(0x4071a4, "op 04 23: hit test")
 HLE_GAME_JUMP(0x40739b, "op 04 22: arguments only")
 
+/* Handlers around native subsystem routines (src/game/ops_sys.c); 19, 1a,
+ * 04 16 and 04 26 leave their timer-bound sub-ops to the original */
+HLE_GAME_JUMP(0x406842, "op 04 14: menu item table")
+HLE_GAME_JUMP(0x406916, "op 04 15: cursor")
+HLE_GAME_JUMP(0x406b05, "op 17: clear text window")
+HLE_GAME_JUMP(0x406b76, "op 04 17: fill rectangle")
+HLE_GAME_JUMP(0x406bcb, "op 04 18: XOR rectangle")
+HLE_GAME_JUMP(0x406c20, "op 04 19: copy rectangle")
+HLE_GAME_JUMP(0x406c85, "op 04 1a: swap rectangle")
+HLE_GAME_JUMP(0x406cea, "op 04 1b: masked copy rectangle")
+HLE_GAME_JUMP(0x406d8b, "op 04 1c: load file into a segment")
+HLE_GAME_JUMP(0x406e11, "op 04 1d: picture")
+HLE_GAME_JUMP(0x406f06, "op 04 16: palette")
+HLE_GAME_JUMP(0x407096, "op 1a: animation slot")
+HLE_GAME_JUMP(0x407204, "op 19: misc sub-ops")
+HLE_GAME_JUMP(0x4073a5, "op 04 24: music")
+HLE_GAME_JUMP(0x4073cd, "op 04 25: voice")
+HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the

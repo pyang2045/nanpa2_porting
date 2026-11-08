@@ -127,6 +127,29 @@ uint32_t game_op_click_handler(void);   /* 04 20 0x4070bc */
 uint32_t game_op_hit_test(void);        /* 04 23 0x4071a4 */
 uint32_t game_op_args_only(void);       /* 04 22 0x40739b */
 
+/* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
+uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */
+uint32_t game_op_cursor(void);          /* 04 15 0x406916 */
+uint32_t game_op_clear_text(void);      /* 17 0x406b05 */
+uint32_t game_op_fill_rect(void);       /* 04 17 0x406b76 */
+uint32_t game_op_xor_rect(void);        /* 04 18 0x406bcb */
+uint32_t game_op_copy_rect(void);       /* 04 19 0x406c20 */
+uint32_t game_op_swap_rect(void);       /* 04 1a 0x406c85 */
+uint32_t game_op_masked_rect(void);     /* 04 1b 0x406cea */
+uint32_t game_op_load_file(void);       /* 04 1c 0x406d8b */
+uint32_t game_op_picture(void);         /* 04 1d 0x406e11 */
+uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
+uint32_t game_op_anim(void);            /* 1a 0x407096 */
+uint32_t game_op_misc(void);            /* 19 0x407204 */
+uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
+uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
+uint32_t game_op_map(void);             /* 04 26 0x4073ee */
+/* the cases each leaves to the native handler (struct game_unit.native) */
+int game_native_misc(void);
+int game_native_anim(void);
+int game_native_palette(void);
+int game_native_map(void);
+
 static inline uint32_t vm_script_byte(uint32_t pc)
 {
 	return rd8(VM_SCRIPT + pc);

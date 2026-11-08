@@ -29,7 +29,7 @@
 enum { MODE_OFF, MODE_ORACLE, MODE_REIMPL };
 
 struct unit_stats {
-	uint64_t calls, mismatches, recorded, oracle_insns, reimpl_insns;
+	uint64_t calls, mismatches, recorded, oracle_insns, reimpl_insns, native_runs;
 	FILE *file;
 	uint64_t *seen; /* open-addressing set of input hashes */
 	size_t seen_cap, seen_n;
@@ -45,6 +45,9 @@ static void report(void)
 {
 	for (int i = 0; i < game_unit_count; i++) {
 		struct unit_stats *s = &stats[i];
+		if (s->native_runs)
+			fprintf(stderr, "diff: %08x %s left to the native handler %llu times\n",
+			        game_units[i].addr, game_units[i].name, (unsigned long long)s->native_runs);
 		if (!s->calls)
 			continue;
 		fprintf(stderr,
@@ -118,7 +121,7 @@ static int first_seen(struct unit_stats *s, uint64_t h)
 
 static void record(const struct game_unit *u, struct unit_stats *s, const struct diff_record *rec)
 {
-	if (!diff_dir || s->recorded >= diff_max)
+	if (!diff_dir || s->recorded >= diff_max || u->calls_native)
 		return;
 	uint64_t h = diff_input_hash(rec);
 	/* the first half of the budget takes every new input, the rest one in
@@ -283,9 +286,12 @@ int game_jump(uint32_t addr, uint32_t *next)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
-	if (mode == MODE_ORACLE) {
-		/* inside an original: the lifted handler, inline */
+	if (mode == MODE_ORACLE || (u->native && u->native())) {
+		/* inside an original, or a case the C handler leaves to the
+		 * native code: the lifted handler, inline */
 		*next = X86_ORACLE_TAG | addr;
+		if (mode == MODE_OFF && stats)
+			stats[u - game_units].native_runs++;
 		return 1;
 	}
 	if (diff_on && mode == MODE_OFF)
