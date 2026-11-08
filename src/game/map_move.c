@@ -18,6 +18,10 @@
  * of another (up's slide goes to left's tail, and so on); here each tail
  * and each "face and try" is a function of its own.
  *
+ * Quirk of the native code kept: the test for the map's right edge (0x404cb8
+ * and, in the slide to the right, 0x4048d7) adds the sprite's height, not its
+ * width, to x; everything else on the right uses the width.
+ *
  * The movers' result is AL; EAX otherwise and ECX, EDX and EBX are
  * scratch (the callers read only AL, which the poisoned diff runs check);
  * ESI, EDI and EBP are kept.
@@ -188,7 +192,8 @@ static int right_face(const struct mv *c)
 {
 	face(c, 6);
 	X86_COUNT(6);
-	if (((rd16(c->sp + S_X) + rd8(c->sp + S_WIDTH)) & 0xffff) == rd16(c->m + M_MAP_W)) {
+	/* the native test adds the sprite's height, not its width (0x4048d7) */
+	if (((rd16(c->sp + S_X) + rd8(c->sp + S_HEIGHT)) & 0xffff) == rd16(c->m + M_MAP_W)) {
 		X86_COUNT(2);
 		return 0;
 	}
@@ -380,7 +385,8 @@ static int mv_right(const struct mv *c)
 {
 	face(c, 6);
 	X86_COUNT(6);
-	if (((rd16(c->sp + S_X) + rd8(c->sp + S_WIDTH)) & 0xffff) == rd16(c->m + M_MAP_W))
+	/* the edge test adds the height (0x404cb8), the cell tested below the width */
+	if (((rd16(c->sp + S_X) + rd8(c->sp + S_HEIGHT)) & 0xffff) == rd16(c->m + M_MAP_W))
 		return slide_vertically(c, (rd16(c->sp + S_X) + rd8(c->sp + S_WIDTH)) & 0xffff, 9);
 	if (blocked(c))
 		return 0;

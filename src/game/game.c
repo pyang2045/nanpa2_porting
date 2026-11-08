@@ -355,8 +355,42 @@ static void fuzz_unit(const struct game_unit *u)
 		cpu = c0;
 		if (getenv("NANPA2_FUZZ_TRACE"))
 			fprintf(stderr, "fuzz %08x %s state %ld seed %08x\n", u->addr, u->name, i, seed);
+		uint32_t seed0 = seed;
 		f(&seed);
+		uint64_t before = s->mismatches;
 		compare(u);
+		if (s->mismatches > before && getenv("NANPA2_FUZZ_DUMP")) {
+			/* the state again, to read the case */
+			memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
+			memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
+			cpu = c0;
+			f(&seed0);
+			fprintf(stderr, "fuzzcase %08x %s esi %08x edi %08x ecx %08x edx %08x\n", u->addr, u->name,
+			        cpu.r[ESI], cpu.r[EDI], cpu.r[ECX], cpu.r[EDX]);
+			uint32_t sel = rd16(0x4452d8), m = 0x4462beu + sel;
+			fprintf(stderr, "  M:");
+			for (uint32_t k = 0; k < 0x34; k++)
+				fprintf(stderr, " %02x", rd8(m + k));
+			fprintf(stderr, "\n");
+			uint32_t sp = rd16(m + 0x2e);
+			for (uint32_t k = 0; k < 16 && rd8(0x4462beu + sp + 16 * k) != 0xff; k++) {
+				fprintf(stderr, "  S%u (%x):", k, sp + 16 * k);
+				for (uint32_t j = 0; j < 16; j++)
+					fprintf(stderr, " %02x", rd8(0x4462beu + sp + 16 * k + j));
+				fprintf(stderr, "\n");
+			}
+			uint32_t layer = rd16(m), mw = rd16(m + 0x1e);
+			uint32_t px = rd16(0x4462beu + cpu.r[ESI] + 1), py = rd16(0x4462beu + cpu.r[ESI] + 3);
+			for (int dy = -3; dy <= 5; dy++) {
+				fprintf(stderr, "  y%+d:", dy);
+				for (int dx = -2; dx <= 6; dx++) {
+					uint32_t x = px + (uint32_t)dx, y = py + (uint32_t)dy;
+					uint32_t a = 0x4462beu + layer + 4 + 2 * (y * mw + x);
+					fprintf(stderr, " %c", rd8(a + 1) & 0x80 ? '#' : '.');
+				}
+				fprintf(stderr, "\n");
+			}
+		}
 		s->fuzz_runs++;
 		memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
 		memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
