@@ -169,15 +169,18 @@ uint32_t game_vm_click_tested1(void)
 /* ---- fetch and dispatch */
 
 /* handlers of ops 0a-1a (table 0x40620b; 10 is a no-op, the loop head) and
- * of the extended ops 04 10-04 26 (table 0x406262) */
-static const uint32_t op_handlers[] = {
-	0x406491, 0x4064b5, 0x4064d9, 0x4064f8, 0x406557, 0x40659e, 0x4060f9, 0x4065f6, 0x40663e,
-	0x406658, 0x406a9a, 0x4069ce, 0x406aad, 0x406b05, 0x4069be, 0x407204, 0x407096,
+ * of the extended ops 04 10-04 26 (table 0x406262), as offsets from
+ * HANDLER_BASE (16 bits, so the binary does not hold the native tables:
+ * ctest no_game_bytes) */
+#define HANDLER_BASE 0x400000u
+static const uint16_t op_handlers[] = {
+	0x6491, 0x64b5, 0x64d9, 0x64f8, 0x6557, 0x659e, 0x60f9, 0x65f6, 0x663e,
+	0x6658, 0x6a9a, 0x69ce, 0x6aad, 0x6b05, 0x69be, 0x7204, 0x7096,
 };
-static const uint32_t ext_handlers[] = {
-	0x40660c, 0x406638, 0x40663b, 0x406671, 0x406842, 0x406916, 0x406f06, 0x406b76, 0x406bcb,
-	0x406c20, 0x406c85, 0x406cea, 0x406d8b, 0x406e11, 0x406f7c, 0x406fcd, 0x4070bc, 0x4070d5,
-	0x40739b, 0x4071a4, 0x4073a5, 0x4073cd, 0x4073ee,
+static const uint16_t ext_handlers[] = {
+	0x660c, 0x6638, 0x663b, 0x6671, 0x6842, 0x6916, 0x6f06, 0x6b76, 0x6bcb,
+	0x6c20, 0x6c85, 0x6cea, 0x6d8b, 0x6e11, 0x6f7c, 0x6fcd, 0x70bc, 0x70d5,
+	0x739b, 0x71a4, 0x73a5, 0x73cd, 0x73ee,
 };
 #define N_OPS (sizeof op_handlers / sizeof op_handlers[0])
 #define N_EXT (sizeof ext_handlers / sizeof ext_handlers[0])
@@ -298,7 +301,7 @@ static uint32_t fetch(void)
 		X86_COUNT(6 + 5);
 		if (cpu.r[EAX] >= N_EXT)
 			x86_trap(0x40625b, "extended opcode outside the native table");
-		return ext_handlers[cpu.r[EAX]];
+		return HANDLER_BASE + ext_handlers[cpu.r[EAX]];
 	}
 	if (op == VM_SEPARATOR) {
 		X86_COUNT(8);
@@ -322,7 +325,7 @@ static uint32_t fetch(void)
 	X86_COUNT(17 + 4);
 	if (cpu.r[EAX] >= N_OPS)
 		x86_trap(0x406204, "opcode outside the native table (09, 1b-1f)");
-	return op_handlers[cpu.r[EAX]];
+	return HANDLER_BASE + op_handlers[cpu.r[EAX]];
 }
 
 /* ---- blocks */

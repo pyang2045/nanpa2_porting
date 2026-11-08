@@ -228,7 +228,7 @@ add_test(NAME diffcapture COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1
   $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
 set_tests_properties(diffcapture PROPERTIES TIMEOUT 240
   FIXTURES_REQUIRED diff_dirs FIXTURES_SETUP diff_records
-  PASS_REGULAR_EXPRESSION "diff: 004037fc script_eval calls [1-9]"
+  PASS_REGULAR_EXPRESSION "diff: 004064d9 op_0c_set_reg calls [1-9]"
   FAIL_REGULAR_EXPRESSION "MISMATCH|x86 trap|WARNING:")
 add_test(NAME diffreplay COMMAND diff_replay "${DIFF_DIR}" "${DIFF_DIR}/ctest")
 set_tests_properties(diffreplay PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
