@@ -29,6 +29,15 @@ add_custom_command(
   COMMENT "Lifting nanpa2.exe to C"
   VERBATIM)
 
+# Game logic reimplemented in C (docs/reimpl.md), without SDL or HLE
+# dependencies, so the differential replay links it alone.
+set(GAME_SOURCES
+  src/game/expr.c
+  src/game/units.c
+  src/game/trace.c
+  src/game/diff.c
+)
+
 set(SOURCES
   src/main.c
   src/launch.c
@@ -47,6 +56,8 @@ set(SOURCES
   src/hle/dev.c
   src/hle/explore.c
   src/hle/status.c
+  ${GAME_SOURCES}
+  src/game/game.c
   "${GEN_C}"
 )
 
@@ -115,6 +126,14 @@ endif()
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
 target_include_directories(decode_all PRIVATE src)
 
+# Differential replay: runs the reimplemented units on call records of the
+# lifted originals (tests/diff_replay.c, docs/reimpl.md).
+add_executable(diff_replay tests/diff_replay.c src/x86/x86.c ${GAME_SOURCES})
+target_include_directories(diff_replay PRIVATE src)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(diff_replay PRIVATE -Wall -Wextra -Wno-unused-parameter)
+endif()
+
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
 # Exit 77 = skipped: the game checks passed but nobody could see the screen
@@ -135,6 +154,32 @@ set_tests_properties(selftest PROPERTIES TIMEOUT 30
   FAIL_REGULAR_EXPRESSION "MISMATCH|ECX KEPT|x86 trap")
 add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
 set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
+
+# Differential tests of the reimplemented game logic (docs/reimpl.md).
+# diffcapture: a headless exploration run from a new game (seed 31) with
+# NANPA2_DIFF on, so every call of a reimplemented unit is compared with
+# the lifted original online and recorded in build/diff/ctest (game memory:
+# stays in the build folder). diffreplay: replays every record under
+# build/diff and build/diff/ctest (put records of longer runs in build/diff)
+# without the game; skipped when there are none.
+set(DIFF_DIR "${CMAKE_BINARY_DIR}/diff")
+add_test(NAME diffcapture_dir COMMAND ${CMAKE_COMMAND} -E
+  rm -rf "${DIFF_DIR}/ctest" "${CMAKE_BINARY_DIR}/diff-saves")
+add_test(NAME diffcapture_mkdir COMMAND ${CMAKE_COMMAND} -E
+  make_directory "${DIFF_DIR}/ctest" "${CMAKE_BINARY_DIR}/diff-saves")
+set_tests_properties(diffcapture_dir PROPERTIES FIXTURES_SETUP diff_dirs)
+set_tests_properties(diffcapture_mkdir PROPERTIES FIXTURES_SETUP diff_dirs DEPENDS diffcapture_dir)
+add_test(NAME diffcapture COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1
+  "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/diff-saves" "NANPA2_DIFF_DIR=${DIFF_DIR}/ctest"
+  NANPA2_EXPLORE=31 NANPA2_EXPLORE_FRAMES=20000 NANPA2_TURBO=8
+  $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
+set_tests_properties(diffcapture PROPERTIES TIMEOUT 240
+  FIXTURES_REQUIRED diff_dirs FIXTURES_SETUP diff_records
+  PASS_REGULAR_EXPRESSION "diff: 004037fc script_eval calls [1-9]"
+  FAIL_REGULAR_EXPRESSION "MISMATCH|x86 trap|WARNING:")
+add_test(NAME diffreplay COMMAND diff_replay "${DIFF_DIR}" "${DIFF_DIR}/ctest")
+set_tests_properties(diffreplay PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
+  FIXTURES_REQUIRED diff_records)
 
 # WAV loader: decoded duration equals header length / byte rate for mono,
 # stereo, 11 kHz and files with extra chunks before data.
