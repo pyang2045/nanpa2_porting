@@ -388,7 +388,7 @@ More VM state, used by the helpers and handlers below:
   and with a `0f` guard EAX = the guard's value (or AL = a bare token); EBX = offset of the
   text, ESI = the next 00 or 02. Flags dead after both call sites.
 
-### Script opcodes (reimplemented in src/game/ops.c)
+### Script opcodes (reimplemented in src/game/ops.c, ops_sys.c, ops_vm.c)
 
 Handlers are entered by `jmp` from the fetch loop with ESI past the opcode byte(s) and end
 with `jmp 0x4060f9`. At 0x4060f9 only ESP, EBP and ESI are live (tools/liveness.py; the
@@ -409,6 +409,28 @@ backward and polls; each loop over a 02 list polls at its own backward jump.
 | 04 20 | 0x4070bc | argument list b, offset: click handler b = offset (no bound check on b) |
 | 04 22 | 0x40739b | argument list read and dropped |
 | 04 23 | 0x4071a4 | the segment base of `@[7]` is read first; then argument list table, x, y; records of five u16 {id, x0, y0, x1, y1} at base + table, tested x >= x0, x <= x1, y >= y0, y <= y1 in that order, inclusive, until id 0xffff; S = the id found or 0xffff |
+| 0f | 0x40659e | expr; nonzero: run the block (0x4061cd), skip the rest of the 02 0f / 02 chain, then go on if AL = 0, else `ret` (break/continue out of the enclosing while); zero: skip the block and test the next 02 0f, or run a final 02 block |
+| 11 | 0x4065f6 | wait for a click or Enter pressed and released (0x406acc), then clear the text window (0x406b24) |
+| 13 / 14 | 0x406658 / 0x406a9a | run the block at label n / at script offset v with ESI pushed (nested VM), then go on |
+| 15 | 0x4069ce | v; format it at 0x445ce6 (0x4069fd): digits from the low nibble of [0x4452f7] (0 as many as needed, 1-4 that many low ones, else 5; a too small count gives a first "digit" above 9), ASCII between 06 marks when the high nibble is set (`inc di`), else Big5 0xa2af + d and a NUL; then run it as a nested script |
+| 16 | 0x406aad | v: wait v/4 + 1 frames (0x4075c6, ECX = v); no argument: wait for a click (0x406acc) |
+| 04 10 | 0x40660c | expr block: push the statement; while expr, run the block; AL = 1 (continue) re-tests, AL = 2 (break) ends |
+| 04 13 | 0x406671 | n: menu block = label n, or the block given inline (0x445e0c); [0x445304] = 1; run label 38; then each round: pump (WM_QUIT ends the VM), step the animations; if [0x445304] was cleared go on, else run label 39 and, for the first input k = 0-5 enabled in 0x4452e1 (bit 1 << (k + 1)) that is down (0x4074d5), run label 32 + k and, unless bit 0 of 0x4452e1, wait for its release (k = 5 steps the animations while it waits) |
+| 04 1e | 0x406f7c | name: load it over the script, reset the slots (0x406dff), clear 0x445ce1/ce2/ce4, ESI = the file's entry, `esp = [0x445cdc]` |
+| 04 1f | 0x406fcd | name: run it as a subroutine ("Calling a MES file" below) |
+| 04 21 | 0x4070d5 | mode, n: 0x445d8a = '0' + n; 0: load FLAGn over 0x444e78 (0xc00 bytes: name, flags, registers), keeping bits 5-6 of @[9], VM init (0x406395), then as 04 1e with the name it holds; 1: save those 0xc00 bytes; other: the load and VM init, keeping the running file's name (copied to 0x445d66 and back) |
+| 17 | 0x406b05 | [c]: clear the text window (0x406b24) in colour c << 4, or in the text colour |
+| 19 | 0x407204 | n, a, b, result in S: 0 restore the picture stashed in segment 3 and draw it to surface 1; 1 S = 0xff; 2 palette fade / stopwatch (0x401d30, 0x401e10); 3 y swap 512 bytes of row y + 0x40 between surfaces 0 and 1; 4 dissolve wipe (0x401a50); 5 a S = a |
+| 1a | 0x407096 | n, slot, a, b: animation slot control 0x403510 (EAX n, EBX slot, ECX a, EDX b) |
+| 04 14 | 0x406842 | n: 1 counts the visible items of the menu block into 0x445302; else fills the table at @[22] with {text offset, item number} for [0x445300] visible items after skipping [0x4452fe] (item step 0x4068e1) |
+| 04 15 | 0x406916 | n: 0 show / 1 hide the cursor (only if not so), 2 nothing, 3 x y move the mouse, 4 off load the 32x32 AND/XOR bitmap (128 dwords, byte-swapped) from segment @[7] to 0x4be900 |
+| 04 16 | 0x406f06 | n [v]: 2 set the palette now (0x401ca0), or all entries from v (0x40754d), saving and restoring the tables (0x40756c, 0x407599); 3 fade and wait; others nothing |
+| 04 17 / 04 18 | 0x406b76 / 0x406bcb | x0 y0 x1 y1 (x in units of 8 pixels): fill (0x4017b0) / XOR (0x401870) on surface @[6] with the text colour |
+| 04 19 / 04 1a / 04 1b | 0x406c20 / 0x406c85 / 0x406cea | x0 y0 x1 y1 s dx dy d: copy (0x401430) / swap (0x401670) / masked copy (0x4014f0) from surface s to (dx, dy) of d, surfaces as one word s << 8 \| d; 04 1b with no argument redraws the last picture's rectangle (0x44538a) from surface 1 to 2 |
+| 04 1c | 0x406d8b | name, off: load the file into segment @[7] at off (0x401050) |
+| 04 1d | 0x406e11 | [name]: picture to surface @[6] (0x406e20; no argument: the one at 0x4662be) |
+| 04 24 / 04 25 | 0x4073a5 / 0x4073cd | music (0x402cb0 / stop 0x4032c0) / voice clip (0x403360) |
+| 04 26 | 0x4073ee | n, args: map sub-op n through 0x403a70 with ESI = the argument values, S = AX after; 4 and 5 first reset the slots (0x406dff) |
 
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 
@@ -488,7 +510,10 @@ the caller restores everything with `mov cx, 0x1e` / `mov cx, 0x8` + `rep movsd`
 code works because the last thing to run before them is the message pump (0x401bf0, called
 at every opcode fetch, 0x4060f9), whose PeekMessageA/DispatchMessageA leave ECX changed.
 A replacement pump has to clobber ECX (to a value with a zero high half) or the copy runs off
-memory.
+memory. The pump is not the only way there: a 04 11/04 12 in an if block at the called
+file's top level returns through 0f's `ret` (0x4065bf) with whatever ECX the handlers
+before it left, so every handler must leave ECX's high half zero, as the native ones do
+(the differential harness checks it, `diff_live_bits`).
 
 ## Running the game code: interpreter, recompile, lockstep
 

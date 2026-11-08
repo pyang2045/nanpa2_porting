@@ -68,8 +68,8 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
 2. **vm helpers, done.** 0x4061d4 block skip, 0x40741b argument parser (+0x4074a3), 0x406dc4
    string argument, 0x406395 VM init, 0x4068e1 menu item step. These are called units with
    register arguments, mostly pure.
-3. **Jump overrides, then the opcode handlers; started** (the mechanism and 12 handlers,
-   "Stage 2" below). Opcode handlers are reached by
+3. **Jump overrides, then the opcode handlers; done** except ext 0x20 (the mechanism and
+   12 handlers in "Stage 2", the rest in "Stage 3" below). Opcode handlers are reached by
    `jmp [0x40620b + 4*op]` / `jmp [0x406262 + 4*xx]` and end with `jmp 0x4060f9`; they have
    no return address. Replacing them needs a second override kind: recomp emits
    `pc = hle_jump(addr); goto dispatch;` for the handler address, and the C handler returns
@@ -77,7 +77,8 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
    condition for the oracle: dispatch stops at a given (pc, esp) pair. Start with the
    assignments (ops 0x0a-0x0e), then 0x10-0x18 and the ext ops that only call already
    replaced code. Ops that run a nested VM (0x0f if, 0x13/0x14 call, ext 0x10 while, ext
-   0x1f call MES) come once the loop itself is replaced.
+   0x1f call MES) turned out not to need the loop in C: they are split at those calls
+   ("call exits", Stage 3).
 4. **The VM loop 0x4060d4/0x4060f9.** Fetch, the 00/01/02 block structure (nested VM by
    native recursion and `mov esp, [0x445cdc]` unwinding), text output 06 and Big5 bytes,
    click handlers. After this the whole vm module is C, and the native stack tricks are
@@ -117,8 +118,10 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
   native globals (`src/game/vm.h`). Emulated memory stays the single state store.
 - Replaced code charges an estimated native instruction count (`X86_COUNT`) so that the
   486 pacing (`--cpu-mips`) stays as it was. The diff run reports native and estimated
-  instructions per call: script_eval 184-250 native against 200-255 estimated at 22 per
-  token.
+  instructions per call. The evaluator charges each token what the native loop runs for it
+  (6 for the 03 end, 14 a digit, 23 a register, 27 most operators: `token_insns` in
+  expr.c); over a 20k-frame explore run the C units' charges total 1.003 of the original's
+  (Stage 3).
 
 **Jump overrides (`HLE_GAME_JUMP`, opcode handlers).** A script opcode handler is entered
 by the VM's `jmp [0x40620b + 4*op]` / `jmp [0x406262 + 4*xx]` and leaves by `jmp 0x4060f9`
@@ -142,8 +145,9 @@ there is no return address. So:
   the oracle with `x86_stop_esp` = the handler's ESP, so the oracle's result is a CPU and
   an exit pc, the same as the C handler's.
 - Inside an oracle (`MODE_ORACLE`), `hle_jump` returns `X86_ORACLE_TAG | addr` and the
-  dispatch (or the interpreter) runs the original inline; handlers do not nest today, but
-  the path is there for the VM loop.
+  dispatch (or the interpreter) runs the original inline. A C handler can do the same
+  outside a test: a unit's `native` predicate (Stage 3) leaves the cases it does not cover
+  to the original.
 - Lockstep: `hle_jump` is an HLE check point like `hle_call`, and an oracle stop is a
   return check point (the shadow predicts the exit pc, not the sentinel).
 - Scratch registers: only ESP, EBP and ESI are live at 0x4060f9 (`tools/liveness.py`, an
@@ -163,11 +167,12 @@ there is no return address. So:
    written (an input) or written;
 3. undoes the original's writes, restores the entry CPU and runs the reimplementation,
    traced;
-4. compares: every register outside the unit's scratch set, the flags if a caller uses
-   them, for a jump unit the exit pc, every byte either side wrote except stack below the
-   entry ESP (dead stack, such as the evaluator's RPN pushes; the stack is the 1 MB below
-   `STACK_TOP`, `diff_kept` in diff.h), and every byte the reimplementation read that the
-   original did not (an input the record would not hold);
+4. compares: every register outside the unit's scratch set (and ECX's upper half even
+   when ECX is scratch, `diff_live_bits`), the flags if a caller uses them, for a jump
+   unit the exit pc, every byte either side wrote except stack below the exit ESP (dead
+   stack, such as the evaluator's RPN pushes; the stack is the 1 MB below `STACK_TOP`,
+   `diff_kept` in diff.h), and every byte the reimplementation read that the original did
+   not (an input the record would not hold);
 5. on a difference logs `diff MISMATCH addr name call N (esi, frame): ...` and keeps the
    original's result, so the run goes on exactly as the unmodified game. The instruction
    count charged is the original's.
@@ -182,6 +187,11 @@ so its writes are compared as theirs (and the unit itself is no longer reached).
 registers get garbage (0xdead0000 ^ ...) and, unless a caller reads them, the flags are
 toggled. A register wrongly taken as dead then shows up as a divergence or a trap in the
 explore run; this is how the liveness answers (a strong hint, not a proof) are checked.
+ECX's upper half is not poisoned (see Stage 3: 04 1f).
+
+Writes the HLE layer makes into game memory with `memcpy` (fread 0x412deb, the GP4
+decompressor 0x4075f0, sprintf) report themselves to the trace (`X86_TRACE`), so the
+harness also undoes a file the original loaded, for example over the script.
 
 Timer polls are held off during the two runs (`x86_poll_countdown`), so no tick or present
 lands between them. Nested units run as originals inside an original and as
@@ -261,6 +271,74 @@ backend once after adding an `HLE_GAME_JUMP` or `HLE_GAME_OVERRIDE` line.
 The scratch sets come from `tools/liveness.py` and were checked with
 `NANPA2_DIFF_POISON=1` explore runs. Results are in NOTES.md (2026-11-08, reimplementation
 stage 2).
+
+## Stage 3: the remaining opcode handlers (src/game/ops_sys.c, ops_vm.c)
+
+Every opcode handler of both jump tables is now C except ext 0x20 (0x4070bc, written but
+never reached by an explore run). The VM loop 0x4060d4/0x4060f9 itself stays native (see
+"Not done" below).
+
+**Handlers around native routines** (`ops_sys.c`, `JUMP_SYS` in units.c): 17 0x406b05,
+19 0x407204, 1a 0x407096 and ext 14 0x406842, 15 0x406916, 16 0x406f06, 17 0x406b76, 18
+0x406bcb, 19 0x406c20, 1a 0x406c85, 1b 0x406cea, 1c 0x406d8b, 1d 0x406e11, 24 0x4073a5, 25
+0x4073cd, 26 0x4073ee. The handler (argument parsing, the sub-op dispatch, the register
+set-up) is C; the subsystem routine it calls (blits, file load, the animation step, music)
+is still the native one, called with `ncall` as a `call` would. A unit's `native`
+predicate sends the sub-ops that are timer-bound or pump messages to the original
+handler (19 sub-op 4, the dissolve wipe; 1a sub-op 4, which runs a slot to its end; 04 16
+mode 3, a fade that spins on the timer; 04 26 sub-ops 5, 7 and 12; and any sub-op given
+as an expression or outside the table): `game_jump` returns
+`X86_ORACLE_TAG | addr`, and the diff reports it as "left to the native handler N times".
+These units are not recorded (`calls_native`): a replay has no native code to call.
+
+**Call exits** (`ops_vm.c`). Handlers that run a block (0x4061cd), a nested VM (0x4060f9),
+a wait or the message pump do it with `call`, and the callee may run any handler, wait
+for input or reset the stack. They are split there instead of being nested in C:
+
+- `HLE_GAME_CALL_EXIT(ra, "what")` in overrides.h marks `call target; ra:` inside a jump
+  unit. The C handler does what the `call` does (`push32(ra)`, return `target`), so the
+  callee runs natively with no host frame under it.
+- The code at ra is a jump unit of its own (`RESUME` in units.c), entered when the callee
+  returns; `stack_words` is how many words the handler had pushed above its entry ESP.
+- recomp.py ends a jump unit's body at its call exits (the call goes through dispatch) and
+  checks that each call exit follows a direct call inside a handler.
+- The oracle stops (`x86_stop_at`) at an exit pc or any jump unit at the stop ESP (entry
+  ESP + 4 * stack_words; not at the first check, which is its own entry), at a call exit's
+  target with ra on top of the stack, or when ESP rose above the stop ESP. A
+  `mov esp, [mem]` ends its block in the recompile (0x40638d, 0x406fc2), so both backends
+  stop right after it.
+
+Units: 0f 0x40659e/0x4065ae/0x4065ed, 11 0x4065f6/0x4065fb, 13 0x406658/0x40666b, 14
+0x406a9a/0x406aa7, 15 0x4069ce/0x4069f7 (with the number formatter 0x4069fd, a called
+unit), 16 0x406aad, ext 10 0x40660c/0x40661e, ext 13 0x406671 with 22 pieces
+0x4066b8-0x40683b, ext 1e 0x406f7c, ext 1f 0x406fcd/0x40704a, ext 21 0x4070d5.
+
+**Harness changes.** An output is dead only below the exit ESP (`diff_kept`): a handler
+that ends at a call exit leaves its pushes live. HLE writes into game memory are traced,
+so a file load over the script (04 1e, 04 1f) is undone before the C run. ECX's upper half
+counts as live even where ECX is scratch (`diff_live_bits`): 04 1f, after the file it
+called returns, copies with `mov cx, 0x1e; rep movsd` (0x40705e), and a 04 11/04 12 in an
+if block at that file's top level gets there through 0f's `ret` with ECX as the handlers
+before it left it. Poisoning all of ECX made the original
+copy run off memory.
+
+**Pacing.** The evaluator's 22 per token became per token type (Override mechanism above),
+the block skip 4 a byte before the 01 and 6 a byte inside. These were most of the
+overcharge in the argument parser (135 against 99 native per call) and ops 0a-0d, 18.
+
+**Not done.**
+
+- The VM loop 0x4060d4/0x4060f9 (fetch, 00/01/02 blocks, text 06 and Big5, the click
+  handlers before each fetch). Its handlers are C, but the loop's own work is the pump
+  0x401bf0 and the animation step 0x403624 (both native routines that every iteration
+  calls) plus the text drawing 0x401900, so a C loop would still call native code around
+  each fetch. It is better done with module 5 (text, anim).
+- Ext 0x20 0x4070bc: no explore run has reached it.
+- `tools/reimpl_status.py` counts a handler's bytes as replaced even where its `native`
+  predicate leaves sub-ops to the original (19, 1a, 04 16, 04 26), so its figures are an
+  upper bound.
+
+Results are in NOTES.md (2026-11-08, reimplementation stage 3).
 
 ## Inventory
 
