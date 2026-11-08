@@ -79,11 +79,12 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
    replaced code. Ops that run a nested VM (0x0f if, 0x13/0x14 call, ext 0x10 while, ext
    0x1f call MES) turned out not to need the loop in C: they are split at those calls
    ("call exits", Stage 3).
-4. **The VM loop 0x4060d4/0x4060f9.** Fetch, the 00/01/02 block structure (nested VM by
+4. **The VM loop 0x4060d4/0x4060f9, done** ("Stage 4"; the click handler path stays
+   native). Fetch, the 00/01/02 block structure (nested VM by
    native recursion and `mov esp, [0x445cdc]` unwinding), text output 06 and Big5 bytes,
    click handlers. After this the whole vm module is C, and the native stack tricks are
    gone.
-5. **text and anim.** Character drawing 0x401900 goes through GDI imports (`src/hle/text.c`
+5. **text and anim, done** ("Stage 4"). Character drawing 0x401900 goes through GDI imports (`src/hle/text.c`
    already rasterizes); the text cursor 0x4063ee, number formatting 0x4069fd, the text
    window 0x406b24. Animation slots 0x403510/0x403624/0x403661 (ANI bytecode).
 6. **screen.** Blits 0x401430/0x4014f0/0x401670/0x4017b0/0x401870 and the surface lock
@@ -340,6 +341,77 @@ overcharge in the argument parser (135 against 99 native per call) and ops 0a-0d
 
 Results are in NOTES.md (2026-11-08, reimplementation stage 3).
 
+## Stage 4: the VM loop, text output and animation (src/game/loop.c, text.c, anim.c)
+
+**The loop as pieces** (`loop.c`). The VM loop is split at its calls as the handlers were in
+Stage 3: each piece is a jump unit (`PIECE` in units.c, `HLE_GAME_JUMP` in overrides.h)
+and each call that pumps, waits or runs a block is a call exit, so the pump 0x401bf0 runs
+once, natively, between two pieces, and a nested block is the same loop on a deeper stack.
+
+| Piece | After | Does |
+|---|---|---|
+| 0x4060d4 | WinMain's call | VM entry: push ebp, [0x445cdc] = ESP, VM init (0x406395), load the MES file (START.MES), ESI = its entry |
+| 0x4060f9 | any handler | loop head: `call 0x401bf0` (call exit 0x4060fe) |
+| 0x4060fe | the pump | WM_QUIT: the VM end 0x40638d; else the animation step (C), then unless @[9] bit 2 or a handler is running, test the left button (call exit 0x406124) |
+| 0x406124 / 0x406134 | button test 0 / 1 | down with a handler: native (predicate); down without: fetch; up: test the right button / fetch |
+| (fetch) | | 0x40616e in C: probe, then 00/02 block end, 01 block, 04 ext table, 06 string, >= 0x80 Big5, 0a-1a op table, the rest the VM end |
+| 0x4061c2 / 0x4061cd / 0x4061d3 | a block | skip the block (0x4061d4) and loop; run it (`call 0x4060f9`); return its AL |
+| 0x406315 / 0x406383 | a character's delay | advance the cursor (C 0x4063ee), the next string byte / the loop |
+| 0x4074d5 / 0x4074db | | input test: pump, test input AL (flags out) |
+| 0x4075c6 / 0x4075d7 | | frame wait: pump and step the animations until the frame |
+| 0x406acc-0x406b02 | | click wait (five pieces: frame, test, release) |
+| 0x406abd / 0x406ac7 | op 16's waits | the op 16 continuations (RESUME), which stage 3 left native |
+
+The text drawing 0x401900, the cursor 0x4063ee/0x406415, the window clear 0x406b24, the
+animation step 0x403624 and its slot interpreter 0x403661, the slot control 0x403510 (sub-op
+4, which spins on the frame counter, left native), the slot reset 0x406dff and the palette
+copy 0x40752c are called units (`CALL_SYS`, `CALL_NATIVE`). The C pieces and handlers call
+them directly; a native caller (a handler's sub-op left native) goes through the override. They call the native screen routines (lock
+0x401190 and unlock 0x4012b0, blits 0x401430/0x4014f0, fill 0x4017b0, palette upload
+0x401ca0) and the GDI imports through `game_ncall`, as the native `call` would (the same
+pushes, the same register state), so `src/hle/text.c` and `ddraw.c` serve them unchanged.
+
+**Registers.** At the loop head only ESP, EBP and ESI are live; a piece that ends at a
+handler leaves EAX (the opcode index) and EDX (the native map code of 04 26 reads it), a
+block end AL and ECX's and EDX's upper halves, so the fetch pieces' scratch is EBX and EDI
+(`AT_FETCH`). The text and animation units set every register as the native code does:
+their callers' callers read registers in places the liveness pass cannot rule out (the
+draw leaves EDX = the scratch surface, which is how the first mismatch of a long run
+showed up: a Big5 character with no delay ends at the next piece with EDX live).
+
+**Harness changes.** recomp.py sends a call to a jump unit (the VM entry, 0x4061cd, the
+waits) and code that falls into one (0x4060d4 into 0x4060f9) through dispatch, and an
+oracle no longer stops at its own entry when that is an exit (the loop head):
+`x86_stop_at` never stops at the first check. `x86_is_oracle_pc` takes only a tagged game
+code address as an original (the HLE COM thunk 0x71000244 has the tag bit set too). A call
+unit's `native` predicate is honoured like a jump unit's. WM_QUIT inside a piece returns
+0x40638d at the piece's own ESP, where its oracle stops too.
+
+**Dispatch tables** are held as 16-bit offsets: as 32-bit addresses they are the exe's own
+bytes at 0x40620b/0x406262, which ctest `no_game_bytes` found.
+
+**Pacing.** Each piece charges the native instruction count of its path (insns/call of the
+oracle and the C agree to 0.1 per piece in the diff report; the VM entry is 102 against
+103, once per run).
+
+**Not done.**
+
+- The click handler path 0x40613f-0x40616c (a button down with its handler set): it waits
+  for the release and runs the handler's block. Ext 0x20 0x4070bc, which sets the
+  handlers, has never been reached by an explore run, so the path is left to the native
+  code by the predicates `game_native_click0/1` and the C traps if it ever gets there
+  without them.
+- 0x403510 sub-op 4 (start a slot and wait until it stops): it spins on the frame counter;
+  native, like the other timer-bound sub-ops.
+- Not a gap in the C, but a limit of the test: diff runs are slower in game frames than
+  plain runs. The timer is real time and the diff runs every piece twice, and since this
+  stage that is the whole loop. Seed 31 at NANPA2_TURBO=8 reaches S5.MES at frame 23953
+  plain (23258 on stage 3), 33395 with the diff (26758 on stage 3). The exploration bot
+  times its clicks in frames, so from a save in OPEN1.MES it stayed there for 300000 frames
+  with the diff at turbo 8, and reached 40.MES at turbo 2 (or plain at turbo 8).
+
+Results are in NOTES.md (2026-11-08, reimplementation stage 4).
+
 ## Inventory
 
 State: `game` reimplemented in src/game (oracle kept), `hle` replaced by platform code,
@@ -361,7 +433,7 @@ by name).
 | 0x401670 | 306 | screen | swap two surface rects through scratch surface 0x4ab058 | 4060d4 | 4011f0 4012e0 |  |
 | 0x4017b0 | 186 | screen | colour-fill rect (Blt COLORFILL, colour = arg>>4) | 4060d4 406b24 | 4011f0 4012e0 |  |
 | 0x401870 | 130 | screen | XOR rect with colour index (arg>>4) | 4060d4 | 401190 4012b0 |  |
-| 0x401900 | 333 | text | draw one ASCII/Big5 character via GDI TextOutA | 4060d4 | 401190 4012b0 SelectObject SetBkColor SetBkMode SetTextColor TextOutA |  |
+| 0x401900 | 333 | text | draw one ASCII/Big5 character via GDI TextOutA | 4060d4 | 401190 4012b0 SelectObject SetBkColor SetBkMode SetTextColor TextOutA | game |
 | 0x401a50 | 402 | screen | dissolve wipe surface 2 -> 0, 2 frames per step | 4060d4 | 401190 4012b0 401bf0 |  |
 | 0x401bf0 | 75 | input | message pump (PeekMessage/Dispatch), stream refill 0x4034a0; 0 = WM_QUIT | 401a50 404450 40609c 4060d4 4074d5 4075c6 | 4034a0 DispatchMessageA PeekMessageA TranslateMessage | hle |
 | 0x401c40 | 25 | screen | show game cursor (0x4ac510 = 1, draw 0x4012e0) | 4060d4 | 4012e0 |  |
@@ -394,9 +466,9 @@ by name).
 | 0x403360 | 211 | sound | play voice SPEECH%s once | 4060d4 | 401000 402f10 402f60 403020 403440 412c90 412d6e 412deb ... | hle |
 | 0x403440 | 90 | sound | stop voice buffer 0x4be564 | 4021c0 402c70 403360 | 412d26 | hle |
 | 0x4034a0 | 106 | sound | wait on stream events, refill played half | 401bf0 | 402f60 4031d0 MsgWaitForMultipleObjects | hle |
-| 0x403510 | 244 | anim | slot control (eax sub-op 0-7: start/run/stop/wait/offset/reset) | 4060d4 406dff | 403661 |  |
-| 0x403624 | 61 | anim | once per frame: step the ten slots at 0x4312cc | 4060d4 4075c6 | 403661 |  |
-| 0x403661 | 364 | anim | interpret one slot's ANI bytecode (delay, loops, blit, palette) | 403510 403624 | 401430 4014f0 401ca0 40752c |  |
+| 0x403510 | 244 | anim | slot control (eax sub-op 0-7: start/run/stop/wait/offset/reset) | 4060d4 406dff | 403661 | game |
+| 0x403624 | 61 | anim | once per frame: step the ten slots at 0x4312cc | 4060d4 4075c6 | 403661 | game |
+| 0x403661 | 364 | anim | interpret one slot's ANI bytecode (delay, loops, blit, palette) | 403510 403624 | 401430 4014f0 401ca0 40752c | game |
 | 0x4037fc | 410 | expr | evaluate RPN expression up to 0x03 | 4060d4 4068e1 40741b | 4039d6 4039f7 | game |
 | 0x4039d6 | 33 | expr | read 4-bit flag n from 0x444e98 | 4037fc |  | dead |
 | 0x4039f7 | 119 | expr | read constant operand (30-3f, 07 b, 08 h l, 09 h m l) (alt 403a06 403a12 403a22 403a42) | 4037fc 4060d4 |  | game |
@@ -464,27 +536,27 @@ by name).
 | 0x405f24 | 73 | map | flood-fill order case 7 |  | 405b07 |  |
 | 0x405fb6 | 230 | map | unreachable goal: mark approach cells for the sprite footprint | 405966 |  |  |
 | 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 |  |
-| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... |  |
-| 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 |  |
+| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... | game |
+| 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 | game |
 | 0x4061d4 | 39 | vm | skip a 01 ... 00 block, counting nesting | 4060d4 40741b |  | game |
 | 0x406395 | 89 | vm | init register '@' and segment table 0x44533c | 4060d4 |  | game |
-| 0x4063ee | 103 | text | advance text cursor, wrap line/window (alt 0x406415 newline) (alt 406415) | 4060d4 |  |  |
+| 0x4063ee | 103 | text | advance text cursor, wrap line/window (alt 0x406415 newline) (alt 406415) | 4060d4 |  | game |
 | 0x406455 | 60 | expr | write 4-bit flag n = ax (clamped to 15) | 4060d4 |  | game |
 | 0x4068e1 | 53 | vm | menu list: next item (guard 0f expr), al = -1/0/1 | 4060d4 | 4037fc | game |
 | 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd |  |
-| 0x406acc | 57 | vm | wait for click/Enter (bit 0x10) press then release | 4060d4 | 4074d5 4075c6 |  |
-| 0x406b24 | 82 | text | clear text window (fill 0x4017b0), home cursor | 4060d4 | 4017b0 |  |
+| 0x406acc | 57 | vm | wait for click/Enter (bit 0x10) press then release | 4060d4 | 4074d5 4075c6 | game |
+| 0x406b24 | 82 | text | clear text window (fill 0x4017b0), home cursor | 4060d4 | 4017b0 | game |
 | 0x406dc4 | 59 | vm | copy string argument into buffer edi | 4060d4 406e20 |  | game |
-| 0x406dff | 18 | anim | reset all animation slots (0x403510 sub-op 7) | 4060d4 406e20 | 403510 |  |
+| 0x406dff | 18 | anim | reset all animation slots (0x403510 sub-op 7) | 4060d4 406e20 | 403510 | game |
 | 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c |  |
 | 0x40741b | 136 | vm | parse argument list into 0x445d06 (types 0x445cf6), eax = arg 0 | 4060d4 | 4037fc 4061d4 4074a3 | game |
 | 0x4074a3 | 50 | vm | test whether the next byte starts an expression | 40741b |  | dead |
-| 0x4074d5 | 87 | input | pump, then test input bit al (0 ok, 1 cancel, 2-5 arrows) | 4060d4 406acc | 401bf0 |  |
-| 0x40752c | 33 | screen | copy a picture palette into 0x44530c / 0x445eae | 403661 406e20 |  |  |
+| 0x4074d5 | 87 | input | pump, then test input bit al (0 ok, 1 cancel, 2-5 arrows) | 4060d4 406acc | 401bf0 | game |
+| 0x40752c | 33 | screen | copy a picture palette into 0x44530c / 0x445eae | 403661 406e20 |  | game |
 | 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  |  |
 | 0x40756c | 45 | screen | save palette tables to 0x44608e | 4060d4 |  |  |
 | 0x407599 | 45 | screen | restore palette tables from 0x44608e | 4060d4 |  |  |
-| 0x4075c6 | 40 | vm | wait ecx/4+1 frames, pump and animate | 4060d4 406acc | 401bf0 403624 |  |
+| 0x4075c6 | 40 | vm | wait ecx/4+1 frames, pump and animate | 4060d4 406acc | 401bf0 403624 | game |
 | 0x4075f0 | 140 | file | GP4/ANI LZHUF decompressor (src/lzh.c) | 401050 | 40776b | hle |
 | 0x40767c | 61 | file | LZHUF tree rebuild at frequency 0x8000 | 4076b9 | 4076b9 | dead |
 | 0x4076b9 | 178 | file | LZHUF update (alt 0x4076cb) (alt 4076cb) | 40767c 40776b | 40767c | dead |
