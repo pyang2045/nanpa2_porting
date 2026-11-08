@@ -9,6 +9,25 @@ int x86_poll_countdown = 1;
 uint32_t x86_poll_pc;
 uint64_t x86_icount;
 void (*x86_trap_hook)(void);
+uint32_t x86_stop_esp, x86_stop_pc;
+const uint32_t *x86_stop_exits;
+
+int x86_stop_at(uint32_t pc)
+{
+	uint32_t esp = cpu.r[ESP];
+	int stop = esp > x86_stop_esp;
+	if (esp == x86_stop_esp)
+		for (const uint32_t *e = x86_stop_exits; e && *e; e++)
+			stop |= *e == pc;
+	if (stop) {
+		x86_stop_pc = pc;
+		x86_stop_esp = 0;
+		/* lockstep: the shadow of the last block predicted this pc,
+		 * not the sentinel x86_exec reports on return */
+		X86_LOCKSTEP_POINT(LS_RET, pc);
+	}
+	return stop;
+}
 
 _Noreturn void x86_trap(uint32_t pc, const char *why)
 {

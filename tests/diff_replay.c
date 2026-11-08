@@ -26,6 +26,18 @@ void x86_exec(uint32_t pc)
 	x86_trap(pc, "diff_replay: a unit called lifted code");
 }
 
+/* opcode handlers poll the host at their backward jumps; there is none */
+void x86_poll(void)
+{
+	x86_poll_countdown = 1 << 30;
+}
+
+/* the hit test (04 23) fires the hotspot probe for the exploration bot */
+void x86_probe(uint32_t pc)
+{
+	(void)pc;
+}
+
 struct counts {
 	unsigned long records, mismatches;
 };
@@ -36,7 +48,12 @@ static int replay_file(const char *path, struct counts *total, struct counts *pe
 	if (!f)
 		return 0;
 	char magic[sizeof DIFF_MAGIC - 1];
-	if (fread(magic, 1, sizeof magic, f) != sizeof magic || memcmp(magic, DIFF_MAGIC, sizeof magic)) {
+	int version = 0;
+	if (fread(magic, 1, sizeof magic, f) == sizeof magic)
+		version = !memcmp(magic, DIFF_MAGIC, sizeof magic)      ? 2
+		          : !memcmp(magic, DIFF_MAGIC_V1, sizeof magic) ? 1
+		                                                        : 0;
+	if (!version) {
 		fprintf(stderr, "%s: not a record file\n", path);
 		fclose(f);
 		total->mismatches++;
@@ -45,7 +62,7 @@ static int replay_file(const char *path, struct counts *total, struct counts *pe
 	static struct diff_record rec;
 	static struct trace_set got;
 	int r;
-	while ((r = diff_read(f, &rec)) == 1) {
+	while ((r = diff_read(f, &rec, version)) == 1) {
 		const struct game_unit *u = game_unit_find(rec.unit);
 		total->records++;
 		if (!u) {
@@ -59,13 +76,18 @@ static int replay_file(const char *path, struct counts *total, struct counts *pe
 			wr8(rec.in[i].addr, rec.in[i].value);
 		diff_set_cpu(rec.in_r, rec.in_flags);
 		trace_begin();
-		pop32(); /* the return address, as hle_call does */
-		u->run();
+		uint32_t pc = 0;
+		if (u->jump) {
+			pc = u->jump();
+		} else {
+			pop32(); /* the return address, as hle_call does */
+			u->run();
+		}
 		trace_end();
 		trace_set_clear(&got);
 		trace_collect(&got);
 		char why[512];
-		if (diff_check(u, &rec, &got, why, sizeof why)) {
+		if (diff_check(u, &rec, pc, &got, why, sizeof why)) {
 			if (c->mismatches < 20)
 				fprintf(stderr, "MISMATCH %08x %s record %lu (esi %08x):%s\n", u->addr, u->name,
 				        c->records, rec.in_r[ESI], why);

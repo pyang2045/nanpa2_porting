@@ -56,6 +56,8 @@ endif()
 # dependencies, so the differential replay links it alone.
 set(GAME_SOURCES
   src/game/expr.c
+  src/game/vm.c
+  src/game/ops.c
   src/game/units.c
   src/game/trace.c
   src/game/diff.c

@@ -33,6 +33,13 @@ static const uint32_t game_overrides[] = {
 	0
 };
 
+static const uint32_t jump_overrides[] = {
+#define HLE_GAME_JUMP(addr, what) addr,
+#include "hle/overrides.h"
+#undef HLE_GAME_JUMP
+	0
+};
+
 static const uint32_t probes[] = {
 #define HLE_PROBE(addr, what) addr,
 #include "hle/overrides.h"
@@ -51,6 +58,9 @@ void x86_interp_init(void)
 	for (size_t i = 0; game_overrides[i]; i++)
 		if (game_overrides[i] - CODE_START < CODE_LEN)
 			x86_interp_override[game_overrides[i] - CODE_START] = OVR_GAME;
+	for (size_t i = 0; jump_overrides[i]; i++)
+		if (jump_overrides[i] - CODE_START < CODE_LEN)
+			x86_interp_override[jump_overrides[i] - CODE_START] = OVR_JUMP;
 }
 
 _Noreturn void x86_unimplemented(uint32_t pc)
@@ -232,6 +242,20 @@ static void timed_hle_call(uint32_t pc)
 	hle_depth--;
 }
 
+static uint32_t timed_hle_jump(uint32_t pc)
+{
+	uint32_t next;
+	if (hle_depth++) {
+		next = hle_jump(pc);
+	} else {
+		double t0 = now_secs();
+		next = hle_jump(pc);
+		x86_interp_hle_secs += now_secs() - t0;
+	}
+	hle_depth--;
+	return next;
+}
+
 #define IFN(name) i_##name
 #define SHADOW 0
 #define MRD8(a) rd8(a)
@@ -243,6 +267,7 @@ static void timed_hle_call(uint32_t pc)
 #define COUNT(n) X86_COUNT(n)
 #define STEP() (x86_interp_steps++)
 #define HLE_CALL(pc) timed_hle_call(pc)
+#define HLE_JUMP(pc) timed_hle_jump(pc)
 #define POLL(at) X86_POLL(at)
 #define STR_MOVS(sz, rep) str_movs((sz), (rep))
 #define STR_STOS(sz, rep) str_stos((sz), (rep))
@@ -257,8 +282,8 @@ void x86_interp(uint32_t pc)
 	if (pc != X86_RET_SENTINEL && (pc & X86_ORACLE_TAG)) {
 		/* the original of a reimplemented function (NANPA2_DIFF) */
 		pc &= ~X86_ORACLE_TAG;
-		if (pc - CODE_START >= CODE_LEN || x86_interp_override[pc - CODE_START] != OVR_GAME)
-			x86_trap(pc, "oracle entry is not an HLE_GAME_OVERRIDE");
+		if (pc - CODE_START >= CODE_LEN || x86_interp_override[pc - CODE_START] < OVR_GAME)
+			x86_trap(pc, "oracle entry is not an HLE_GAME_OVERRIDE or HLE_GAME_JUMP");
 		i_run(pc, 0, pc);
 		return;
 	}

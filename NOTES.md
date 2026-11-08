@@ -615,3 +615,62 @@ code change.
   the game overrides active, explore seed 9, 120000 frames, turbo 8 (to s31.mes): 2.15 G
   instructions compared, 916 checks dropped (host call mid-block), no divergence.
   no_game_bytes: build/nanpa2 and build/同級生２.app (7 files), 0 matches.
+
+## 2026-11-08 (reimplementation stage 2: VM helpers, jump overrides, 12 opcode handlers)
+
+- ca615e6: the VM helpers in C (`src/game/vm.c`): block skip 0x4061d4, argument parser
+  0x40741b with 0x4074a3, string argument 0x406dc4, VM init 0x406395, menu item 0x4068e1.
+  Opcode handlers in C (`src/game/ops.c`): 0a 0x406491, 0b 0x4064b5, 0c 0x4064d9, 0d
+  0x4064f8, 0e 0x406557, 12 0x40663e, 18 0x4069be, ext 11 0x406638, 12 0x40663b, 20
+  0x4070bc, 22 0x40739b, 23 0x4071a4. Contracts and exact semantics in re-notes.md
+  ("Script VM helpers", "Script opcodes").
+- A second override kind for the handlers, which are entered by `jmp` and leave by
+  `jmp 0x4060f9`: reaching one goes on at `pc = hle_jump(addr)`, the pc the C handler
+  returns. Their oracles run until an exit (0x4060f9 / 0x40638d at the handler's ESP, or a
+  `ret` above it: `x86_stop_at`). recomp.py refuses calls, fallthrough and outside direct
+  jumps into a handler. Diff records gain the exit pc (N2DIFF2). docs/reimpl.md "Override
+  mechanism".
+- `tools/liveness.py`: interprocedural register liveness over the lifted code (function
+  summaries, callee-save slots, per-lane registers, CF and ZS flags apart). At 0x4060f9
+  only ESP, EBP, ESI are live, so EAX ECX EDX EBX EDI and the flags are handler scratch.
+  Checked by `NANPA2_DIFF_POISON=1`, which fills every unit's scratch registers with
+  garbage after it runs.
+- Harness bug, present since stage 1: outputs counted only writes at or above the entry
+  ESP, and the stack (0x00fxxxxx) lies below the globals, so no global write was ever
+  compared. A sabotaged op 0c gave 0 mismatches. Now only stack below the entry ESP is dead
+  (`diff_kept`, diff.h): the same sabotage gives 3745 mismatches, and a sabotaged string
+  case of the argument parser gives 32. Stage 1's units write no globals except the flag
+  write 0x406455, whose only callers (ops 0a/0b) are now in C and compared with it.
+- 5d177c6: merge of master b4dcf20 (interpreter backend). The overrides are lines in
+  `src/hle/overrides.h`: `HLE_GAME_OVERRIDE` for the helpers, a new `HLE_GAME_JUMP` kind for
+  the handlers (recomp.py `GAME_JUMP_OVERRIDES`; interpreter `OVR_JUMP`, with the oracle
+  stop checked at each fetch while `x86_stop_esp` is set). Lockstep: `hle_jump` is an HLE
+  check point, an oracle stop a return point. The C hit test fires probe 0x4071bb itself,
+  so the exploration bot still gets the hotspot table.
+- fa0adfb: docs (reimpl.md, re-notes.md); reimpl_status.py counts the handlers.
+- Note: the entry checks for jump units (no calls, fallthrough or outside direct jumps)
+  are in recomp.py's check_oracles, which the default interp build does not run: build
+  the recomp backend once whenever an HLE_GAME_JUMP or HLE_GAME_OVERRIDE line is added.
+- Results, interp build, explore runs of 300000 frames at NANPA2_TURBO=8, all with the
+  online diff except seed 32; none had a trap, watchdog warning, stall or mismatch:
+  - seed 31: Prologue to OPEN1 and 40.MES (frame 267381), ends at S50.MES; records kept;
+  - seed 33 (poisoned): OPEN1 at 254333, 40.MES, ends at TOWN.MES;
+  - seed 32 (C only, poisoned, no diff): OPEN1 at 232351, 40.MES, ends at 41.MES, diary save;
+  - seed 42 (poisoned, from seed 32's saves): 31 MES files in the main game, ends at 14.MES.
+  Calls compared over seeds 31, 33 and 42: evaluator 2.45 M, block skip 1.78 M, op 0c 2.94 M,
+  op 0d 713 k, argument parser 1.04 M, hit test 146 k, ext 12 174 k, op 12 71 k, op 18 47 k,
+  menu item 32 k, op 0a 19.7 k, op 0b 26.4 k, string argument 3.5 k, ext 22 486, ext 11 54,
+  op 0e 29, VM init 8; 0 mismatches. Ext 20 (0x4070bc) was never reached, so its handler
+  (written in ops.c) is not enabled in overrides.h until a run covers it. Replay of the
+  352,462 records of seeds 31 and 42: 0 mismatches.
+- Short checks: recomp build with the online diff (seed 31, 6000 frames) 0 mismatches;
+  NANPA2_LOCKSTEP=1 with the diff (3000 frames) and without (seed 9, 120000 frames, to
+  S24.MES, 1.70 G instructions compared, 690 checks dropped) no divergence.
+- ctest: 9 of 9 on the interp build (with no_game_bytes) and on a recomp build (with
+  lockstep); smoke skipped (screen not visible).
+- Pacing: the estimated counts are close to the native ones per call (evaluator 326-572
+  against 326-559, argument parser +25%, op 0d +40%, op 0e +90% on few calls); tuning is
+  left for later.
+- reimpl_status: 5,267 of 25,597 bytes replaced (20.6%, was 17.3%), 33 of 142 functions;
+  game logic 1,471 bytes (5.7%, was 2.4%): 8 functions and 11 opcode handlers. vm module
+  849 of 4,295 bytes (19.8%).

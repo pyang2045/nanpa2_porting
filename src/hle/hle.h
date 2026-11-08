@@ -25,6 +25,12 @@
 void hle_call(uint32_t addr);
 int hle_is_target(uint32_t addr);
 
+/* Jump overrides (HLE_GAME_JUMP in overrides.h, script opcode handlers
+ * reimplemented in src/game): code that reaches one by any jump continues
+ * at pc = hle_jump(addr). There is no return address; the handler leaves
+ * the CPU as the native one would at the returned pc. */
+uint32_t hle_jump(uint32_t addr);
+
 /* After hle_call popped the return address: argument i (0-based). */
 static inline uint32_t hle_arg(int i)
 {

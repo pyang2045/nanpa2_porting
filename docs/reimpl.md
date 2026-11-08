@@ -65,10 +65,11 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
 1. **expr, done.** Script expressions and flags: 0x4037fc evaluator, 0x4039f7 constant
    reader, 0x4039d6 flag read, 0x406455 flag write. They are pure, hot (millions of
    calls a playthrough) and called, so the call-override mechanism fits.
-2. **vm helpers.** 0x4061d4 block skip, 0x40741b argument parser (+0x4074a3), 0x406dc4
+2. **vm helpers, done.** 0x4061d4 block skip, 0x40741b argument parser (+0x4074a3), 0x406dc4
    string argument, 0x406395 VM init, 0x4068e1 menu item step. These are called units with
    register arguments, mostly pure.
-3. **Jump overrides, then the opcode handlers.** Opcode handlers are reached by
+3. **Jump overrides, then the opcode handlers; started** (the mechanism and 12 handlers,
+   "Stage 2" below). Opcode handlers are reached by
    `jmp [0x40620b + 4*op]` / `jmp [0x406262 + 4*xx]` and end with `jmp 0x4060f9`; they have
    no return address. Replacing them needs a second override kind: recomp emits
    `pc = hle_jump(addr); goto dispatch;` for the handler address, and the C handler returns
@@ -119,6 +120,37 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
   instructions per call: script_eval 184-250 native against 200-255 estimated at 22 per
   token.
 
+**Jump overrides (`HLE_GAME_JUMP`, opcode handlers).** A script opcode handler is entered
+by the VM's `jmp [0x40620b + 4*op]` / `jmp [0x406262 + 4*xx]` and leaves by `jmp 0x4060f9`
+(the loop head), `jmp 0x40638d` (VM end) or `ret` (ext 11/12 return from the block's VM);
+there is no return address. So:
+
+- `HLE_GAME_JUMP(addr, "what")` lines in `overrides.h` (recomp.py: `GAME_JUMP_OVERRIDES`,
+  also in `HLE_OVERRIDES`; interpreter: `OVR_JUMP`). Reaching addr by any jump continues at
+  `pc = hle_jump(addr)` (recomp: `case addr: pc = hle_jump(pc); goto dispatch;`;
+  interpreter: at the override check of its fetch loop). `hle_jump` hands it to `game_jump`,
+  which runs the unit's `jump` function: it reads and writes the CPU like the native
+  handler and returns the pc to go on at (normally 0x4060f9, after the native handler's
+  poll at its `jmp`).
+- recomp.py refuses calls to a jump unit, fallthrough into one, and direct jumps into it
+  from outside its own body, so the table is the only way in.
+- The oracle body of a jump unit ends at the exits (`JUMP_EXITS`, 0x4060f9 and 0x40638d):
+  recomp computes it with those as stops, and inside it a jump to an exit goes through
+  dispatch. While `x86_stop_esp` is set, dispatch (recomp) or every fetch (interpreter)
+  calls `x86_stop_at(pc)`, which stops the run when ESP is above `x86_stop_esp` (a `ret`
+  out of the handler) or equal to it at an exit; `x86_stop_pc` is that pc. `game.c` runs
+  the oracle with `x86_stop_esp` = the handler's ESP, so the oracle's result is a CPU and
+  an exit pc, the same as the C handler's.
+- Inside an oracle (`MODE_ORACLE`), `hle_jump` returns `X86_ORACLE_TAG | addr` and the
+  dispatch (or the interpreter) runs the original inline; handlers do not nest today, but
+  the path is there for the VM loop.
+- Lockstep: `hle_jump` is an HLE check point like `hle_call`, and an oracle stop is a
+  return check point (the shadow predicts the exit pc, not the sentinel).
+- Scratch registers: only ESP, EBP and ESI are live at 0x4060f9 (`tools/liveness.py`, an
+  interprocedural liveness over the lifted code with per-function summaries), so EAX, ECX,
+  EDX, EBX, EDI and the flags are the handlers' scratch (`AT_LOOP` in units.c). Ext 11/12
+  return to the caller of the VM, so they have no scratch.
+
 ## Differential harness
 
 **Online (`NANPA2_DIFF=1`).** On every call of a unit, `src/game/game.c`:
@@ -132,12 +164,24 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
 3. undoes the original's writes, restores the entry CPU and runs the reimplementation,
    traced;
 4. compares: every register outside the unit's scratch set, the flags if a caller uses
-   them, every byte either side wrote at or above the entry ESP (writes below it are dead
-   stack, such as the evaluator's RPN pushes), and every byte the reimplementation read
-   that the original did not (an input the record would not hold);
+   them, for a jump unit the exit pc, every byte either side wrote except stack below the
+   entry ESP (dead stack, such as the evaluator's RPN pushes; the stack is the 1 MB below
+   `STACK_TOP`, `diff_kept` in diff.h), and every byte the reimplementation read that the
+   original did not (an input the record would not hold);
 5. on a difference logs `diff MISMATCH addr name call N (esi, frame): ...` and keeps the
    original's result, so the run goes on exactly as the unmodified game. The instruction
    count charged is the original's.
+
+Until stage 2 the output rule was "at or above the entry ESP", and the stack lies below
+the game's globals (0x00fxxxxx against 0x4xxxxx), so writes to globals were never
+compared: a sabotaged op 0c gave 0 mismatches. With `diff_kept` it gives 3745. Of the stage
+1 units only the flag write 0x406455 writes globals; its callers are ops 0a/0b, now in C,
+so its writes are compared as theirs (and the unit itself is no longer reached).
+
+**Poison (`NANPA2_DIFF_POISON=1`).** After every unit, compared or not, its scratch
+registers get garbage (0xdead0000 ^ ...) and, unless a caller reads them, the flags are
+toggled. A register wrongly taken as dead then shows up as a divergence or a trap in the
+explore run; this is how the liveness answers (a strong hint, not a proof) are checked.
 
 Timer polls are held off during the two runs (`x86_poll_countdown`), so no tick or present
 lands between them. Nested units run as originals inside an original and as
@@ -146,7 +190,8 @@ mismatches, records, instructions per call, and the evaluator's token coverage.
 
 **Records (`NANPA2_DIFF_DIR=DIR`).** Each compared call is also written to
 `DIR/<addr>-<pid>.n2diff` (`src/game/diff.c`): entry registers and flags, the input bytes
-with their values, exit registers and flags, and the output bytes. Records are
+with their values, exit registers and flags, for a jump unit the exit pc (format
+`N2DIFF2`; `N2DIFF1` files of stage 1 are still read), and the output bytes. Records are
 deduplicated by a hash of their inputs. Up to `NANPA2_DIFF_MAX` per unit (default 40000) are
 kept: every new input for the first half, then one in 16, so a long run is sampled to its
 end. Records hold game memory: they stay in the build folder or a scratch folder and are
@@ -188,6 +233,34 @@ place of returning into garbage. The one benign case, an unknown token as the fi
 behaves as natively (AL = the token, EAX's upper bytes kept).
 
 Results are in NOTES.md (2026-11-08, reimplementation stage 1).
+
+## Stage 2: VM helpers and the first opcode handlers (src/game/vm.c, ops.c)
+
+Semantics are in `re-notes.md`, "Script VM helpers" and "Script opcodes". Called units
+(`HLE_GAME_OVERRIDE`):
+
+| Unit | Native | Contract | Scratch |
+|---|---|---|---|
+| `vm_skip_block` | 0x4061d4 | ESI in/out, AX = 0 | flags |
+| `vm_init` | 0x406395 | no arguments | EAX, flags |
+| `vm_menu_item` | 0x4068e1 | ESI in/out, AL / EAX result, EBX text offset | EDX, flags |
+| `vm_string_arg` | 0x406dc4 | EDI destination in/out, EBX, AL | flags |
+| `vm_parse_args` | 0x40741b (+ 0x4074a3) | ESI in/out, EAX, ECX, EBX, EDI | EDX, flags |
+
+Jump units (`HLE_GAME_JUMP`), all leaving to 0x4060f9 with scratch EAX ECX EDX EBX EDI and
+the flags, except ext 11/12, which `ret` and have none: ops 0a 0x406491, 0b 0x4064b5, 0c
+0x4064d9, 0d 0x4064f8, 0e 0x406557, 12 0x40663e, 18 0x4069be, and ext 11 0x406638, 12
+0x40663b, 22 0x40739b, 23 0x4071a4. The hit test fires the probe 0x4071bb itself (edi = the
+rectangle table), so the exploration bot still sees the hotspots. Ext 20 0x4070bc is
+written (`game_op_click_handler`) but not enabled: no explore run has reached it yet.
+
+The entry checks for jump units (no calls, fallthrough or outside direct jumps into one)
+are made by recomp.py, which the default interp build does not run: build the recomp
+backend once after adding an `HLE_GAME_JUMP` or `HLE_GAME_OVERRIDE` line.
+
+The scratch sets come from `tools/liveness.py` and were checked with
+`NANPA2_DIFF_POISON=1` explore runs. Results are in NOTES.md (2026-11-08, reimplementation
+stage 2).
 
 ## Inventory
 
@@ -315,19 +388,19 @@ by name).
 | 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 |  |
 | 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... |  |
 | 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 |  |
-| 0x4061d4 | 39 | vm | skip a 01 ... 00 block, counting nesting | 4060d4 40741b |  |  |
-| 0x406395 | 89 | vm | init register '@' and segment table 0x44533c | 4060d4 |  |  |
+| 0x4061d4 | 39 | vm | skip a 01 ... 00 block, counting nesting | 4060d4 40741b |  | game |
+| 0x406395 | 89 | vm | init register '@' and segment table 0x44533c | 4060d4 |  | game |
 | 0x4063ee | 103 | text | advance text cursor, wrap line/window (alt 0x406415 newline) (alt 406415) | 4060d4 |  |  |
 | 0x406455 | 60 | expr | write 4-bit flag n = ax (clamped to 15) | 4060d4 |  | game |
-| 0x4068e1 | 53 | vm | menu list: next item (guard 0f expr), al = -1/0/1 | 4060d4 | 4037fc |  |
+| 0x4068e1 | 53 | vm | menu list: next item (guard 0f expr), al = -1/0/1 | 4060d4 | 4037fc | game |
 | 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd |  |
 | 0x406acc | 57 | vm | wait for click/Enter (bit 0x10) press then release | 4060d4 | 4074d5 4075c6 |  |
 | 0x406b24 | 82 | text | clear text window (fill 0x4017b0), home cursor | 4060d4 | 4017b0 |  |
-| 0x406dc4 | 59 | vm | copy string argument into buffer edi | 4060d4 406e20 |  |  |
+| 0x406dc4 | 59 | vm | copy string argument into buffer edi | 4060d4 406e20 |  | game |
 | 0x406dff | 18 | anim | reset all animation slots (0x403510 sub-op 7) | 4060d4 406e20 | 403510 |  |
 | 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c |  |
-| 0x40741b | 136 | vm | parse argument list into 0x445d06 (types 0x445cf6), eax = arg 0 | 4060d4 | 4037fc 4061d4 4074a3 |  |
-| 0x4074a3 | 50 | vm | test whether the next byte starts an expression | 40741b |  |  |
+| 0x40741b | 136 | vm | parse argument list into 0x445d06 (types 0x445cf6), eax = arg 0 | 4060d4 | 4037fc 4061d4 4074a3 | game |
+| 0x4074a3 | 50 | vm | test whether the next byte starts an expression | 40741b |  | dead |
 | 0x4074d5 | 87 | input | pump, then test input bit al (0 ok, 1 cancel, 2-5 arrows) | 4060d4 406acc | 401bf0 |  |
 | 0x40752c | 33 | screen | copy a picture palette into 0x44530c / 0x445eae | 403661 406e20 |  |  |
 | 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  |  |

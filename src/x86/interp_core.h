@@ -11,6 +11,7 @@
  *   COUNT(n)               instructions executed (x86_icount)
  *   STEP()                 one instruction decoded and run (speed statistics)
  *   HLE_CALL(pc)           hle_call (interpreter only)
+ *   HLE_JUMP(pc)           hle_jump, returns the next pc (interpreter only)
  *   POLL(at)               a taken backward branch at `at` (X86_POLL)
  *   STR_MOVS/STOS/LODS/SCAS/CMPS(sz, rep)   string instructions
  *
@@ -66,11 +67,27 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 	for (;;) {
 		if (pc == X86_RET_SENTINEL)
 			return pc;
+#if !SHADOW
+		/* the oracle of an opcode handler ends at its exit (game.c) */
+		if (x86_stop_esp && x86_stop_at(pc))
+			return pc;
+#endif
 		uint32_t off = pc - CODE_START;
 		if ((off >= CODE_LEN || x86_interp_override[off]) && pc != native) {
 #if SHADOW
 			return pc;
 #else
+			if (off < CODE_LEN && x86_interp_override[off] == OVR_JUMP) {
+				/* an opcode handler: no return address, the C
+				 * handler gives the next pc; inside an oracle it is
+				 * the tagged entry of the original, run here */
+				pc = HLE_JUMP(pc);
+				if (pc != X86_RET_SENTINEL && (pc & X86_ORACLE_TAG)) {
+					pc &= ~X86_ORACLE_TAG;
+					native = pc;
+				}
+				continue;
+			}
 			/* as the recompiled dispatch: hle_call pops the return
 			 * address and the caller continues there */
 			uint32_t ra = rd32(cpu.r[ESP]);
@@ -100,7 +117,7 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 
 #define JUMP(target) do { \
 	uint32_t t_ = (target); \
-	int game_ = t_ - CODE_START < CODE_LEN && x86_interp_override[t_ - CODE_START] == OVR_GAME; \
+	int game_ = t_ - CODE_START < CODE_LEN && x86_interp_override[t_ - CODE_START] >= OVR_GAME; \
 	if (t_ <= pc && (game_ || !x86_is_hle(t_))) \
 		POLL(pc); \
 	if (game_) \

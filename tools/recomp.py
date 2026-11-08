@@ -49,8 +49,20 @@ HLE_OVERRIDES = read_hooks('OVERRIDE')
 # bodies are kept as the differential-test oracle: reachable only through
 # the tagged entry ORACLE_TAG | addr (x86_exec), never from game code.
 GAME_OVERRIDES = read_hooks('GAME_OVERRIDE')
+# Script opcode handlers reimplemented in C (HLE_GAME_JUMP, src/game/ops.c):
+# jump overrides. They are entered by the VM's jump tables (no return
+# address) and leave by jumping to an exit (JUMP_EXITS) or by `ret`.
+# Reaching one of these addresses becomes `pc = hle_jump(addr); goto
+# dispatch;`: the C handler returns the pc to go on at. Their lifted bodies,
+# which end at the exits, are kept as oracles like GAME_OVERRIDES; inside
+# them a jump to an exit goes through dispatch, where the differential test
+# stops the oracle (x86_stop_esp, src/x86/x86.h).
+GAME_JUMP_OVERRIDES = read_hooks('GAME_JUMP')
+JUMP_EXITS = (0x4060f9, 0x40638d)  # VM loop head, VM end (src/hle/overrides.h)
 HLE_OVERRIDES.update(GAME_OVERRIDES)
+HLE_OVERRIDES.update(GAME_JUMP_OVERRIDES)
 ORACLE_TAG = 0x40000000  # src/x86/x86.h X86_ORACLE_TAG
+ORACLES = set(GAME_OVERRIDES) | set(GAME_JUMP_OVERRIDES)
 
 # Known jump tables in .text: base -> number of entries (computed if None)
 TEXT_TABLES = [0x40247c, 0x402508, 0x402550, 0x403521, 0x40368b, 0x40386d,
@@ -143,13 +155,13 @@ class Lifter:
         # the CRT entry calls WinMain (0x402090); start there too
         work.append(0x402090)
         # oracle bodies of the reimplemented functions
-        work += list(GAME_OVERRIDES)
+        work += list(ORACLES)
         for w in work:
             self.labels.add(w)
         seen = set()
         while work:
             a = work.pop()
-            if a in seen or not in_code(a) or (a in HLE_OVERRIDES and a not in GAME_OVERRIDES):
+            if a in seen or not in_code(a) or (a in HLE_OVERRIDES and a not in ORACLES):
                 continue
             while True:
                 if a in seen:
@@ -200,12 +212,13 @@ class Lifter:
         self.check_oracles()
         return seen
 
-    def body(self, entry):
-        """Instructions reachable from entry without following calls."""
+    def body(self, entry, stop=()):
+        """Instructions reachable from entry without following calls (nor
+        going past the addresses in stop)."""
         out, work = set(), [entry]
         while work:
             a = work.pop()
-            if a in out or a not in self.insns:
+            if a in out or a not in self.insns or a in stop:
                 continue
             out.add(a)
             insn = self.insns[a]
@@ -228,16 +241,30 @@ class Lifter:
     def check_oracles(self):
         # A direct jump into a reimplemented entry from outside its own body
         # would become a goto past the override (the interpreter also keeps
-        # such jumps in the original); refuse to build that.
+        # such jumps in the original); refuse to build that. A jump override
+        # must be entered only through dispatch (its jump table), so a direct
+        # call to it, or code falling into it, is refused as well.
         self.oracle_body = {}
         for e in GAME_OVERRIDES:
             self.oracle_body[e] = self.body(e)
+        self.jump_body = set()
+        for e in GAME_JUMP_OVERRIDES:
+            self.oracle_body[e] = self.body(e, JUMP_EXITS)
+            self.jump_body |= self.oracle_body[e]
         for a, insn in self.insns.items():
             m, ops = insn.mnemonic, insn.operands
-            if (m == 'jmp' or m.startswith('j') or m.startswith('loop')) and ops \
-                    and ops[0].type == X.X86_OP_IMM and ops[0].imm in GAME_OVERRIDES \
-                    and a not in self.oracle_body[ops[0].imm]:
-                raise Unsupported('jump into reimplemented %x from %x' % (ops[0].imm, a))
+            if not ops or ops[0].type != X.X86_OP_IMM:
+                continue
+            t = ops[0].imm
+            if (m == 'jmp' or m.startswith('j') or m.startswith('loop')) and t in ORACLES \
+                    and a not in self.oracle_body[t]:
+                raise Unsupported('jump into reimplemented %x from %x' % (t, a))
+            if m == 'call' and t in GAME_JUMP_OVERRIDES:
+                raise Unsupported('call to opcode handler %x from %x' % (t, a))
+        # nor may the code before it fall into it
+        for a, insn in self.insns.items():
+            if a + insn.size in GAME_JUMP_OVERRIDES and insn.mnemonic not in ('jmp', 'ret'):
+                raise Unsupported('%x falls into opcode handler %x' % (a, a + insn.size))
 
     def table_ranges(self):
         r = set()
@@ -302,6 +329,10 @@ class Lifter:
             # backward jumps poll the host (timer ticks, screen), since the
             # native code spins on counters its timer thread updates
             poll = 'X86_POLL(0x%xu); ' % here if here is not None and target <= here else ''
+            if here in self.jump_body and target in JUMP_EXITS:
+                # the exit of an opcode handler's oracle: through dispatch,
+                # where the differential test can stop it
+                return poll + 'pc = 0x%xu; goto dispatch;' % target
             return poll + 'goto L_%x;' % target
         if target in HLE_OVERRIDES or not in_code(target):
             return 'pc = 0x%xu; goto dispatch;' % target
@@ -486,11 +517,16 @@ class Lifter:
         w('{')
         w('dispatch:')
         w('\tif (pc == X86_RET_SENTINEL) return;')
+        w('\tif (x86_stop_esp && x86_stop_at(pc)) return;')
         w('\tswitch (pc) {')
         for a in addrs:
-            if a in GAME_OVERRIDES:
+            if a in ORACLES:
                 # the lifted original, for the differential tests only
                 w('\tcase 0x%x: goto L_%x; /* oracle */' % (ORACLE_TAG | a, a))
+            if a in GAME_JUMP_OVERRIDES:
+                w('\tcase 0x%x: pc = hle_jump(pc); goto dispatch;' % a)
+            elif a in GAME_OVERRIDES:
+                pass
             elif a in self.labels:
                 w('\tcase 0x%x: goto L_%x;' % (a, a))
         w('\tdefault:')

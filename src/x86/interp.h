@@ -38,8 +38,10 @@ struct dec {
 };
 
 /* per code byte: an override (src/hle/overrides.h), entering it calls
- * hle_call; OVR_GAME ones keep their original body as the oracle */
-enum { OVR_NONE, OVR_HLE, OVR_GAME };
+ * hle_call; OVR_GAME ones keep their original body as the oracle. OVR_JUMP
+ * (HLE_GAME_JUMP, an opcode handler): entering it by any jump goes on at
+ * pc = hle_jump(pc), no return address; its original is an oracle too. */
+enum { OVR_NONE, OVR_HLE, OVR_GAME, OVR_JUMP };
 extern uint8_t x86_interp_override[CODE_LEN];
 /* decoded instruction per code byte (len 0 = not decoded yet) */
 extern struct dec dec_cache[CODE_LEN];
@@ -48,6 +50,7 @@ void x86_interp_init(void);
 _Noreturn void x86_unimplemented(uint32_t pc);
 /* hle/hle.h, not included here to keep the x86 layer apart */
 void hle_call(uint32_t addr);
+uint32_t hle_jump(uint32_t addr);
 
 /* Entering pc leaves the game code: an import or COM thunk, the C runtime
  * or an override, all run by hle_call. */

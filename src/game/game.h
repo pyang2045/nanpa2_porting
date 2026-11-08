@@ -18,7 +18,11 @@
 struct game_unit {
 	uint32_t addr;
 	const char *name;
+	/* a called unit (GAME_OVERRIDES) has run; an opcode handler entered
+	 * by jump (GAME_JUMP_OVERRIDES) has jump, which returns the pc to go
+	 * on at (an exit of the VM, or a return address it popped) */
 	void (*run)(void);
+	uint32_t (*jump)(void);
 	/* registers whose value on return is not part of the contract (bit
 	 * REG_BIT(EAX)...); the reason is documented at the function */
 	uint32_t scratch_regs;
@@ -35,5 +39,12 @@ const struct game_unit *game_unit_find(uint32_t addr);
  * lifted original and the reimplementation from the same state and compares
  * them (src/game/game.c). */
 int game_call(uint32_t addr);
+/* From hle_jump: run the opcode handler at addr, *next = the pc to go on
+ * at. 0 if addr is not a jump unit. */
+int game_jump(uint32_t addr, uint32_t *next);
+
+/* The exits of the VM's opcode handlers: the loop head 0x4060f9 and the VM
+ * end 0x40638d (zero-terminated, for x86_stop_exits). */
+extern const uint32_t game_vm_exits[];
 
 #endif

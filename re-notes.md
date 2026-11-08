@@ -347,6 +347,69 @@ EBX, EDX and the flags are scratch; ECX, EDI, EBP are untouched. The full EAX ma
 (0x406528 `add eax, eax` after the call). The native loop costs about 22 instructions per
 token (measured: 247 per call against 11 tokens per call on average).
 
+### Script VM helpers (reimplemented in src/game/vm.c)
+
+More VM state, used by the helpers and handlers below:
+
+| Address | Type | Meaning |
+|---|---|---|
+| `0x445cf6` | u8[16] | argument types of the last list: 1 expression, 2 string, 3 block (12 bytes cleared per list) |
+| `0x445d06` | u16[16] | argument values: the value, or for a string/block the script offset of its 06/01 |
+| `0x445dbc` | u16[] | labels (op 12 sets, op 13 calls) |
+| `0x445ce2` | u16[2] | click handler blocks, left and right (ext 20) |
+| `0x4452f4` | u16 | text colour (op 18) |
+| `0x44629a` | u32 | segment index op 0d stores through |
+| `0x4452fa` | u16 | `@[22]`: menu list pointer, set to 0x445d90 (as an offset) by 0x406395 |
+| `0x445396` | - | buffer whose offset 0x406395 puts in `@[0]` |
+
+- Block skip 0x4061d4: ESI in/out. Scans forward to the first 01, then counts 01 up and 00
+  down in AH (8 bits, wrapping) until the depth is 0; ESI ends past the closing 00, AX = 0.
+  02 inside a block is not special. Flags dead at all six call sites.
+- Argument list 0x40741b (with 0x4074a3): clears the 12 type bytes, then per argument
+  writes its type and value to entry n with no bound check (past 16 arguments the types run
+  into the values):
+  - `06 ... 06` a string: value = offset of the opening 06; AL ends as the closing 06;
+  - `01 ... 00` a block, skipped with 0x4061d4: value = offset of the 01, AX = 0 after;
+  - a byte that starts an expression (0x4074a3: 07, 08, 09 or 0x20-0x5a): value = the
+    expression's value (16 bits stored, EAX the full value);
+  - any other byte ends the list with AL = 0xff over the last EAX, ESI on that byte.
+  After an argument, a 02 continues the list; anything else ends it with EAX = argument 0's
+  value as a u16. Out: ESI, EAX, ECX = count, EBX = 0x445cf6 + count, EDI = 0x445d06 +
+  2*count (callers read EBX and EDI). EDX is the evaluator's scratch.
+- String argument 0x406dc4: EDI = destination. Type 1 (expression): argument 0 is the offset
+  of a NUL-terminated string, copied with its NUL, EDI past it, AL = 0. Otherwise (a string
+  literal): copied from after the opening 06 up to the closing one, then a NUL; EDI on the
+  NUL, AL = 06. EBX = script offset just past the last byte read. ECX untouched (callers
+  keep it).
+- VM init 0x406395: `@` = 0x4452ce - 0x435e78, segments {0x435e78, 0x4462be, 0x4562be,
+  0x4562be}, `@[0]` = offset of 0x445396, `@[22]` = offset of 0x445d90. EAX scratch.
+- Menu item 0x4068e1 (ESI at an item of `02 [0f expr] text ... 02 ... 00`): at a 00, AL =
+  0xff and nothing else changes. Otherwise it skips one byte (the 02; not checked), AL = 1,
+  and with a `0f` guard EAX = the guard's value (or AL = a bare token); EBX = offset of the
+  text, ESI = the next 00 or 02. Flags dead after both call sites.
+
+### Script opcodes (reimplemented in src/game/ops.c)
+
+Handlers are entered by `jmp` from the fetch loop with ESI past the opcode byte(s) and end
+with `jmp 0x4060f9`. At 0x4060f9 only ESP, EBP and ESI are live (tools/liveness.py; the
+pump 0x401bf0 that runs before the next fetch sets EAX and clears ECX and EDX), so a handler
+may leave any value in the other registers and the flags. Every `jmp` back to the loop is
+backward and polls; each loop over a 02 list polls at its own backward jump.
+
+| Op | Handler | Exact behaviour |
+|---|---|---|
+| 0a | 0x406491 | n = constant operand (0x4039f7; any other byte is n itself); then flag n++ = expr for each expression in a 02 list (0x406455 clamps to 15) |
+| 0b | 0x4064b5 | as 0a with n an expression |
+| 0c | 0x4064d9 | R = next byte; register (R - 0x40) & 0xff = expr as u16 (any byte names one of 256 words from 0x445298) |
+| 0d | 0x4064f8 | R; segment s = `@[7]`, or 0 when R is `@`, stored to 0x44629a; off = reg R + 2*expr; then for each expression of the 02 list a word at seg_base[[0x44629a]] + off, off += 2 |
+| 0e | 0x406557 | R; off = reg R + expr; bytes at seg_base[`@[7]`] + off, off += 1 (no `@` case; the base is read again per byte) |
+| 04 11 / 04 12 | 0x406638 / 0x40663b | AL = 1 / 2 and `ret`: leaves the VM running the block, which the enclosing while (04 10) reads |
+| 12 | 0x40663e | argument list n, offset: label n = offset |
+| 18 | 0x4069be | argument list c: text colour = c |
+| 04 20 | 0x4070bc | argument list b, offset: click handler b = offset (no bound check on b) |
+| 04 22 | 0x40739b | argument list read and dropped |
+| 04 23 | 0x4071a4 | the segment base of `@[7]` is read first; then argument list table, x, y; records of five u16 {id, x0, y0, x1, y1} at base + table, tested x >= x0, x <= x1, y >= y0, y <= y1 in that order, inclusive, until id 0xffff; S = the id found or 0xffff |
+
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 
 After the Prologue (S63.MES jumps to OPEN1.MES) scenes are point-and-click. The script's

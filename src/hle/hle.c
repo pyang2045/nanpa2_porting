@@ -255,6 +255,17 @@ static void override_call(uint32_t addr)
 	x86_trap(addr, msg);
 }
 
+uint32_t hle_jump(uint32_t addr)
+{
+	X86_LOCKSTEP_POINT(LS_HLE, addr);
+	uint32_t pc;
+	if (game_jump(addr, &pc))
+		return pc;
+	char msg[64];
+	snprintf(msg, sizeof msg, "no jump override for %08x", addr);
+	x86_trap(addr, msg);
+}
+
 void hle_call(uint32_t addr)
 {
 	X86_LOCKSTEP_POINT(LS_HLE, addr);
