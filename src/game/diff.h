@@ -54,7 +54,7 @@ static inline uint32_t diff_live_bits(const struct game_unit *u, int r)
 {
 	if (!(u->scratch_regs & REG_BIT(r)))
 		return 0xffffffffu;
-	return r == ECX ? 0xffff0000u : 0;
+	return r == ECX ? 0xffff0000u : r == EAX ? u->eax_live : 0;
 }
 
 uint32_t diff_flags(const struct cpu *c);   /* CF PF ZF SF DF OF as EFLAGS */

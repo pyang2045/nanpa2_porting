@@ -21,6 +21,7 @@
  * Semantics: re-notes.md "Script opcodes".
  */
 #include "game/file.h"
+#include "game/map.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -128,7 +129,7 @@ int game_native_map(void) /* 04 26: sub-ops 5, 7 and 12 pump messages */
 	uint32_t v;
 	if (!literal_arg0(&v))
 		return 1;
-	return !(v <= 16 || v == 30 || v == 32) || v == 5 || v == 7 || v == 12;
+	return !game_map_op_in_c(v);
 }
 
 /* ---- the handlers */
@@ -510,7 +511,7 @@ uint32_t game_op_anim_done(void) /* 0x4070b6 */
 uint32_t game_op_map(void)
 {
 	uint32_t a = parse(), esi;
-	if (a == 5 || a == 7 || a == 12 || !(a <= 16 || a == 30 || a == 32))
+	if (!game_map_op_in_c(a))
 		x86_trap(0x40740a, "op 04 26: sub-op left to the native handler reached C");
 	X86_COUNT(2);
 	if (a == 5 || a == 4) {
@@ -522,7 +523,7 @@ uint32_t game_op_map(void)
 	esi = cpu.r[ESI];
 	cpu.r[ESI] = VM_ARG_VALUES;
 	X86_COUNT(2);
-	ncall(0x403a70);
+	game_map_dispatch(); /* the call of 0x403a70 */
 	cpu.r[ESI] = esi;
 	vm_set_reg(VM_REG_S, cpu.r[EAX]);
 	X86_COUNT(2);

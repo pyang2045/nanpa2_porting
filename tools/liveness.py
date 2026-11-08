@@ -232,6 +232,9 @@ class Liveness:
         overridden functions (the lifted oracle copies of game units are
         reached only by the differential tests)."""
         work = list(recomp.EXTRA_ENTRIES) + [0x402090]
+        # LIVENESS_ROOTS=hex,hex: extra roots, for code whose only caller is
+        # now C (the map sub-ops, called through 0x403a70 by game_op_map)
+        work += [int(x, 16) for x in os.environ.get('LIVENESS_ROOTS', '').split(',') if x]
         seen = set()
         while work:
             a = work.pop()

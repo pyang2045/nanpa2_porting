@@ -35,6 +35,14 @@
  * dispatch, where the test can stop them, and reads these lines into
  * CALL_EXITS.
  *
+ * HLE_GAME_DEAD(addr, what): native code whose work is in C and that no
+ * running code enters any more: it is reached only from replaced code (the
+ * map's cell drawing and flood fill, which are C functions below the units)
+ * or only through the cases a unit's `native` predicate leaves to the
+ * original (the map sub-ops a script runs are C; the pumping ones are
+ * not). Nothing hooks it: the lifted code stays, as the oracle's body.
+ * Only tools/reimpl_status.py reads these lines, to count it as replaced.
+ *
  * Use as an X-macro: define HLE_OVERRIDE(addr, what), HLE_GAME_OVERRIDE,
  * HLE_GAME_JUMP, HLE_GAME_CALL_EXIT and/or HLE_PROBE(addr, what), then
  * include this file. No include guard.
@@ -54,6 +62,10 @@
 #ifndef HLE_GAME_CALL_EXIT
 #define HLE_GAME_CALL_EXIT(ra, what)
 #define HLE_OVERRIDES_UNDEF_C
+#endif
+#ifndef HLE_GAME_DEAD
+#define HLE_GAME_DEAD(addr, what)
+#define HLE_OVERRIDES_UNDEF_D
 #endif
 #ifndef HLE_PROBE
 #define HLE_PROBE(addr, what)
@@ -250,6 +262,70 @@ HLE_GAME_CALL_EXIT(0x406ae6, "click wait: test the button (0x4074d5)")
 HLE_GAME_CALL_EXIT(0x406afb, "click wait for the release: a frame (0x4075c6)")
 HLE_GAME_CALL_EXIT(0x406b02, "click wait for the release: test (0x4074d5)")
 
+/* Stage 5A: the town map (src/game/map*.c). Sub-ops 5, 7 and 12, the sprite
+ * step 0x4042f7 and the pumping routines (0x404450, 0x405216, 0x405597,
+ * 0x403e30, 0x4051c2) stay native, with the 04 26 handler's `native`
+ * predicate (the dispatcher 0x403a70 itself is called only by the C 04 26
+ * handler game_op_map, which does its work in C now). */
+HLE_GAME_OVERRIDE(0x403b28, "map: sub-op 2, the cell grid from the layer (src/game/map_draw.c)")
+HLE_GAME_OVERRIDE(0x403bd2, "map: sub-op 3, the sprite tiles over the grid (src/game/map_draw.c)")
+HLE_GAME_OVERRIDE(0x403d45, "map: sub-op 4, draw the changed cells (src/game/map_draw.c)")
+HLE_GAME_OVERRIDE(0x403eff, "map: draw one cell (src/game/map_draw.c)")
+HLE_GAME_OVERRIDE(0x4040f0, "map: clear bit 3 of a cell (src/game/map_draw.c)")
+HLE_GAME_OVERRIDE(0x40431b, "map: step one sprite's script, but the player (src/game/map_sprite.c)")
+HLE_GAME_OVERRIDE(0x404731, "map: move a sprite up (src/game/map_move.c)")
+HLE_GAME_OVERRIDE(0x404937, "map: move a sprite down (src/game/map_move.c)")
+HLE_GAME_OVERRIDE(0x404a9a, "map: move a sprite left (src/game/map_move.c)")
+HLE_GAME_OVERRIDE(0x404c9f, "map: move a sprite right (src/game/map_move.c)")
+HLE_GAME_OVERRIDE(0x405691, "map: one step of an auto-walk (src/game/map_path.c)")
+HLE_GAME_OVERRIDE(0x405966, "map: plan a walk to a cell (src/game/map_path.c)")
+HLE_GAME_OVERRIDE(0x404f8c, "map: area trigger under a sprite (src/game/map.c)")
+HLE_GAME_OVERRIDE(0x40500e, "map: collision test for a sprite (src/game/map.c)")
+
+/* Stage 5A: native map code whose work is in C and that nothing enters now
+ * (see HLE_GAME_DEAD above) */
+HLE_GAME_DEAD(0x403a87, "map: sub-op 0 (init)")
+HLE_GAME_DEAD(0x403ae9, "map: sub-op 1")
+HLE_GAME_DEAD(0x403f44, "map: cell draw, no sprite tile")
+HLE_GAME_DEAD(0x403faf, "map: cell draw, 1 sprite tile")
+HLE_GAME_DEAD(0x403feb, "map: cell draw, 2 sprite tiles")
+HLE_GAME_DEAD(0x404056, "map: cell draw, 3 sprite tiles")
+HLE_GAME_DEAD(0x404132, "map: tile into the work planes")
+HLE_GAME_DEAD(0x4041f9, "map: sprite tile over the work cell")
+HLE_GAME_DEAD(0x404281, "map: work cell to the screen")
+HLE_GAME_DEAD(0x4042e7, "map: sub-op 6")
+HLE_GAME_DEAD(0x40442e, "map: kind 1")
+HLE_GAME_DEAD(0x404435, "map: kind 2")
+HLE_GAME_DEAD(0x40443c, "map: kind 3")
+HLE_GAME_DEAD(0x404443, "map: kind 4")
+HLE_GAME_DEAD(0x4046b7, "map: kind 8")
+HLE_GAME_DEAD(0x4046c6, "map: kind 9")
+HLE_GAME_DEAD(0x4046d5, "map: kind 10")
+HLE_GAME_DEAD(0x4046e4, "map: kind 11")
+HLE_GAME_DEAD(0x4046f3, "map: kind 13")
+HLE_GAME_DEAD(0x404e06, "map: tile word address")
+HLE_GAME_DEAD(0x404e25, "map: sprite collision test")
+HLE_GAME_DEAD(0x40502c, "map: sub-op 10")
+HLE_GAME_DEAD(0x405113, "map: sub-op 11")
+HLE_GAME_DEAD(0x4053a6, "map: sub-op 13")
+HLE_GAME_DEAD(0x4053de, "map: sub-op 14")
+HLE_GAME_DEAD(0x405415, "map: sub-op 15")
+HLE_GAME_DEAD(0x40548f, "map: sub-op 16")
+HLE_GAME_DEAD(0x405542, "map: sub-op 30")
+HLE_GAME_DEAD(0x40558f, "map: sub-op 32")
+HLE_GAME_DEAD(0x40562b, "map: walk grid")
+HLE_GAME_DEAD(0x405acd, "map: start the flood fill")
+HLE_GAME_DEAD(0x405b07, "map: flood fill")
+HLE_GAME_DEAD(0x405c72, "map: flood case 0")
+HLE_GAME_DEAD(0x405ce8, "map: flood case 1")
+HLE_GAME_DEAD(0x405d3a, "map: flood case 2")
+HLE_GAME_DEAD(0x405d8c, "map: flood case 3")
+HLE_GAME_DEAD(0x405e05, "map: flood case 4")
+HLE_GAME_DEAD(0x405e5a, "map: flood case 5")
+HLE_GAME_DEAD(0x405ed0, "map: flood case 6")
+HLE_GAME_DEAD(0x405f24, "map: flood case 7")
+HLE_GAME_DEAD(0x405fb6, "map: approach cells")
+
 /* Stage 5B (src/game/anim.c, ops_sys.c): the slot control 0x403510 is a
  * jump unit entered by the call of op 1a (call exit 0x4070b6); sub-op 4
  * goes on in the wait loop 0x4035b5, a piece that returns itself while it
@@ -282,6 +358,9 @@ HLE_GAME_JUMP(0x402090, "WinMain (src/game/startup.c)")
 HLE_GAME_JUMP(0x4021a3, "WinMain: after the script VM (src/game/startup.c)")
 HLE_GAME_CALL_EXIT(0x4021a3, "WinMain: the script VM (0x4060d4)")
 HLE_GAME_OVERRIDE(0x4021c0, "window procedure (src/game/startup.c)")
+/* the logo's window procedure: installed (SetWindowLongA) only by the logo
+ * player 0x401e20, an HLE override, so nothing enters it */
+HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
@@ -313,6 +392,10 @@ HLE_PROBE(0x4071bb, "script hit test rectangle table")
 #ifdef HLE_OVERRIDES_UNDEF_C
 #undef HLE_GAME_CALL_EXIT
 #undef HLE_OVERRIDES_UNDEF_C
+#endif
+#ifdef HLE_OVERRIDES_UNDEF_D
+#undef HLE_GAME_DEAD
+#undef HLE_OVERRIDES_UNDEF_D
 #endif
 #ifdef HLE_OVERRIDES_UNDEF_P
 #undef HLE_PROBE
