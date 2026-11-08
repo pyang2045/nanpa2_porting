@@ -171,7 +171,7 @@ uint32_t game_op_click_handler(void)
 	uint32_t pc = cpu.r[ESI], button;
 	vm_parse_args(&pc, &button);
 	wr16(VM_CLICK_HANDLERS + 2 * button, vm_arg(1));
-	X86_COUNT(5);
+	X86_COUNT(3);
 	return to_loop(pc, 0x4070d0);
 }
 

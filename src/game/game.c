@@ -286,6 +286,7 @@ static uint32_t compare(const struct game_unit *u)
 	trace_begin();
 	mode = MODE_REIMPL;
 	game_replay_pass = 1;
+	diff_ax_unspecified = 0;
 	uint32_t got_pc = 0;
 	if (u->jump) {
 		got_pc = u->jump();
@@ -391,7 +392,13 @@ static void fuzz_run(const struct game_unit *u)
 		if (getenv("NANPA2_FUZZ_TRACE"))
 			fprintf(stderr, "fuzz %08x %s state %ld seed %08x\n", u->addr, u->name, i, seed);
 		uint32_t seed0 = seed;
+		game_map_fuzz_skip = 0;
 		f(&seed);
+		if (game_map_fuzz_skip) { /* no state to compare yet */
+			memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
+			memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
+			break;
+		}
 		uint64_t before = s->mismatches;
 		compare(u);
 		if (s->mismatches > before && getenv("NANPA2_FUZZ_DUMP")) {
@@ -512,6 +519,8 @@ int game_jump(uint32_t addr, uint32_t *next)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
+	if (mode == MODE_OFF)
+		diff_ax_unspecified = 0;
 	if (mode == MODE_ORACLE || (u->native && u->native())) {
 		/* inside an original, or a case the C handler leaves to the
 		 * native code: the lifted handler, inline */

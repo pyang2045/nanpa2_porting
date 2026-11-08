@@ -220,7 +220,8 @@ static void fuzz_sprite_script(uint32_t *s, const struct world *wp, uint32_t sp)
 {
 	struct world w = *wp;
 	uint32_t p = SEG1 + sp;
-	uint32_t donor = SEG1 + pick_sprite(s, &w);
+	/* the script of a sprite but the player's (only the player runs kind 6) */
+	uint32_t donor = SEG1 + w.sprites + 16 * (w.n > 1 ? 1 + below(s, w.n - 1) : 0);
 	wr8(p + S_FLAGS, rd8(p + S_FLAGS) | (chance(s, 85) ? SPRITE_ACTIVE : 0));
 	wr8(p + S_SCRIPT, rd8(donor + S_SCRIPT));
 	wr8(p + S_SCRIPT_PC, below(s, 6));
@@ -282,8 +283,11 @@ static void fuzz_op_map(uint32_t *s)
 	pc = put_value(pc, op);
 	if (op == 7) { /* the sprite loop: a movement state for each sprite */
 		fuzz_view(s, &w);
-		for (uint32_t k = 0; k < w.n; k++)
+		uint32_t esi = cpu.r[ESI], edi = cpu.r[EDI]; /* the script pointer the handler parses */
+		for (uint32_t k = 1; k < w.n; k++)
 			fuzz_sprite_script(s, &w, w.sprites + 16 * k);
+		cpu.r[ESI] = esi;
+		cpu.r[EDI] = edi;
 	}
 	uint32_t args[6] = { 0, 0, 0, 0, 0, 0 };
 	uint32_t nargs = 0;
@@ -423,11 +427,16 @@ static void fuzz_mouse(uint32_t *s, const struct world *w, uint32_t pl)
 	cpu.r[EBX] = (l | (uint32_t)(r << 1)) | ((uint32_t)(r << 1) << 8);
 }
 
+/* set by a fuzzer that cannot build a state (no map yet): the driver skips it */
+int game_map_fuzz_skip;
+
 static int fuzz_chain_base(uint32_t *s, struct world *w)
 {
 	*w = world();
-	if (w->n < 2 || w->mw < 6 || w->mh < 6)
+	if (w->n < 2 || w->mw < 6 || w->mh < 6) {
+		game_map_fuzz_skip = 1;
 		return 0;
+	}
 	fuzz_sprites(s, w);
 	fuzz_view(s, w);
 	wr16(w->m + M_SCREEN_X, below(s, 5));

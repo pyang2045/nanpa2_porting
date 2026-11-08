@@ -147,5 +147,6 @@ int game_chain_words(void);
 
 /* ---- map_fuzz.c: random states for the differential test (NANPA2_FUZZ) ---- */
 void (*game_map_fuzz_for(uint32_t addr))(uint32_t *);
+extern int game_map_fuzz_skip;
 
 #endif

@@ -5,6 +5,7 @@
 #include <string.h>
 
 uint32_t diff_exit_pc;
+int diff_ax_unspecified;
 
 /* The registers that need not match where the unit leaves for diff_exit_pc:
  * at the VM's quit exits (0x40638d, 0x406393, 0x40472f: mov esp,[0x445cdc]
