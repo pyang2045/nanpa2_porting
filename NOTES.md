@@ -1028,3 +1028,40 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   (main game) 677 M, mostly the map module (0x403d45 208 M, 0x403b28 136 M, ...).
 - ctest 9/9 on the interp build and the recomp build (lockstep, diffcapture, diffreplay).
 - Not done here: 0x40609c (the map's pump, module input) stays with the map module.
+
+## 2026-11-09 (stage 5B file + input + start-up, on top of stage 5A)
+
+- 60e7123: merge of master 6d90a58 (stage 5A, the town map). Conflicts only in includes, CMake
+  sources, game.c (`uncompared()` beside `fuzz_unit`, both apply) and the docs. The logo window
+  procedure 0x401fd0 moved from reimpl_status `DEAD_ENTRIES` to `HLE_GAME_DEAD` in overrides.h.
+  No units.c rows needed changing: the 5B rows use the shared macros, which carry `eax_live`.
+- reimpl_status on the merge: 22388 of 25597 bytes (87.5%), 126 of 142 functions; reimplemented
+  game logic 18592 bytes (72.6%); startup and file 100%, input 93.3% (0x40609c left).
+- ctest 9/9 on interp and recomp builds (smoke skipped, screen not visible).
+- Runs on 60e7123 (interp: diff + poison + native report; recomp: one diff run, one lockstep
+  run), all 0 mismatches, no trap, no watchdog warning, exit 0:
+
+  | Build | Seed (start) | Turbo | Frames | Reached | Native game insns |
+  |---|---|---|---|---|---|
+  | interp | 31 (new game) | 8 | 300000 | Prologue to S38 | 52 |
+  | interp | 33 (new game) | 8 | 300000 | Prologue to S37 | 47 |
+  | interp | 42 (saves32) | 2 | 300000 | MISAKO, TOWN at 281806, 40.MES | 47.6 M |
+  | interp | 43 (saves32) | 2 | 300000 | main game, the girls' _S files, 39.MES | 64.9 M |
+  | recomp diff | 44 (saves32) | 8 | 150000 | to OPEN1 | |
+  | recomp lockstep | 9 (new game) | 8 | 120000 | to S24, no divergence | |
+
+- Save/load: op 04 21 ran 4-18 times per run inside the compare; op 04 1c 54 times in the recomp
+  run. Window procedure compared 12.8k-30.5k times per run, native/reimpl insns per call 2171.2 /
+  2172.9 (seed 31), 3572.1 / 3574.0 (seed 43).
+- Native report: the 44-50 instructions at 0x406f7c in the new-game runs are one per op 04 1e
+  call, the `jmp 0x4060f9` at 0x406fc8 the C handler returns to (not the quit path, as the
+  2026-11-08 entry guessed); 0x40638d likewise. Seed 43: wipe 0x401a50 46.3 M, the map pump
+  0x40609c 12.8 M, 0x405216 4.3 M, 0x404410 0.7 M, then 0x40431b, 0x4042f7, 0x403d45 (from the
+  native map callers), 0x40500e, 0x4073ee, 0x403a70, 0x405597.
+- Sabotage on the merge (window procedure writes MOUSE_X + 1): 558 of 920 calls mismatched.
+- Start-up HLE trace (first 250 calls) against the pre-5B baseline: equal apart from the units'
+  own lines and unused argument slots, as before.
+- The map pump chain 0x4042f7, 0x404450, 0x4051c2, 0x405216, 0x405597, 0x403e30 is not made
+  splittable by this work. The window procedure in C runs under the HLE pump 0x401bf0; the
+  obstacle is 0x40609c itself (a pump that takes a message, and its WM_QUIT `mov esp,
+  [0x445cdc]`), which still needs the jump-unit split at each pump site.
