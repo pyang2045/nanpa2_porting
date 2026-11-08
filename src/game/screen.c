@@ -15,6 +15,7 @@
  * Instruction charges are the native routines' counts (their own
  * instructions, the `ret` included, not the `call`).
  */
+#include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -811,7 +812,7 @@ void game_picture_load(void)
 		push32(PICTURE);
 		push32(PICTURE_NAME);
 		X86_COUNT(6);
-		game_ncall(0x401050, 0);
+		game_file_load(PICTURE_NAME, PICTURE);
 		cpu.r[ESP] += 8;
 	}
 	uint32_t esi = PICTURE;
