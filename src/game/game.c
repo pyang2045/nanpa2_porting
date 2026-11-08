@@ -198,8 +198,9 @@ static void stop_tables(void)
  * register wrongly taken as dead shows up as a divergence or a trap. */
 static int poison_on = -1;
 
-static void poison(const struct game_unit *u)
+static void poison(const struct game_unit *u, uint32_t exit_pc)
 {
+	diff_exit_pc = u->jump ? exit_pc : 0;
 	static uint32_t n;
 	if (poison_on < 0) {
 		const char *e = getenv("NANPA2_DIFF_POISON");
@@ -230,7 +231,7 @@ static uint32_t oracle(const struct game_unit *u)
 		return 0;
 	}
 	stop_tables();
-	x86_stop_esp = cpu.r[ESP] + 4u * (uint32_t)u->stack_words;
+	x86_stop_esp = cpu.r[ESP] + 4u * (uint32_t)(u->words_fn ? u->words_fn() : u->stack_words);
 	x86_stop_exits = game_vm_exits;
 	x86_stop_units = stop_units;
 	x86_stop_calls = stop_calls;
@@ -285,6 +286,7 @@ static uint32_t compare(const struct game_unit *u)
 	trace_begin();
 	mode = MODE_REIMPL;
 	game_replay_pass = 1;
+	diff_ax_unspecified = 0;
 	uint32_t got_pc = 0;
 	if (u->jump) {
 		got_pc = u->jump();
@@ -329,11 +331,24 @@ static int uncompared(const struct game_unit *u)
 	return u->addr == 0x402090 || u->addr == 0x4021a3;
 }
 
+/* NANPA2_START_ORACLE=1: run the original WinMain and shutdown (the lifted
+ * code, as the oracle of any unit) instead of the C pieces, so that the HLE
+ * call traces of the two start-ups can be compared (tests/start_trace.py) */
+static int start_oracle(void)
+{
+	static int on = -1;
+	if (on < 0) {
+		const char *e = getenv("NANPA2_START_ORACLE");
+		on = e && *e && strcmp(e, "0");
+	}
+	return on;
+}
+
 /* NANPA2_FUZZ=N: before the first NANPA2_FUZZ_CALLS (default 30) compared
  * calls of a unit that has a fuzzer (src/game/map_fuzz.c), compare it N
  * times from random states. Memory (the game's data and the stack) and the
  * CPU are put back after each, so the game goes on with its real state. */
-static void fuzz_unit(const struct game_unit *u)
+static void fuzz_run(const struct game_unit *u)
 {
 	static long iters = -1, limit = 30;
 	static uint8_t *save_lo, *save_hi, *save_px;
@@ -377,7 +392,13 @@ static void fuzz_unit(const struct game_unit *u)
 		if (getenv("NANPA2_FUZZ_TRACE"))
 			fprintf(stderr, "fuzz %08x %s state %ld seed %08x\n", u->addr, u->name, i, seed);
 		uint32_t seed0 = seed;
+		game_map_fuzz_skip = 0;
 		f(&seed);
+		if (game_map_fuzz_skip) { /* no state to compare yet */
+			memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
+			memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
+			break;
+		}
 		uint64_t before = s->mismatches;
 		compare(u);
 		if (s->mismatches > before && getenv("NANPA2_FUZZ_DUMP")) {
@@ -424,6 +445,20 @@ static void fuzz_unit(const struct game_unit *u)
 	s->fuzz_mismatches += s->mismatches - mism;
 }
 
+static void fuzz_unit(const struct game_unit *u)
+{
+	fuzz_run(u);
+	/* the pump chain's pieces run in the real game only where the player
+	 * is clicked or touched, and ext 20 (0x4070bc) in no shipped script:
+	 * fuzz them from the handler's first calls */
+	if (u->addr == 0x4073ee) {
+		static const uint32_t sites[] = { 0x40448b, 0x4044a9, 0x4044b7, 0x4045eb, 0x40559d,
+			0x4051e3, 0x40520f, 0x405233, 0x405273, 0x40539f, 0x4070bc };
+		for (size_t i = 0; i < sizeof sites / sizeof sites[0]; i++)
+			fuzz_run(game_unit_find(sites[i]));
+	}
+}
+
 int game_call(uint32_t addr)
 {
 	const struct game_unit *u = game_unit_find(addr);
@@ -447,8 +482,34 @@ int game_call(uint32_t addr)
 		u->run();
 	}
 	if (mode == MODE_OFF)
-		poison(u);
+		poison(u, 0);
 	return 1;
+}
+
+/* The ends of a piece that the native code finishes with a few instructions
+ * of its own: the VM's quit (0x40638d: mov esp, [0x445cdc]; then pop ebp, ret
+ * to WinMain), and the restart of 04 1e from a nested VM (0x406fc8, jmp
+ * 0x4060f9). The C returns those pcs so that the oracle and the comparison
+ * stop at the same place; here, after the comparison, the instructions run. */
+static uint32_t finish_exit(uint32_t pc)
+{
+	switch (pc) {
+	case 0x40638d:
+		cpu.r[ESP] = rd32(0x445cdc);
+		X86_COUNT(1);
+		/* fall through */
+	case 0x406393: /* the quit of a piece that already reset ESP */
+	case 0x40472f:
+		cpu.r[EBP] = pop32();
+		pc = pop32();
+		X86_COUNT(2);
+		return pc;
+	case 0x406fc8:
+		X86_COUNT(1);
+		X86_POLL(0x406fc8);
+		return 0x4060f9;
+	}
+	return pc;
 }
 
 int game_jump(uint32_t addr, uint32_t *next)
@@ -458,6 +519,8 @@ int game_jump(uint32_t addr, uint32_t *next)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
+	if (mode == MODE_OFF)
+		diff_ax_unspecified = 0;
 	if (mode == MODE_ORACLE || (u->native && u->native())) {
 		/* inside an original, or a case the C handler leaves to the
 		 * native code: the lifted handler, inline */
@@ -466,13 +529,33 @@ int game_jump(uint32_t addr, uint32_t *next)
 			stats[u - game_units].native_runs++;
 		return 1;
 	}
+	if (mode == MODE_OFF && uncompared(u) && start_oracle()) {
+		/* like oracle(), but WinMain's ret may leave for the host */
+		stop_tables();
+		x86_stop_esp = cpu.r[ESP] + 4u * (uint32_t)u->stack_words;
+		x86_stop_exits = game_vm_exits;
+		x86_stop_units = stop_units;
+		x86_stop_calls = stop_calls;
+		x86_stop_started = 0;
+		x86_stop_pc = 0;
+		mode = MODE_ORACLE;
+		x86_native_hold = 1;
+		x86_exec(X86_ORACLE_TAG | u->addr);
+		x86_native_hold = 0;
+		mode = MODE_OFF;
+		*next = x86_stop_esp ? X86_RET_SENTINEL : x86_stop_pc;
+		x86_stop_esp = 0;
+		return 1;
+	}
 	if (diff_on && mode == MODE_OFF && !uncompared(u)) {
 		fuzz_unit(u);
 		*next = compare(u);
 	} else
 		*next = u->jump();
-	if (mode == MODE_OFF)
-		poison(u);
+	if (mode == MODE_OFF) {
+		poison(u, *next);
+		*next = finish_exit(*next);
+	}
 	if (u->poll_self && *next == addr && mode == MODE_OFF)
 		X86_POLL(addr);
 	return 1;

@@ -50,11 +50,16 @@ static inline int diff_kept(uint32_t addr, uint32_t exit_esp)
  * half. That is live at the VM loop: 04 1f, after the file it called
  * returns, copies with `mov cx, 0x1e; rep movsd` (0x40705e), so it relies on
  * every handler leaving ECX < 0x10000, as the original's do. */
+/* set by the C of sub-op 7 of ext op 04 26, whose result S is whatever AX the
+ * last sprite step left (nothing reads it): AX is not compared then */
+extern int diff_ax_unspecified;
+extern uint32_t diff_exit_pc; /* the exit pc of the call being checked or poisoned */
+uint32_t diff_scratch(const struct game_unit *u);
 static inline uint32_t diff_live_bits(const struct game_unit *u, int r)
 {
-	if (!(u->scratch_regs & REG_BIT(r)))
+	if (!(diff_scratch(u) & REG_BIT(r)))
 		return 0xffffffffu;
-	return r == ECX ? 0xffff0000u : r == EAX ? u->eax_live : 0;
+	return r == ECX ? 0xffff0000u : r == EAX ? (diff_ax_unspecified ? 0 : u->eax_live) : 0;
 }
 
 uint32_t diff_flags(const struct cpu *c);   /* CF PF ZF SF DF OF as EFLAGS */

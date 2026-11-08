@@ -1065,3 +1065,63 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   splittable by this work. The window procedure in C runs under the HLE pump 0x401bf0; the
   obstacle is 0x40609c itself (a pump that takes a message, and its WM_QUIT `mov esp,
   [0x445cdc]`), which still needs the jump-unit split at each pump site.
+
+## 2026-11-09 (reimplementation stage 6: the last native game code)
+
+- 146ef80: the dissolve wipe 0x401a50 (op 19 sub-op 4) as C pieces (`src/game/wipe.c`, written by a
+  helper): set-up and passes, the rest after the pump (return 0x401b90), the frame at the native
+  stack addresses, 166,485 native instructions charged exactly, op 19's native fallback removed.
+- d5eb14f, 169d988, caf1e5a, 8fe7cce, bbe9b18: the 04 26 pump chain (`src/game/map_pump.c`): the
+  handler 0x4073ee, the pump 0x40609c/0x4060a2 and every pump site's return address (0x40448b,
+  0x4044a9, 0x4044b7, 0x4045eb, 0x4051e3, 0x40520f, 0x405233, 0x405273, 0x40539f, 0x40559d) are jump
+  units joined by call exits; the handler's tail is 0x407410. Replaces 0x403a70, 0x403e30, 0x4042f7,
+  0x40431b, 0x404410, 0x404450, 0x4051c2, 0x405216, 0x405597. The VM's click handler path
+  0x40613f-0x40616c (0x40614a, 0x406153, 0x406164) and ext 20 0x4070bc are C. The tail
+  instructions (0x40638d, 0x406393, 0x40472f, the `jmp 0x4060f9` at 0x406fc8) run in
+  `finish_exit` after the comparison. NANPA2_START_ORACLE and ctest `start_trace` compare the
+  start-up's HLE call trace with the original WinMain's (171 calls, identical). Details:
+  docs/reimpl.md "Stage 6", re-notes.md.
+- Findings: no shipped script uses ext 20 or ext 1a (tools/mes_ops.py: 0 of 470 MES files), so the
+  click handler path is reached only with NANPA2_CLICKTEST=1 (dev.c). 04 26 sub-op 7 is used 9 times
+  and leaves the AX of its last sprite step in S; nothing reads it, AX is not compared there
+  (`diff_ax_unspecified`). A 5B-style oracle for the handler failed at the first town call: with the
+  stop ESP one word below the entry (the pushed ESI) the "ESP above the stop" rule ended the oracle at
+  the argument parser's return; the tail piece moved to 0x407410 (after `pop esi`). A click-path
+  piece trapped under poison because 0x406124/0x406134 had EDI scratch while the path keeps the handler in
+  it. Route runs of the town are lotteries under the compare at turbo 8 (a click at the title that
+  lands before the menu is up leaves the route waiting for ever): turbo 2 works.
+- Native instructions (NANPA2_NATIVE_REPORT=1, plain, 300k frames, seed 43 from saves32, turbo 2):
+  before 53,166,107 in 14 functions (0x401a50 46.3 M, 0x40609c 4.8 M, 0x405216 1.6 M, 0x404410,
+  0x40431b, 0x4042f7, 0x403d45, 0x40500e, 0x4073ee, 0x403a70, 0x405597, 0x406f7c 81, 0x407204, 0x40638d);
+  after **0** in 0 functions, also for seed 42 (plain, 300k frames, reaches TOWN at frame 26678 and
+  stays in it). reimpl_status: 25,597 of 25,597 bytes, 142 of 142 functions (was 22,388, 126).
+- Verification on bbe9b18 (diff + poison, headless; units compared, mismatches, charge = C insns over
+  native over all compared units; interp unless noted):
+
+  | Run | Frames | Reached | Mismatches | Charge |
+  |---|---|---|---|---|
+  | seed 31, new game, turbo 8 | 300000 | Prologue to S22 | 0 | 1.00066 |
+  | seed 33, new game, turbo 8 | 300000 | Prologue to S20 | 0 | 1.00057 |
+  | seed 42, saves32, turbo 2 | 300000 | OPEN1, 40.MES | 0 | 1.00069 |
+  | seed 43, saves32, turbo 2 | 300000 | main game, MISAKO, TOWN at 189707, 24830 04 26 calls, 174335 pumps, 36 wipe pieces | 0 | 1.00004 |
+  | recomp seed 44, saves32, turbo 2 | 150000 | to TOMOMI | 0 | 1.00032 |
+  | recomp lockstep seed 9, turbo 8 | 120000 | to S23 | no divergence (thin: no native game code runs) | |
+  | town route (turbo 2) with NANPA2_FUZZ=100, three runs | route | mati1, walk, clicks, right clicks, quit | 0 | 1.0005 |
+
+  The fuzz (`NANPA2_FUZZ`) compared each pump site's piece 2900 times, the handler 3000 (op 7 included)
+  and ext 20 3000 states, all equal. The click handler path under NANPA2_CLICKTEST (seed 31, 20000
+  frames): 159 handler runs, 0 mismatches. Earlier runs on d5eb14f/169d988 (before the tail piece
+  moved): seeds 42 and 43 reached the town, 0 mismatches after the fix. Watchdog warnings (main thread
+  stalled over 3 s in one compare: the wipe's first piece, a fuzz state) occurred in the seed 42/43 runs
+  (1 and 3) and the fuzz routes (29), never a trap or a mismatch; none in the others.
+- Sabotage: the event check's mouse test off by one (`+ 0x61` for `+ 0x60` in `game_ev_pumped_b`,
+  0x405273): the route with the fuzz reported `diff MISMATCH 00405273 map_event_pumped_b` (reverted).
+  The wipe: see 146ef80's helper (a source column off by one at pixel 100: 5 mismatches in
+  `wipe_pumped`).
+- ctest 10/10 on the interp and the recomp builds (smoke skipped, screen not visible), including
+  `no_game_bytes` and the new `start_trace`.
+- Left: nothing of the game code runs natively. The exe is the oracle of the differential test (and,
+  in the recomp build, the lifted reference); a build that drops it needs the state to move from
+  emulated memory into C structs (not done). Not exercised by any run: ops 04 1a (swap rect; no script
+  uses it), the menu input blocks 2-5 of 04 13 (`handled2`..`waited5`), the click handler path in a
+  real script, and the event check's pieces in an explore run (the fuzz and the route cover them).

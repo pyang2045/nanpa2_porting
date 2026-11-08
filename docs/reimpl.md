@@ -33,6 +33,89 @@ So the script VM 0x4060d4 owns all opcode handlers reached through its jump tabl
 (3,765 bytes). About a third of the functions are hand-written assembly with register
 arguments.
 
+## Stage 6: the pump chain, the wipe, the click path, the tails (src/game/map_pump.c, wipe.c, loop.c)
+
+The last stage: no game function is left to run natively. `NANPA2_NATIVE_REPORT=1` counts the
+instructions the interpreter runs in 0x401000-0x4077ac outside a differential oracle; a
+playthrough used to run 53 M of them (seed 43, 300k frames: the dissolve wipe 46.3 M, the map's
+pump 4.8 M, the event check 1.6 M, the rest the sprite step and the other callers of the pump
+chain). Now it runs **0**. `tools/reimpl_status.py` reports 25,597 of 25,597 bytes and 142 of 142
+functions replaced (it was 87.5% and 126 of 142). What is left of the game files is the exe
+only as the oracle of the differential test and, in the recomp build, as the lifted reference.
+
+**The pump chain** (`map_pump.c`). Sub-ops 5, 7 and 12 of ext op 04 26 wait for the window from
+ten places in native code (the pump 0x40609c is called by the player's step, the frame, the
+event check and the right click), and a WM_QUIT in it resets ESP to the VM's top frame, so the
+chain is jump units joined by call exits, as the VM loop is (Stage 4). The handler 0x4073ee
+pushes ESI, `call 0x403a70` and runs the sub-op; sub-ops that do not pump (0-4, 6, 8-11, 13-16,
+30, 32) are still `game_map_dispatch` and leave for the handler's tail 0x40740f at once; 5, 7 and
+12 run on, with the native frames pushed as the native calls push them, down to the first pump.
+
+| Piece | Native | Does |
+|---|---|---|
+| `game_op_map` | 0x4073ee | the handler; ends at its tail or at the first pump (call exit to 0x40609c) |
+| `game_op_map_done` | 0x40740f | `pop esi; [S] = AX; jmp 0x4060f9` |
+| `game_pump` | 0x40609c | `pushad`, call exit to the HLE pump 0x401bf0 (return 0x4060a2) |
+| `game_pump_done` | 0x4060a2 | WM_QUIT (EAX = 0: ESP = [0x445cdc]) or `popad`, BL = buttons, CX/DX = mouse, `ret` |
+| `game_pl_pumped_a` / `_b` | 0x40448b / 0x4044a9 | the player's step with the game's cursor on: after the pump (right button: start a walk, 0x405597) and after the second pump (left button?) |
+| `game_pl_click` | 0x4044b7 | left button down: follow the mouse (up, down, left, right movers) |
+| `game_pl_keys` | 0x4045eb | cursor off: the arrow keys (after the HLE pump directly) |
+| `game_rc_pumped` | 0x40559d | the right click: plan a walk (0x405966) |
+| `game_s12_pumped_a` / `game_s12_released` | 0x4051e3 / 0x40520f | sub-op 12 after the frame's redraw: a click in the screen's button box holds the frame |
+| `game_ev_pumped_a` / `_b` / `game_ev_released` | 0x405233 / 0x405273 / 0x40539f | the event check: contact with sprite 0, the mouse on the player, the area trigger, wait for the button |
+
+A `ret` out of the chain is `go(ra)` (map_pump.c): the return address on the emulated stack
+says which native code runs next (0x403a86 and 0x40440f are bare `ret`s, 0x404314 is the sprite
+loop's `pop esi; add esi, 0x10`, 0x4051ce continues sub-op 12, 0x403ed3 sub-op 5, 0x404495 the
+right click), and anything else is a unit (0x40740f). So a pump site's piece runs under any of
+the chain's callers, and its oracle ends where the handler's does: `words_fn`
+(`game_chain_words`) finds the 0x40740f word on the stack to give the stop ESP. The sprite step
+0x40431b returns 1 for a sprite of kind 6 (the player); the loop then pushes the frames and
+runs the player (the three saved words, the pushad), instead of the unit and `native` predicate
+of Stage 5A. Sub-op 5's draw is `game_map_redraw_all_begin/_end` (map_draw.c).
+
+**The dissolve wipe** (`wipe.c`, written by a helper). 0x401a50 is two pieces (set-up and passes;
+the rest after the pump, return 0x401b90) with the 0x38-byte frame at the native stack
+addresses, because the compare checks them at each exit; the op 19 handler pushes its saved ESI,
+the two surface indices and the return address 0x40738b, whose piece (`game_op_wipe_done`)
+drops them. 166,485 native instructions without waiting (charged exactly), every native
+backward jump polls. Op 19 has no native fallback any more.
+
+**Harness.**
+- `struct game_unit.exit_pc/exit_scratch`: registers that are scratch only where the unit
+  leaves for one pc. The chain's pieces compare every register at a pump (it returns to them)
+  and only AX at the handler's tail (`MAP_TAIL_SCRATCH`).
+- `diff_scratch()` (diff.c): at the quit exits 0x40638d, 0x406393 and 0x40472f every register
+  but ESP is scratch.
+- `finish_exit()` (game.c): the native tails after a piece, run after the comparison, so the
+  C returns the pc where its oracle stops: 0x40638d (`mov esp, [0x445cdc]; pop ebp; ret`),
+  0x406393 and 0x40472f (the pop and ret after a reset that the piece did), and 0x406fc8 (the
+  `jmp 0x4060f9` of 04 1e from a nested VM). These were the "tail instructions" in the native
+  report, 2-81 a run.
+- `words_fn` for the stop ESP, above.
+- recomp.py takes call exits inside `HLE_GAME_DEAD` bodies (the chain's callers are C now).
+- `NANPA2_FUZZ`: the sprite loop (04 26 7 with a movement state for each sprite), each pump
+  site's piece from a state built as the native stack has it there (frames, pushad blocks, the
+  mouse near the player half the time, buttons, keys, a contact now and then) and ext 20 are
+  fuzzed from the handler's first calls (`fuzz_unit` in game.c, `map_fuzz.c`).
+
+**The click path and ext 20.** The VM loop's click handler path (a button down with its
+handler set: wait for both buttons up, run the handler's block) is pieces 0x40614a, 0x406153,
+0x406164; `game_native_click0/1` are gone. Ext 20 (0x4070bc) is enabled. No shipped script uses
+it: `tools/mes_ops.py` finds no `04 20` (and no `04 1a`) in the 470 MES files. So the path is
+checked with `NANPA2_CLICKTEST=1` (dev.c: both handlers point at a block `01 10 00` in the free
+end of the script image) in a scripted route with clicks, under the compare, and ext 20 by its
+fuzzer.
+
+**Start-up.** WinMain's pieces cannot be compared online (window, DirectDraw, timer, exit).
+`NANPA2_START_ORACLE=1` runs the original WinMain and shutdown (the lifted code, as an oracle
+with a free return) instead of the C, and ctest `start_trace` (tests/start_trace.py) runs the game
+headless twice and compares every HLE call (imports, COM methods, C runtime) from launch to a
+quit six seconds in, ignoring the message pump's calls (their number follows the timer) and the
+argument slot of the sound exit 0x402c70, which takes none: 171 calls, identical.
+
+**Verification, results and what is left**: see NOTES.md 2026-11-09 (stage 6).
+
 ## Stage 5B: measurement, palette, screen routines, spin pieces (src/game/screen.c)
 
 **Measurement.** `tools/reimpl_status.py` used to count a function as replaced when nothing
@@ -74,7 +157,7 @@ otherwise differ), and the registers every routine leaves are the native ones: E
 half is compared for every unit, which found the cursor restore leaving its width in ECX (it
 stores it over the saved ECX slot, `[esp+0xc]`).
 
-**Not done.**
+**Not done.** (Stage 6 did all of it.)
 
 - The dissolve wipe 0x401a50 (op 19 sub-op 4: 128 passes, 2 frames apart, the pump between;
   needs pieces with the frame in emulated memory at the native addresses, and no explore run
@@ -199,7 +282,7 @@ there is no return address. So:
 - Inside an oracle (`MODE_ORACLE`), `hle_jump` returns `X86_ORACLE_TAG | addr` and the
   dispatch (or the interpreter) runs the original inline. A C handler can do the same
   outside a test: a unit's `native` predicate (Stage 3) leaves the cases it does not cover
-  to the original.
+  to the original (no unit uses one since Stage 6; the field is still there).
 - Lockstep: `hle_jump` is an HLE check point like `hle_call`, and an oracle stop is a
   return check point (the shadow predicts the exit pc, not the sentinel).
 - Scratch registers: only ESP, EBP and ESI are live at 0x4060f9 (`tools/liveness.py`, an
@@ -561,7 +644,7 @@ caller left (the pumping chain below) is a unit: 0x403b28, 0x403bd2, 0x403d45 (c
 `tools/reimpl_status.py` counts them (it takes them as barriers of the live walk), and the
 lifted bodies stay as the oracles' code.
 
-**What is left native, and why.** Seven functions, 1,505 bytes, plus 0x403a70 and 0x404410
+**What is left native, and why.** (All of it is C since Stage 6, above; this is the state after 5A.) Seven functions, 1,505 bytes, plus 0x403a70 and 0x404410
 which the native fallback still runs: 0x4042f7 (sub-op 7: loop over the sprites), 0x404450 (kind
 6, the player: mouse and keys; 615 bytes), 0x4051c2 (sub-op 12: one frame), 0x405216 (event
 check), 0x405597 (right click), 0x403e30 (sub-op 5: redraw all, then the event check), and the
@@ -627,37 +710,37 @@ by name).
 | Address | Bytes | Module | Purpose | Callers | Callees | State |
 |---|---|---|---|---|---|---|
 | 0x401000 | 70 | file | fopen "rb": path as given, then with CD prefix 0x431030 | 401050 402cb0 403360 | 412c90 412d13 | game |
-| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 ... | game |
+| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 41a3d0 41a6a6 41a730 41a740 | game |
 | 0x401160 | 47 | file | save(name, buf, size): fopen wb, fwrite, fclose | 4060d4 | 412d13 412d6e 412fb7 | game |
-| 0x401190 | 84 | screen | Lock surface (hides cursor on primary), return pointer (+40 lines if 0x4ac068) | 4014f0 401870 401900 401a50 403d45 403e30 ... | 4011f0 |  |
-| 0x4011f0 | 184 | screen | cursor: restore saved 32x32 background at 0x4aac54/50 | 401190 401430 4014f0 401670 4017b0 401c60 ... |  |  |
-| 0x4012b0 | 41 | screen | Unlock surface; redraw cursor if primary and shown | 4014f0 401870 401900 401a50 403d45 403e30 ... |  |  |
-| 0x4012e0 | 330 | screen | cursor: save background, draw AND/XOR bitmap 0x4be900 | 401430 4014f0 401670 4017b0 401c40 |  |  |
-| 0x401430 | 178 | screen | Blt copy rect between surfaces 0x44629e[n] (40-line offset) | 403661 4060d4 | 4011f0 4012e0 |  |
-| 0x4014f0 | 380 | screen | masked copy rect, index 8 transparent | 403661 4060d4 | 401190 4011f0 4012b0 4012e0 |  |
-| 0x401670 | 306 | screen | swap two surface rects through scratch surface 0x4ab058 | 4060d4 | 4011f0 4012e0 |  |
-| 0x4017b0 | 186 | screen | colour-fill rect (Blt COLORFILL, colour = arg>>4) | 4060d4 406b24 | 4011f0 4012e0 |  |
-| 0x401870 | 130 | screen | XOR rect with colour index (arg>>4) | 4060d4 | 401190 4012b0 |  |
+| 0x401190 | 84 | screen | Lock surface (hides cursor on primary), return pointer (+40 lines if 0x4ac068) | 4014f0 401870 401900 401a50 403d45 403e30 4060d4 406e20 | 4011f0 | game |
+| 0x4011f0 | 184 | screen | cursor: restore saved 32x32 background at 0x4aac54/50 | 401190 401430 4014f0 401670 4017b0 401c60 402570 |  | game |
+| 0x4012b0 | 41 | screen | Unlock surface; redraw cursor if primary and shown | 4014f0 401870 401900 401a50 403d45 403e30 4060d4 406e20 |  | game |
+| 0x4012e0 | 330 | screen | cursor: save background, draw AND/XOR bitmap 0x4be900 | 401430 4014f0 401670 4017b0 401c40 |  | dead |
+| 0x401430 | 178 | screen | Blt copy rect between surfaces 0x44629e[n] (40-line offset) | 403661 4060d4 | 4011f0 4012e0 | dead |
+| 0x4014f0 | 380 | screen | masked copy rect, index 8 transparent | 403661 4060d4 | 401190 4011f0 4012b0 4012e0 | dead |
+| 0x401670 | 306 | screen | swap two surface rects through scratch surface 0x4ab058 | 4060d4 | 4011f0 4012e0 | dead |
+| 0x4017b0 | 186 | screen | colour-fill rect (Blt COLORFILL, colour = arg>>4) | 4060d4 406b24 | 4011f0 4012e0 | dead |
+| 0x401870 | 130 | screen | XOR rect with colour index (arg>>4) | 4060d4 | 401190 4012b0 | dead |
 | 0x401900 | 333 | text | draw one ASCII/Big5 character via GDI TextOutA | 4060d4 | 401190 4012b0 SelectObject SetBkColor SetBkMode SetTextColor TextOutA | game |
-| 0x401a50 | 402 | screen | dissolve wipe surface 2 -> 0, 2 frames per step | 4060d4 | 401190 4012b0 401bf0 |  |
+| 0x401a50 | 402 | screen | dissolve wipe surface 2 -> 0, 2 frames per step | 4060d4 | 401190 4012b0 401bf0 | game |
 | 0x401bf0 | 75 | input | message pump (PeekMessage/Dispatch), stream refill 0x4034a0; 0 = WM_QUIT | 401a50 404450 40609c 4060d4 4074d5 4075c6 | 4034a0 DispatchMessageA PeekMessageA TranslateMessage | hle |
-| 0x401c40 | 25 | screen | show game cursor (0x4ac510 = 1, draw 0x4012e0) | 4060d4 | 4012e0 |  |
-| 0x401c60 | 25 | screen | hide game cursor (restore 0x4011f0, 0x4ac510 = 0) | 4060d4 | 4011f0 |  |
-| 0x401c80 | 31 | input | SetCursorPos(x, y+40 if 0x4ac068) | 4060d4 | SetCursorPos |  |
-| 0x401ca0 | 138 | screen | build palette from 0x44530c/0x445eae, SetEntries | 403661 4060d4 |  |  |
-| 0x401d30 | 221 | screen | start palette fade: per-entry deltas, 0x4ac504 = 1 | 4060d4 |  |  |
-| 0x401e10 | 6 | screen | return fade-active flag 0x4ac504 | 4060d4 |  |  |
+| 0x401c40 | 25 | screen | show game cursor (0x4ac510 = 1, draw 0x4012e0) | 4060d4 | 4012e0 | dead |
+| 0x401c60 | 25 | screen | hide game cursor (restore 0x4011f0, 0x4ac510 = 0) | 4060d4 | 4011f0 | dead |
+| 0x401c80 | 31 | input | SetCursorPos(x, y+40 if 0x4ac068) | 4060d4 |  SetCursorPos | dead |
+| 0x401ca0 | 138 | screen | build palette from 0x44530c/0x445eae, SetEntries | 403661 4060d4 |  | dead |
+| 0x401d30 | 221 | screen | start palette fade: per-entry deltas, 0x4ac504 = 1 | 4060d4 |  | dead |
+| 0x401e10 | 6 | screen | return fade-active flag 0x4ac504 | 4060d4 |  | dead |
 | 0x401e20 | 431 | startup | play LOGO.AVI through MCI (src/hle/logo.c) | 402090 | 4077a0 412c90 DispatchMessageA GetMessageA SetWindowPos ShowCursor | hle |
-| 0x401fd0 | 179 | startup | window procedure during the logo movie |  | DefWindowProcA SetFocus mciSendStringA | dead |
-| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA ... | game |
+| 0x401fd0 | 179 | startup | window procedure during the logo movie |  |  DefWindowProcA SetFocus mciSendStringA | dead |
+| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA LoadIconA MessageBoxA RegisterClassA ShowWindow UpdateWindow | game |
 | 0x4021c0 | 699 | input | main window procedure: keys/buttons -> 0x445d8f, mouse, activate |  | 402570 403220 403250 403440 DefWindowProcA DestroyWindow PostQuitMessage SetFocus | game |
-| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 | game |
-| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e | game |
-| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent | game |
-| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent | game |
+| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 | dead |
+| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e | dead |
+| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent | dead |
+| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent | dead |
 | 0x402ad0 | 405 | sound | DirectSound init, primary buffer 22050 Hz 8-bit stereo | 402620 | 4077a6 MessageBoxA | hle |
 | 0x402c70 | 61 | sound | sound exit: stop voice/music, release DirectSound | 402a20 | 4032c0 403440 | hle |
-| 0x402cb0 | 346 | sound | play music n: MUSIC\%02d.MP3 else .WAV | 4060d4 | 401000 402e10 402ea0 402f10 402f60 403020 4030f0 4032c0 ... | hle |
+| 0x402cb0 | 346 | sound | play music n: MUSIC\%02d.MP3 else .WAV | 4060d4 | 401000 402e10 402ea0 402f10 402f60 403020 4030f0 4032c0 412c90 412d6e 412deb 412f02 41a6a6 41a730 | hle |
 | 0x402e10 | 129 | sound | create MP3 decoder state 0x4be56c | 402cb0 | 407810 407a70 407fb0 408130 40a660 412c90 | dead |
 | 0x402ea0 | 112 | sound | set two position notifications on the stream buffer | 402cb0 |  | dead |
 | 0x402f10 | 68 | sound | find WAV "data" chunk after fmt | 402cb0 403020 403250 403360 |  | hle |
@@ -668,7 +751,7 @@ by name).
 | 0x403220 | 41 | sound | pause music on deactivate | 4021c0 |  | hle |
 | 0x403250 | 111 | sound | resume music after reactivate | 4021c0 | 402f10 402f60 | hle |
 | 0x4032c0 | 153 | sound | stop music, free decoder 0x409f40 | 402c70 402cb0 4060d4 | 409f40 412d26 | hle |
-| 0x403360 | 211 | sound | play voice SPEECH%s once | 4060d4 | 401000 402f10 402f60 403020 403440 412c90 412d6e 412deb ... | hle |
+| 0x403360 | 211 | sound | play voice SPEECH%s once | 4060d4 | 401000 402f10 402f60 403020 403440 412c90 412d6e 412deb 412f02 41a6a6 41a730 | hle |
 | 0x403440 | 90 | sound | stop voice buffer 0x4be564 | 4021c0 402c70 403360 | 412d26 | hle |
 | 0x4034a0 | 106 | sound | wait on stream events, refill played half | 401bf0 | 402f60 4031d0 MsgWaitForMultipleObjects | hle |
 | 0x403510 | 244 | anim | slot control (eax sub-op 0-7: start/run/stop/wait/offset/reset) | 4060d4 406dff | 403661 | game |
@@ -683,7 +766,7 @@ by name).
 | 0x403b28 | 170 | map | sub-op 2: fill view cell grid 0x4313c8 from tile layer | 4042e7 4051c2 |  | game |
 | 0x403bd2 | 371 | map | sub-op 3: overlay visible sprites' tiles into the cell grid | 4042e7 4051c2 |  | game |
 | 0x403d45 | 235 | map | sub-op 4: redraw cells changed since 0x433308 | 4042e7 4051c2 | 401190 4012b0 403eff | game |
-| 0x403e30 | 207 | map | sub-op 5: redraw every cell, then event check 0x405216 |  | 401190 4012b0 403eff 4040f0 405216 |  |
+| 0x403e30 | 207 | map | sub-op 5: redraw every cell, then event check 0x405216 |  | 401190 4012b0 403eff 4040f0 405216 | dead |
 | 0x403eff | 69 | map | draw one 16x16 cell: tile via 0x4355fa, 0x435dfc[layers] | 403d45 403e30 |  | game |
 | 0x403f44 | 107 | map | cell draw [0x435dfc 0]: tile only |  |  | dead |
 | 0x403faf | 60 | map | cell draw [0x435dfc 1]: tile + 1 sprite layer |  | 404132 4041f9 404281 | dead |
@@ -694,14 +777,14 @@ by name).
 | 0x4041f9 | 136 | map | overlay one sprite tile onto the work cell | 403faf 403feb 404056 |  | dead |
 | 0x404281 | 102 | map | write the composed work cell to the screen | 403faf 403feb 404056 |  | dead |
 | 0x4042e7 | 16 | map | sub-op 6: compose and draw (sub-ops 2, 3, 4) |  | 403b28 403bd2 403d45 | dead |
-| 0x4042f7 | 36 | map | sub-op 7: step all sprite scripts | 4051c2 | 40431b |  |
-| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 | game |
+| 0x4042f7 | 36 | map | sub-op 7: step all sprite scripts | 4051c2 | 40431b | dead |
+| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 | dead |
 | 0x404410 | 30 | map | count down move steps, dispatch 0x435e0c[kind-1] | 40431b |  | dead |
-| 0x40442e | 15 | map | move kind 1: up (0x404731), toggle frame |  | 404731 |  |
+| 0x40442e | 15 | map | move kind 1: up (0x404731), toggle frame |  | 404731 | dead |
 | 0x404435 | 7 | map | move kind 2: down (0x404937) |  | 404937 | dead |
 | 0x40443c | 7 | map | move kind 3: left (0x404a9a) |  | 404a9a | dead |
 | 0x404443 | 5 | map | move kind 4: right (0x404c9f) |  | 404c9f | dead |
-| 0x404450 | 615 | map | move kind 6: player control, mouse/keys, history ring 0x435dca |  | 401bf0 404731 404937 404a9a 404c9f 405597 405691 40609c |  |
+| 0x404450 | 615 | map | move kind 6: player control, mouse/keys, history ring 0x435dca |  | 401bf0 404731 404937 404a9a 404c9f 405597 405691 40609c | dead |
 | 0x4046b7 | 15 | map | move kind 8: left+up |  | 404731 404a9a | dead |
 | 0x4046c6 | 15 | map | move kind 9: right+up |  | 404731 404c9f | dead |
 | 0x4046d5 | 15 | map | move kind 10: left+down |  | 404937 404a9a | dead |
@@ -717,15 +800,15 @@ by name).
 | 0x40500e | 30 | map | sub-op 9: collision test for sprite n | 405216 | 404e25 | game |
 | 0x40502c | 231 | map | sub-op 10: place player/view at entry n, fill history |  |  | dead |
 | 0x405113 | 175 | map | sub-op 11: reset history to player, view from entry n |  |  | dead |
-| 0x4051c2 | 84 | map | sub-op 12: one map frame (falls into 0x405216) |  | 403b28 403bd2 403d45 4042f7 40609c |  |
-| 0x405216 | 400 | map | event check: sprite contact / area trigger | 403e30 | 404f8c 40500e 40609c |  |
+| 0x4051c2 | 84 | map | sub-op 12: one map frame (falls into 0x405216) |  | 403b28 403bd2 403d45 4042f7 40609c | dead |
+| 0x405216 | 400 | map | event check: sprite contact / area trigger | 403e30 | 404f8c 40500e 40609c | dead |
 | 0x4053a6 | 56 | map | sub-op 13: set sprite n's script |  |  | dead |
 | 0x4053de | 55 | map | sub-op 14: enable/disable sprite n (flag 0x80) |  |  | dead |
 | 0x405415 | 122 | map | sub-op 15: unpack run-length layer (0x4000 = run) |  |  | dead |
 | 0x40548f | 179 | map | sub-op 16: copy a rectangle of map cells |  |  | dead |
 | 0x405542 | 77 | map | sub-op 30: start pathfinding for sprite n |  | 405966 | dead |
 | 0x40558f | 8 | map | sub-op 32: cancel auto-walk (0x435573 = 0) |  |  | dead |
-| 0x405597 | 148 | map | right click: mouse to map cell, pathfind the player there | 404450 | 405966 40609c |  |
+| 0x405597 | 148 | map | right click: mouse to map cell, pathfind the player there | 404450 | 405966 40609c | dead |
 | 0x40562b | 102 | map | build walk grid from cell bit 0x80 (0xff wall, 0xfe free) | 405966 |  | dead |
 | 0x405691 | 725 | map | auto-walk step: go to the lower neighbour (8 directions) | 404450 4046f3 | 404731 404937 404a9a 404c9f | game |
 | 0x405966 | 359 | map | pathfinding setup: start/goal, walk grid, flood fill | 4046f3 405542 405597 | 40562b 405acd 405fb6 | game |
@@ -740,27 +823,27 @@ by name).
 | 0x405ed0 | 109 | map | flood-fill order case 6 |  | 405b07 | dead |
 | 0x405f24 | 73 | map | flood-fill order case 7 |  | 405b07 | dead |
 | 0x405fb6 | 230 | map | unreachable goal: mark approach cells for the sprite footprint | 405966 |  | dead |
-| 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 |  |
-| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... | game |
+| 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 | game |
+| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 401870 401900 401a50 401bf0 401c40 401c60 401c80 401ca0 401d30 401e10 402cb0 4032c0 403360 403510 403624 4037fc 4039f7 403a70 4060d4 4061cd 4061d4 406395 4063ee 406455 4068e1 4069fd 406acc 406b24 406dc4 406dff 406e20 40741b 4074d5 40754d 40756c 407599 4075c6 | game |
 | 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 | game |
 | 0x4061d4 | 39 | vm | skip a 01 ... 00 block, counting nesting | 4060d4 40741b |  | game |
 | 0x406395 | 89 | vm | init register '@' and segment table 0x44533c | 4060d4 |  | game |
 | 0x4063ee | 103 | text | advance text cursor, wrap line/window (alt 0x406415 newline) (alt 406415) | 4060d4 |  | game |
 | 0x406455 | 60 | expr | write 4-bit flag n = ax (clamped to 15) | 4060d4 |  | game |
 | 0x4068e1 | 53 | vm | menu list: next item (guard 0f expr), al = -1/0/1 | 4060d4 | 4037fc | game |
-| 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd |  |
+| 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd | game |
 | 0x406acc | 57 | vm | wait for click/Enter (bit 0x10) press then release | 4060d4 | 4074d5 4075c6 | game |
 | 0x406b24 | 82 | text | clear text window (fill 0x4017b0), home cursor | 4060d4 | 4017b0 | game |
 | 0x406dc4 | 59 | vm | copy string argument into buffer edi | 4060d4 406e20 |  | game |
 | 0x406dff | 18 | anim | reset all animation slots (0x403510 sub-op 7) | 4060d4 406e20 | 403510 | game |
-| 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c |  |
+| 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c | dead |
 | 0x40741b | 136 | vm | parse argument list into 0x445d06 (types 0x445cf6), eax = arg 0 | 4060d4 | 4037fc 4061d4 4074a3 | game |
 | 0x4074a3 | 50 | vm | test whether the next byte starts an expression | 40741b |  | dead |
 | 0x4074d5 | 87 | input | pump, then test input bit al (0 ok, 1 cancel, 2-5 arrows) | 4060d4 406acc | 401bf0 | game |
 | 0x40752c | 33 | screen | copy a picture palette into 0x44530c / 0x445eae | 403661 406e20 |  | game |
-| 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  |  |
-| 0x40756c | 45 | screen | save palette tables to 0x44608e | 4060d4 |  |  |
-| 0x407599 | 45 | screen | restore palette tables from 0x44608e | 4060d4 |  |  |
+| 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  | dead |
+| 0x40756c | 45 | screen | save palette tables to 0x44608e | 4060d4 |  | dead |
+| 0x407599 | 45 | screen | restore palette tables from 0x44608e | 4060d4 |  | dead |
 | 0x4075c6 | 40 | vm | wait ecx/4+1 frames, pump and animate | 4060d4 406acc | 401bf0 403624 | game |
 | 0x4075f0 | 140 | file | GP4/ANI LZHUF decompressor (src/lzh.c) | 401050 | 40776b | hle |
 | 0x40767c | 61 | file | LZHUF tree rebuild at frequency 0x8000 | 4076b9 | 4076b9 | dead |

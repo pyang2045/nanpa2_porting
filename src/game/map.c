@@ -454,8 +454,9 @@ void game_map_collision(void)
 
 /* ---- the dispatcher */
 
-/* The sub-ops the C handles; the rest (5, 7, 12, which pump messages, and
- * the sub-ops no script uses) are the native handler's. */
+/* The sub-ops that run to their end in one piece; 5, 7 and 12 pump messages
+ * and are the pieces of map_pump.c; the table of the native dispatcher has
+ * nothing at the other numbers. */
 int game_map_op_in_c(uint32_t op)
 {
 	switch (op) {
@@ -467,12 +468,11 @@ int game_map_op_in_c(uint32_t op)
 	}
 }
 
-/* 0x403a70 for the C handler of 04 26 (ops_sys.c game_op_map): EAX = the
- * sub-op, ESI = the argument values. Copies arguments 1..6 to MAP_ARGS and
- * runs the sub-op; AX is its result. */
-void game_map_dispatch(void)
+/* 0x403a70 up to its call of the sub-op: ESI = the argument values; copies
+ * arguments 1..6 to MAP_ARGS, with the registers the rep movsd leaves
+ * (the call of 0x403a70 and of the sub-op are counted here too). */
+void game_map_dispatch_args(void)
 {
-	uint32_t op = cpu.r[EAX];
 	uint32_t src = cpu.r[ESI] + 2;
 	for (uint32_t i = 0; i < 3; i++)
 		wr32(MAP_ARGS + 4 * i, rd32(src + 4 * i));
@@ -480,6 +480,15 @@ void game_map_dispatch(void)
 	cpu.r[EDI] = MAP_ARGS + 12;
 	cpu.r[ECX] = 0;
 	X86_COUNT(9);
+}
+
+/* 0x403a70 for the C handler of 04 26 (ops_sys.c game_op_map): EAX = the
+ * sub-op, ESI = the argument values. Copies arguments 1..6 to MAP_ARGS and
+ * runs the sub-op; AX is its result. */
+void game_map_dispatch(void)
+{
+	uint32_t op = cpu.r[EAX];
+	game_map_dispatch_args();
 	switch (op) {
 	case 0:
 		cpu.r[EAX] = op_init();

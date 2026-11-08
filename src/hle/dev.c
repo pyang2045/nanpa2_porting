@@ -255,9 +255,29 @@ void dev_hit_table(uint32_t table)
 	fprintf(stderr, "\n");
 }
 
+/* NANPA2_CLICKTEST=1: set both click handlers (ext op 20 sets them; no
+ * shipped script uses it) to a block `01 10 00` in the free end of the
+ * script image, so that clicks run the VM's click handler path
+ * (0x40613f-0x40616c, src/game/loop.c) in a scripted run. */
+static void click_test(void)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_CLICKTEST") != NULL;
+	if (!on)
+		return;
+	enum { BLOCK = 0xf000 }; /* above the largest MES file, within a u16 offset */
+	wr8(0x435e78u + BLOCK, 0x01);
+	wr8(0x435e78u + BLOCK + 1, 0x10);
+	wr8(0x435e78u + BLOCK + 2, 0x00);
+	wr16(0x445ce2, BLOCK);
+	wr16(0x445ce4, BLOCK);
+}
+
 void dev_inject(void)
 {
 	explore_tick();
+	click_test();
 	uint32_t now = clock_now();
 	for (int i = first_live(); i < ninput; i++) {
 		struct ev *e = &input[i];

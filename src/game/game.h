@@ -47,6 +47,14 @@ struct game_unit {
 	 * game_jump polls the timer (X86_POLL) for each such return, after the
 	 * comparison, because the compare holds the timer off */
 	int poll_self;
+	/* stage 6, the pump chain: the registers that are scratch only where
+	 * the unit leaves for exit_pc (the handler tail 0x40740f needs only AX,
+	 * but the same piece's exits at a pump need all of them) */
+	uint32_t exit_pc, exit_scratch;
+	/* stack_words by calculation: how many words from ESP up to and
+	 * including the return address of the chain's handler (0x40740f),
+	 * where the oracle of a piece inside the 04 26 pump chain ends */
+	int (*words_fn)(void);
 };
 
 extern const struct game_unit game_units[];

@@ -4,6 +4,28 @@
 #include <stdlib.h>
 #include <string.h>
 
+uint32_t diff_exit_pc;
+int diff_ax_unspecified;
+
+/* The registers that need not match where the unit leaves for diff_exit_pc:
+ * at the VM's quit exits (0x40638d, 0x406393, 0x40472f: mov esp,[0x445cdc]
+ * and what follows pops EBP and returns) everything but ESP; at a unit's own
+ * exit_pc its exit_scratch; else scratch_regs. */
+uint32_t diff_scratch(const struct game_unit *u)
+{
+	if (u->jump) {
+		switch (diff_exit_pc) {
+		case 0x40638d:
+		case 0x406393:
+		case 0x40472f:
+			return ~REG_BIT(ESP) & 0xffu;
+		}
+		if (u->exit_pc && diff_exit_pc == u->exit_pc)
+			return u->exit_scratch;
+	}
+	return u->scratch_regs;
+}
+
 static const char *const reg_names[8] = { "eax", "ecx", "edx", "ebx", "esp", "ebp", "esi", "edi" };
 
 uint32_t diff_flags(const struct cpu *c)
@@ -87,6 +109,7 @@ int diff_check(const struct game_unit *u, const struct diff_record *rec, uint32_
                const struct trace_set *t, char *why, size_t cap)
 {
 	struct why w = { why, cap, 0, 0 };
+	diff_exit_pc = u->jump ? rec->out_pc : 0;
 	if (cap)
 		why[0] = 0;
 	if (u->jump && pc != rec->out_pc)

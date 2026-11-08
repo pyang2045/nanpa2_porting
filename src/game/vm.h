@@ -195,12 +195,12 @@ uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
 uint32_t game_op_anim(void);            /* 1a 0x407096 */
 uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
+uint32_t game_op_wipe_done(void);        /* 0x40738b */
+uint32_t game_wipe(void);                /* 0x401a50, src/game/wipe.c */
+uint32_t game_wipe_pumped(void);         /* 0x401b90 */
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
-uint32_t game_op_map(void);             /* 04 26 0x4073ee */
-/* the cases each leaves to the native handler (struct game_unit.native) */
-int game_native_misc(void);
-int game_native_map(void);
+uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
 
 /* ---- src/game/loop.c: the VM loop, blocks, text, waits (stage 4) ---- */
 uint32_t game_vm_entry(void);           /* 0x4060d4 */
@@ -222,8 +222,9 @@ uint32_t game_wait_click_framed(void);  /* 0x406adf */
 uint32_t game_wait_click_tested(void);  /* 0x406ae6 */
 uint32_t game_wait_click_release_framed(void); /* 0x406afb */
 uint32_t game_wait_click_release_tested(void); /* 0x406b02 */
-int game_native_click0(void);
-int game_native_click1(void);
+uint32_t game_vm_click_up0(void);       /* 0x40614a */
+uint32_t game_vm_click_up1(void);       /* 0x406153 */
+uint32_t game_vm_click_done(void);      /* 0x406164 */
 
 /* ---- src/game/screen.c (stage 5B): palette and fades ---- */
 void game_palette_save(void);           /* 0x40756c */
