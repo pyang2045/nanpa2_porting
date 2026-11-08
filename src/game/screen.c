@@ -781,3 +781,76 @@ void game_fill_rect_regs(void) { game_fill_rect(); }
 void game_xor_rect_regs(void) { game_xor_rect(); }
 
 void game_cursor_restore_regs(void) { game_cursor_restore(); }
+
+/*
+ * Picture load 0x406e20 (stage 5B). ECX non-zero: the name is argument 0
+ * of the opcode, read into STRING_BUF and the file (a GP4 picture) loaded
+ * to PICTURE; otherwise the picture already there is drawn again. The
+ * animation slots are reset first. The picture: four u16 (x / 8, y, width
+ * / 8, height) and, unless @[9] bit 0 keeps the palette, a palette block
+ * (0x40752c), then the 8-bit pixels from PICTURE + 0x208; they go to the
+ * rectangle (x, y, width, height) of the surface @[6] names, and the
+ * rectangle is kept at PICTURE_RECT for the masked copy op 04 1b.
+ */
+#define PICTURE 0x4662beu
+#define PICTURE_NAME 0x445d26u
+#define PICTURE_RECT 0x44538au /* u16 x / 8 ... y, w / 8, h (4 x u16, 0x44538a-0x445390) */
+#define SURFACE_PICK 0x4452dau
+
+void game_picture_load(void)
+{
+	uint32_t ecx = cpu.r[ECX];
+	X86_COUNT(2);
+	game_anim_reset();
+	X86_COUNT(3);
+	cpu.r[ECX] = ecx;
+	if (ecx) {
+		cpu.r[EDI] = PICTURE_NAME;
+		game_string_arg_regs();
+		push32(PICTURE);
+		push32(PICTURE_NAME);
+		X86_COUNT(6);
+		game_ncall(0x401050, 0);
+		cpu.r[ESP] += 8;
+	}
+	uint32_t esi = PICTURE;
+	wr16(PICTURE_RECT, rd16(esi) >> 3);
+	wr16(PICTURE_RECT + 2, rd16(esi + 2));
+	wr16(PICTURE_RECT + 4, rd16(esi + 4) >> 3);
+	wr16(PICTURE_RECT + 6, rd16(esi + 6));
+	X86_COUNT(15);
+	if (!(rd8(VM_FLAGS9) & 1)) {
+		cpu.r[EAX] = esi + 8;
+		X86_COUNT(2);
+		game_palette_copy(cpu.r[EAX]);
+	}
+	esi += 0x208;
+	uint32_t surf = rd16(SURFACE_PICK);
+	push32(rd32(SURFACES + 4 * surf));
+	game_lock_regs();
+	cpu.r[ESP] += 4;
+	uint32_t dst = cpu.r[EAX];
+	uint32_t pitch = rd32(PITCHES + 4 * surf);
+	cpu.r[EBX] = pitch;
+	dst += rd16(PICTURE_RECT + 2) * pitch + (rd16(PICTURE_RECT) << 3);
+	uint32_t rows = rd16(PICTURE_RECT + 6), dwords = rd16(PICTURE_RECT + 4) << 1;
+	X86_COUNT(18);
+	cpu.r[EDX] = rows;
+	cpu.r[ECX] = dwords;
+	while (rows) {
+		for (uint32_t i = 0; i < dwords; i++)
+			wr32(dst + 4 * i, rd32(esi + 4 * i));
+		esi += 4 * dwords;
+		dst += pitch;
+		rows--;
+		X86_COUNT(7 + dwords);
+		if (rows)
+			X86_POLL(0x406ee1);
+	}
+	cpu.r[EDX] = 0;
+	X86_COUNT(4);
+	push32(rd32(SURFACES + 4 * surf));
+	game_unlock_regs();
+	cpu.r[ESP] += 4;
+	X86_COUNT(4);
+}

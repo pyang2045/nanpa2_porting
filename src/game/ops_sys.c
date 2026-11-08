@@ -445,7 +445,7 @@ uint32_t game_op_load_file(void)
 uint32_t game_op_picture(void)
 {
 	parse();
-	ncall(0x406e20);
+	game_picture_load();
 	return loop_at(0x406e1b);
 }
 
@@ -562,7 +562,7 @@ static uint32_t misc_restore(void)
 	cpu.r[EDX] = edx;
 	push32(edx);
 	X86_COUNT(7);
-	ncall(0x406e20);
+	game_picture_load();
 	cpu.r[EDX] = pop32();
 	wr8(VM_FLAGS9, rd8(VM_FLAGS9) & 0xfe);
 	wr16(SURFACE_SELECT, cpu.r[EDX]);

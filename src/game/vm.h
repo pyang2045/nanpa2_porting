@@ -249,7 +249,8 @@ void game_blit_copy(void);              /* 0x401430 (dx, dy, sx, sy, w, h, surfa
 void game_blit_masked(void);            /* 0x4014f0 */
 void game_blit_swap(void);              /* 0x401670 */
 void game_fill_rect(void);              /* 0x4017b0 (x, y, w, h, colour << 4, surface) */
-void game_xor_rect(void);               /* 0x401870 */
+void game_xor_rect(void);
+void game_picture_load(void);           /* 0x406e20, ECX = load the file named by arg 0 */               /* 0x401870 */
 
 /* ---- src/game/text.c ---- */
 void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
