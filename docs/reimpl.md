@@ -33,6 +33,89 @@ So the script VM 0x4060d4 owns all opcode handlers reached through its jump tabl
 (3,765 bytes). About a third of the functions are hand-written assembly with register
 arguments.
 
+## Stage 6: the pump chain, the wipe, the click path, the tails (src/game/map_pump.c, wipe.c, loop.c)
+
+The last stage: no game function is left to run natively. `NANPA2_NATIVE_REPORT=1` counts the
+instructions the interpreter runs in 0x401000-0x4077ac outside a differential oracle; a
+playthrough used to run 53 M of them (seed 43, 300k frames: the dissolve wipe 46.3 M, the map's
+pump 4.8 M, the event check 1.6 M, the rest the sprite step and the other callers of the pump
+chain). Now it runs **0**. `tools/reimpl_status.py` reports 25,597 of 25,597 bytes and 142 of 142
+functions replaced (it was 87.5% and 126 of 142). What is left of the game files is the exe
+only as the oracle of the differential test and, in the recomp build, as the lifted reference.
+
+**The pump chain** (`map_pump.c`). Sub-ops 5, 7 and 12 of ext op 04 26 wait for the window from
+ten places in native code (the pump 0x40609c is called by the player's step, the frame, the
+event check and the right click), and a WM_QUIT in it resets ESP to the VM's top frame, so the
+chain is jump units joined by call exits, as the VM loop is (Stage 4). The handler 0x4073ee
+pushes ESI, `call 0x403a70` and runs the sub-op; sub-ops that do not pump (0-4, 6, 8-11, 13-16,
+30, 32) are still `game_map_dispatch` and leave for the handler's tail 0x40740f at once; 5, 7 and
+12 run on, with the native frames pushed as the native calls push them, down to the first pump.
+
+| Piece | Native | Does |
+|---|---|---|
+| `game_op_map` | 0x4073ee | the handler; ends at its tail or at the first pump (call exit to 0x40609c) |
+| `game_op_map_done` | 0x40740f | `pop esi; [S] = AX; jmp 0x4060f9` |
+| `game_pump` | 0x40609c | `pushad`, call exit to the HLE pump 0x401bf0 (return 0x4060a2) |
+| `game_pump_done` | 0x4060a2 | WM_QUIT (EAX = 0: ESP = [0x445cdc]) or `popad`, BL = buttons, CX/DX = mouse, `ret` |
+| `game_pl_pumped_a` / `_b` | 0x40448b / 0x4044a9 | the player's step with the game's cursor on: after the pump (right button: start a walk, 0x405597) and after the second pump (left button?) |
+| `game_pl_click` | 0x4044b7 | left button down: follow the mouse (up, down, left, right movers) |
+| `game_pl_keys` | 0x4045eb | cursor off: the arrow keys (after the HLE pump directly) |
+| `game_rc_pumped` | 0x40559d | the right click: plan a walk (0x405966) |
+| `game_s12_pumped_a` / `game_s12_released` | 0x4051e3 / 0x40520f | sub-op 12 after the frame's redraw: a click in the screen's button box holds the frame |
+| `game_ev_pumped_a` / `_b` / `game_ev_released` | 0x405233 / 0x405273 / 0x40539f | the event check: contact with sprite 0, the mouse on the player, the area trigger, wait for the button |
+
+A `ret` out of the chain is `go(ra)` (map_pump.c): the return address on the emulated stack
+says which native code runs next (0x403a86 and 0x40440f are bare `ret`s, 0x404314 is the sprite
+loop's `pop esi; add esi, 0x10`, 0x4051ce continues sub-op 12, 0x403ed3 sub-op 5, 0x404495 the
+right click), and anything else is a unit (0x40740f). So a pump site's piece runs under any of
+the chain's callers, and its oracle ends where the handler's does: `words_fn`
+(`game_chain_words`) finds the 0x40740f word on the stack to give the stop ESP. The sprite step
+0x40431b returns 1 for a sprite of kind 6 (the player); the loop then pushes the frames and
+runs the player (the three saved words, the pushad), instead of the unit and `native` predicate
+of Stage 5A. Sub-op 5's draw is `game_map_redraw_all_begin/_end` (map_draw.c).
+
+**The dissolve wipe** (`wipe.c`, written by a helper). 0x401a50 is two pieces (set-up and passes;
+the rest after the pump, return 0x401b90) with the 0x38-byte frame at the native stack
+addresses, because the compare checks them at each exit; the op 19 handler pushes its saved ESI,
+the two surface indices and the return address 0x40738b, whose piece (`game_op_wipe_done`)
+drops them. 166,485 native instructions without waiting (charged exactly), every native
+backward jump polls. Op 19 has no native fallback any more.
+
+**Harness.**
+- `struct game_unit.exit_pc/exit_scratch`: registers that are scratch only where the unit
+  leaves for one pc. The chain's pieces compare every register at a pump (it returns to them)
+  and only AX at the handler's tail (`MAP_TAIL_SCRATCH`).
+- `diff_scratch()` (diff.c): at the quit exits 0x40638d, 0x406393 and 0x40472f every register
+  but ESP is scratch.
+- `finish_exit()` (game.c): the native tails after a piece, run after the comparison, so the
+  C returns the pc where its oracle stops: 0x40638d (`mov esp, [0x445cdc]; pop ebp; ret`),
+  0x406393 and 0x40472f (the pop and ret after a reset that the piece did), and 0x406fc8 (the
+  `jmp 0x4060f9` of 04 1e from a nested VM). These were the "tail instructions" in the native
+  report, 2-81 a run.
+- `words_fn` for the stop ESP, above.
+- recomp.py takes call exits inside `HLE_GAME_DEAD` bodies (the chain's callers are C now).
+- `NANPA2_FUZZ`: the sprite loop (04 26 7 with a movement state for each sprite), each pump
+  site's piece from a state built as the native stack has it there (frames, pushad blocks, the
+  mouse near the player half the time, buttons, keys, a contact now and then) and ext 20 are
+  fuzzed from the handler's first calls (`fuzz_unit` in game.c, `map_fuzz.c`).
+
+**The click path and ext 20.** The VM loop's click handler path (a button down with its
+handler set: wait for both buttons up, run the handler's block) is pieces 0x40614a, 0x406153,
+0x406164; `game_native_click0/1` are gone. Ext 20 (0x4070bc) is enabled. No shipped script uses
+it: `tools/mes_ops.py` finds no `04 20` (and no `04 1a`) in the 470 MES files. So the path is
+checked with `NANPA2_CLICKTEST=1` (dev.c: both handlers point at a block `01 10 00` in the free
+end of the script image) in a scripted route with clicks, under the compare, and ext 20 by its
+fuzzer.
+
+**Start-up.** WinMain's pieces cannot be compared online (window, DirectDraw, timer, exit).
+`NANPA2_START_ORACLE=1` runs the original WinMain and shutdown (the lifted code, as an oracle
+with a free return) instead of the C, and ctest `start_trace` (tests/start_trace.py) runs the game
+headless twice and compares every HLE call (imports, COM methods, C runtime) from launch to a
+quit six seconds in, ignoring the message pump's calls (their number follows the timer) and the
+argument slot of the sound exit 0x402c70, which takes none: 171 calls, identical.
+
+**Verification, results and what is left**: see NOTES.md 2026-11-09 (stage 6).
+
 ## Stage 5B: measurement, palette, screen routines, spin pieces (src/game/screen.c)
 
 **Measurement.** `tools/reimpl_status.py` used to count a function as replaced when nothing
@@ -74,7 +157,7 @@ otherwise differ), and the registers every routine leaves are the native ones: E
 half is compared for every unit, which found the cursor restore leaving its width in ECX (it
 stores it over the saved ECX slot, `[esp+0xc]`).
 
-**Not done.**
+**Not done.** (Stage 6 did all of it.)
 
 - The dissolve wipe 0x401a50 (op 19 sub-op 4: 128 passes, 2 frames apart, the pump between;
   needs pieces with the frame in emulated memory at the native addresses, and no explore run
@@ -199,7 +282,7 @@ there is no return address. So:
 - Inside an oracle (`MODE_ORACLE`), `hle_jump` returns `X86_ORACLE_TAG | addr` and the
   dispatch (or the interpreter) runs the original inline. A C handler can do the same
   outside a test: a unit's `native` predicate (Stage 3) leaves the cases it does not cover
-  to the original.
+  to the original (no unit uses one since Stage 6; the field is still there).
 - Lockstep: `hle_jump` is an HLE check point like `hle_call`, and an oracle stop is a
   return check point (the shadow predicts the exit pc, not the sentinel).
 - Scratch registers: only ESP, EBP and ESI are live at 0x4060f9 (`tools/liveness.py`, an
@@ -561,7 +644,7 @@ caller left (the pumping chain below) is a unit: 0x403b28, 0x403bd2, 0x403d45 (c
 `tools/reimpl_status.py` counts them (it takes them as barriers of the live walk), and the
 lifted bodies stay as the oracles' code.
 
-**What is left native, and why.** Seven functions, 1,505 bytes, plus 0x403a70 and 0x404410
+**What is left native, and why.** (All of it is C since Stage 6, above; this is the state after 5A.) Seven functions, 1,505 bytes, plus 0x403a70 and 0x404410
 which the native fallback still runs: 0x4042f7 (sub-op 7: loop over the sprites), 0x404450 (kind
 6, the player: mouse and keys; 615 bytes), 0x4051c2 (sub-op 12: one frame), 0x405216 (event
 check), 0x405597 (right click), 0x403e30 (sub-op 5: redraw all, then the event check), and the

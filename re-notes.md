@@ -328,6 +328,17 @@ and tests [0x445d8f] against 0x10, 0x20, 1, 2, 4, 8 for AL 0-5 (ZF set: up). The
 0x406acc returns as soon as Ctrl is down (bit 0x40, tested each round), else waits frame by frame (0x4075c6,
 ECX = 1) for input 0 down and then up.
 
+The click handler path in detail (0x40613f-0x40616c, stage 6). A handler offset is a u16 at
+0x445ce2 (left) / 0x445ce4 (right), 0 = none; `04 20 button, offset` (0x4070bc: parse,
+`[0x445ce2 + 2 * button] = arg 1`) sets one. **No shipped script uses `04 20`** (nor `04 1a`;
+tools/mes_ops.py counts the byte pairs `04 xx` in all 470 MES files: zero hits), so the path runs
+only with a modified script or the dev hook NANPA2_CLICKTEST (src/hle/dev.c writes a block `01 10
+00` at the end of the script image and points both handlers at it). With a handler set and its
+button down (ZF clear after 0x4074d5): wait until the left button, then the right button, are
+both up (0x406143: `mov al, 0; call 0x4074d5; jne 0x406143; mov al, 1; call 0x4074d5; jne
+0x406143`), then `push esi; [0x445ce1] = 0xff; esi = handler; call 0x4061cd` (run the block),
+`[0x445ce1] = 0; pop esi; jmp 0x4060f9`. The busy flag keeps the handlers from nesting.
+
 ### Script expressions: exact semantics (0x4037fc, reimplemented in src/game/expr.c)
 
 The evaluator is called (`call 0x4037fc`) with ESI = script offset of the first token and
@@ -545,6 +556,38 @@ depth and the ones it tried 0xff. A step goes to the neighbour with a higher mar
 0x405fb6 marks free cells around it outward. Quirk kept: the second pass reads the goal's row from
 DX, which the first `mul` clobbered (row 0 in practice). 0x435573 = 0xff while a route is walked.
 
+The pumping chain (stage 6; src/game/map_pump.c). Sub-ops 5, 7 and 12 are the ones that wait for the
+window. The pump 0x40609c is `pushad; call 0x401bf0; (0: WM_QUIT: mov esp, [0x445cdc]; pop ebp;
+ret at 0x404729); popad; BL = (input & 0x10 ? 1 : 0) | (input & 0x20 ? 2 : 0), BH = input & 0x20 ?
+2 : 0; CX, DX = the mouse (0x4452e2, 0x4452e4); ret`: bit 0 of BL is the left button or Enter,
+bit 1 the right button or Escape; the other registers are as before. Sprite kind 6, the player
+(0x404450), saves frame, x, y (three pushes, popped at the end for the history record), then: with
+the game's cursor off (0x445ce0 = 0) the keyboard: pump, then the arrows at 0x445d8f bits 4, 8, 1, 2
+(left, right, up, down) each call their mover and CH collects the movers' AL; with the cursor on
+a walk along the walk grid (0x435573 = 0xff: 0x405691, then the frame bit flips) or the mouse:
+pump, the right button starts a walk to the cell under the mouse if the mouse is inside the view
+(0x405597: view x * 16 .. (view x + width) * 16, view y .. + height * 16; goal = mouse / 16 - screen
+position + view position; 0x435e61 = 0 so a wall goal does not get approach cells), pump again, the
+left button moves the player one step toward the mouse (compare the mouse with the player's place
+on the screen, the margins 0x30 and 0x20 + 0x60 wide: vertical first - up if the mouse is above,
+down if below the box - then sideways; 0x435572 marks that the vertical test lies above the
+margin and keeps the 0x30 off the box). A step that moved (CH != 0) sets 0x435571 = 0xff, stops the walk
+(0x435573 = 0), flips the frame bit and shifts the position history (0x435dca, 5 bytes a record,
+10 records) by one with the old frame, x, y first. The event check 0x405216 runs at the end of
+sub-ops 12 and 5: collision test of sprite 0 (0x40500e; a contact is the sprite number, else
+0xffff); on a contact it pumps and, if the mouse is on the player and the left button is down
+and the player did not move this frame (0x435571), the contact is the event (EAX); the click
+is remembered at 0x43556c and the area under sprite 0 (0x404f8c) at 0x43556e (a new area gives
+its code + 0x32); the player's facing (frame / 2) at 0x43556a; an event is held until the left
+button is released (0x405399 pumps while BL bit 0). Sub-op 12 first pumps once after drawing:
+the left button inside the box x 0xf8-0x187, y 0x120-0x13f holds the frame (EAX = 0xfffe) until it
+is released, any other click goes to the event check. Native call frames of the chain: the
+handler pushes ESI and `call 0x403a70` (return 0x40740f), 0x403a70 calls the table entry (return
+0x403a86), the sprite loop 0x4042f7 pushes ESI and calls 0x40431b (return 0x404314), which calls
+0x404410 (return 0x40440f) and jumps into the kind's code; sub-op 12 calls the loop with return
+0x4051ce, sub-op 5 calls the event check with return 0x403ed3 (after `push ebp`), the right click
+is a call with return 0x404495.
+
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 
 After the Prologue (S63.MES jumps to OPEN1.MES) scenes are point-and-click. The script's
@@ -749,3 +792,18 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
   15, 24, 32 px (weights 700, 700, 400, charset 0x88) at 0x4ac070..; timeSetEvent(16, 16,
   0x4028c0, 0, 1) -> 0x4ac500; ShowCursor(0). Shutdown 0x402a20 reverses it (timer, fonts,
   palette, scratch, surfaces, DirectDraw, sound exit 0x402c70, ShowCursor(1)).
+
+## Dissolve wipe (0x401a50, op 19 sub-op 4; src/game/wipe.c)
+
+`call 0x401a50` with two surface indices (the handler pushes 2 then 0: copy surface 2 onto
+surface 0; the arguments are read at [esp+0x4c] and [esp+0x54] after the pushes). Both surfaces
+are locked (0x401190) for the whole wipe and unlocked (0x4012b0) at its end. 128 passes; a pass
+copies, in 25 rows of the 400-line picture (every 16th line, starting at line `ebx * pitch`,
+640 pixels wide), the pixels whose bit is set in a 16-byte dither mask: the mask byte `ebx`
+gets one more bit per pass (a walking bit, 0x80 down to 1 and round again) and `ebx` advances by
+5 mod 16 (plus 1 each time the walking bit wraps), so every line has every bit after 128
+passes. After a pass the wipe waits until two frames have passed since the pass started (the
+frame counter 0x446292), pumping messages (0x401bf0) each round; an input bit in 0x30 (OK or
+cancel) sets a flag that skips all later waits, so the rest of the passes run at once. The
+pump's result is never read (a WM_QUIT is seen by the VM's next pump). 166,485 instructions for
+the set-up and 128 passes with no waits; with waits the pump rounds dominate.

@@ -5,18 +5,15 @@
  *
  * Each is the native handler's own work in C (argument parsing, the
  * argument registers and stack words, the branches between sub-ops) around
- * a call to the native routine that does the drawing or loading, which is
- * not reimplemented yet. Those calls run the lifted code (ncall below) with
- * the registers and stack words the native handler passes, so the callee
- * sees what it sees natively and leaves the CPU as it does: some handlers
- * store the callee's AX (op 19, ext 26).
+ * the C routine that does the drawing or loading (screen.c, file.c, anim.c)
+ * or, where a handler reaches a routine that is a unit for its native
+ * callers too, around a call as the native `call` makes it (ncall below).
  *
- * Sub-ops that wait on the timer or pump messages (op 19 sub-op 4 wipe,
- * op 1a sub-op 4, ext 16 mode 3, ext 26 sub-ops 5, 7 and 12), and any
- * whose sub-op is not a literal in the script, are left to the native
- * handler: their unit's `native` predicate (src/game/units.c) sends
- * hle_jump to the original, so they run exactly as before and are not
- * compared (the harness holds the timer off while it compares).
+ * Handlers that wait on the timer or pump messages are pieces joined by
+ * call exits: op 19 sub-op 4, the dissolve wipe (wipe.c), op 1a sub-op 4
+ * (anim.c), ext 16 mode 3 (game_palette_wait_piece) and ext 26 sub-ops 5, 7
+ * and 12 (map_pump.c). Since stage 6 no handler leaves a case to the
+ * native code.
  *
  * Semantics: re-notes.md "Script opcodes".
  */

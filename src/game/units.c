@@ -65,14 +65,14 @@
 /* the movers (src/game/map_move.c): AL is the result, ECX, EDX, EBX are scratch */
 #define MAP_MOVER_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX))
 
-/* Stage 6: where the 04 26 chain leaves for the handler's tail 0x40740f only
+/* Stage 6: where the 04 26 chain leaves for the handler's tail 0x407410 only
  * AX is live (S); the pieces leave at a pump with every register live */
 #define MAP_TAIL_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | \
 	REG_BIT(ESI) | REG_BIT(EDI))
 /* a piece of the chain at a pump site: its oracle ends at the handler's tail,
  * wherever in the chain it was entered */
 #define CHAIN(addr, name, fn) \
-	{ addr, name, NULL, fn, 0, 0, NULL, 1, 0, 0xffff, 0, 0x40740f, MAP_TAIL_SCRATCH, game_chain_words }
+	{ addr, name, NULL, fn, 0, 0, NULL, 1, 0, 0xffff, 0, 0x407410, MAP_TAIL_SCRATCH, game_chain_words }
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -240,8 +240,8 @@ const struct game_unit game_units[] = {
 	/* Stage 6 (src/game/map_pump.c): the handler runs the chain down to the first
 	 * pump, the pump sites' return addresses are the pieces. At the handler's tail
 	 * only AX (S) is live; at a pump every register is. */
-	{ 0x4073ee, "op_0426_map", NULL, game_op_map, 0, 0, NULL, 1, -1, 0xffff, 0, 0x40740f, MAP_TAIL_SCRATCH, NULL },
-	RESUME(0x40740f, "op_0426_map_done", game_op_map_done, AT_LOOP, 1),
+	{ 0x4073ee, "op_0426_map", NULL, game_op_map, 0, 0, NULL, 1, 0, 0xffff, 0, 0x407410, MAP_TAIL_SCRATCH, NULL },
+	RESUME(0x407410, "op_0426_map_done", game_op_map_done, AT_LOOP, 0),
 	CALL(0x40741b, "vm_parse_args", game_parse_args_regs, REG_BIT(EDX), 0),
 	PIECE(0x4074d5, "input_test", game_input_test, 0, 0, 0, 0, NULL),
 	PIECE(0x4074db, "input_tested", game_input_tested, 0, 1, 1, 0, NULL),

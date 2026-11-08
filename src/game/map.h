@@ -130,7 +130,7 @@ void game_map_cell_clear_bit3(void);  /* 0x4040f0 */
 
 /* ---- map_pump.c: the chain that pumps messages (pieces, jump units) ---- */
 uint32_t game_op_map(void);           /* 0x4073ee, the 04 26 handler */
-uint32_t game_op_map_done(void);      /* 0x40740f */
+uint32_t game_op_map_done(void);      /* 0x407410 */
 uint32_t game_pump(void);             /* 0x40609c */
 uint32_t game_pump_done(void);        /* 0x4060a2 */
 uint32_t game_pl_pumped_a(void);      /* 0x40448b */

@@ -36,7 +36,8 @@
 #define PUMP 0x40609cu
 #define PUMP_DONE 0x4060a2u
 #define HLE_PUMP 0x401bf0u
-#define TAIL 0x40740fu
+#define TAIL 0x40740fu      /* the return address of the handler's call of 0x403a70 */
+#define TAIL_PIECE 0x407410u /* after its `pop esi`: mov [S], ax; jmp 0x4060f9 */
 #define VM_TOP_ESP 0x445cdcu
 #define INPUT_BITS 0x445d8fu  /* u8: arrows 1 2 4 8, Enter / click 0x10, Esc / right click 0x20 */
 #define MOUSE_X 0x4452e2u     /* u16 */
@@ -703,6 +704,10 @@ static uint32_t go(uint32_t ra)
 	case 0x404495: /* jmp 0x4044a3 */
 		CNT(1);
 		return pl_4044a3();
+	case TAIL: /* pop esi */
+		cpu.r[ESI] = pop32();
+		CNT(1);
+		return TAIL_PIECE;
 	default:
 		return ra;
 	}
@@ -727,13 +732,16 @@ uint32_t game_op_map(void)
 		cpu.r[EAX] = pop32();
 		CNT(2);
 	}
-	push32(cpu.r[ESI]);
+	uint32_t esi = cpu.r[ESI];
 	cpu.r[ESI] = VM_ARG_VALUES;
 	CNT(2);
 	if (game_map_op_in_c(a)) {
 		game_map_dispatch();
-		return TAIL;
+		cpu.r[ESI] = esi; /* the pop of the pushed ESI, at the tail */
+		CNT(1);
+		return TAIL_PIECE;
 	}
+	push32(esi);
 	if (a != 5 && a != 7 && a != 12)
 		x86_trap(0x403a7f, "04 26: sub-op outside the dispatch table");
 	push32(TAIL); /* call 0x403a70 */
@@ -752,26 +760,25 @@ uint32_t game_op_map(void)
 	}
 }
 
-/* 0x40740f: pop esi, S = AX, on with the script */
+/* 0x407410 (after the pop of ESI at 0x40740f): S = AX, on with the script */
 uint32_t game_op_map_done(void)
 {
-	cpu.r[ESI] = pop32();
 	vm_set_reg(VM_REG_S, cpu.r[EAX]);
-	CNT(2);
+	CNT(1);
 	X86_POLL(0x407416);
 	return VM_LOOP;
 }
 
-/* Where the oracle of a piece inside the chain ends: the handler's tail.
- * Words from ESP up to and including the 0x40740f frame (read without the
- * trace, which is on). */
+/* Where the oracle of a piece inside the chain ends: the handler's tail
+ * 0x407410. Words from ESP up to and including the 0x40740f frame and the
+ * ESI under it (read without the trace, which is on). */
 int game_chain_words(void)
 {
 	for (uint32_t i = 0; i < 512; i++) {
 		uint32_t v;
 		memcpy(&v, x86_ptr(cpu.r[ESP] + 4 * i, 4), 4);
 		if (v == TAIL)
-			return (int)i + 1;
+			return (int)i + 2;
 	}
 	x86_trap(cpu.r[ESP], "map chain: no handler frame on the stack");
 }
