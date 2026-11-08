@@ -1,5 +1,8 @@
 /*
- * Runtime for the code lifted from nanpa2.exe by tools/recomp.py.
+ * Runtime for the game code of nanpa2.exe, run by one of two backends: the
+ * interpreter (src/x86/interp.c), which decodes the player's own exe at run
+ * time, or the static recompile (tools/recomp.py, build/gen/recomp.c,
+ * NANPA2_BACKEND=recomp builds only).
  *
  * Emulated state: eight 32-bit registers, the arithmetic flags, and a flat
  * little-endian memory holding the exe image at its native addresses
@@ -9,6 +12,7 @@
 #ifndef NANPA2_X86_H
 #define NANPA2_X86_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -25,6 +29,9 @@ extern uint8_t *x86_mem;
 #define MEM_END 0x04000000u
 #define STACK_TOP 0x01000000u
 #define HEAP_BASE 0x01000000u
+/* Game code run by the backends; everything else goes to hle_call(). */
+#define CODE_START 0x00401000u
+#define CODE_END 0x00407800u
 /* Return address the host pushes before entering lifted code. */
 #define X86_RET_SENTINEL 0xfffffff0u
 
@@ -40,12 +47,22 @@ static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 	return x86_mem + (a - MEM_BASE);
 }
 
+/* Lockstep (src/x86/lockstep.c): the recompiled code is built with
+ * X86_WTRACK so that its memory writes inside a basic block are logged. */
+#ifdef X86_WTRACK
+extern int x86_wtrack_on;
+void x86_wtrack(uint32_t a, uint32_t n);
+#define X86_WT(a, n) do { if (x86_wtrack_on) x86_wtrack((a), (n)); } while (0)
+#else
+#define X86_WT(a, n) ((void)0)
+#endif
+
 static inline uint32_t rd8(uint32_t a) { return *x86_ptr(a, 1); }
 static inline uint32_t rd16(uint32_t a) { uint16_t v; memcpy(&v, x86_ptr(a, 2), 2); return v; }
 static inline uint32_t rd32(uint32_t a) { uint32_t v; memcpy(&v, x86_ptr(a, 4), 4); return v; }
-static inline void wr8(uint32_t a, uint32_t v) { *x86_ptr(a, 1) = (uint8_t)v; }
-static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; memcpy(x86_ptr(a, 2), &t, 2); }
-static inline void wr32(uint32_t a, uint32_t v) { memcpy(x86_ptr(a, 4), &v, 4); }
+static inline void wr8(uint32_t a, uint32_t v) { X86_WT(a, 1); *x86_ptr(a, 1) = (uint8_t)v; }
+static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; X86_WT(a, 2); memcpy(x86_ptr(a, 2), &t, 2); }
+static inline void wr32(uint32_t a, uint32_t v) { X86_WT(a, 4); memcpy(x86_ptr(a, 4), &v, 4); }
 
 static inline void set16(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffff0000u) | (v & 0xffffu); }
 static inline void set8l(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffffff00u) | (v & 0xffu); }
@@ -436,6 +453,7 @@ static inline void str_movs(int sz, int rep)
 	if (!cpu.df && cpu.r[ECX]) {
 		uint32_t n = cpu.r[ECX] * (uint32_t)sz;
 		uint8_t *d = x86_ptr(cpu.r[EDI], n), *s = x86_ptr(cpu.r[ESI], n);
+		X86_WT(cpu.r[EDI], n);
 		/* byte-forward copy: overlapping moves replicate as on x86 */
 		if (d > s && d < s + n)
 			for (uint32_t i = 0; i < n; i++) d[i] = s[i];
@@ -510,8 +528,17 @@ static inline void str_cmps(int sz, int rep)
 
 /* ---------------------------------------------------------------- host */
 
-/* Lifted code: run from pc until it returns to X86_RET_SENTINEL. */
+/* Run game code from pc until it returns to X86_RET_SENTINEL, on the
+ * selected backend (x86.c). */
 void x86_exec(uint32_t pc);
+/* The backends: the interpreter (interp.c) and the generated code. */
+void x86_interp(uint32_t pc);
+void x86_exec_recomp(uint32_t pc);
+/* 1 when x86_exec runs the interpreter (always in interp builds; in recomp
+ * builds with NANPA2_INTERP=1). */
+extern int x86_use_interp;
+/* the backend's name for logs: "interp", "recomp" or "lockstep" */
+const char *x86_backend_name(void);
 
 /* Called by lifted code on backward jumps: runs due timer ticks and
  * presents the screen, as the native timer thread and DirectDraw would. */
@@ -525,16 +552,38 @@ void x86_poll(void);
  * count runs ahead of real time at the configured rate (win32.c). */
 extern uint64_t x86_icount;
 #define X86_COUNT(n) (x86_icount += (n))
+
+/* Lockstep (recomp builds, NANPA2_LOCKSTEP=1): the interpreter shadows each
+ * basic block of the recompiled code and the results are compared at the
+ * next block start, HLE call, poll or return (lockstep.c). The generated
+ * code starts every block with X86_BLOCK(block address, instructions). */
+/* LS_NEST: x86_call from the host while a block runs (a probe calling
+ * game code): that block's check is dropped. */
+enum { LS_BLOCK, LS_HLE, LS_POLL, LS_RET, LS_NEST };
+#ifdef NANPA2_HAVE_RECOMP
+extern int x86_lockstep_on;
+void x86_lockstep_block(uint32_t pc, uint32_t n);
+void x86_lockstep_point(int kind, uint32_t pc);
+void x86_lockstep_init(void);
+#define X86_BLOCK(pc, n) do { if (x86_lockstep_on) x86_lockstep_block((pc), (n)); X86_COUNT(n); } while (0)
+#define X86_LOCKSTEP_POINT(kind, pc) do { if (x86_lockstep_on) x86_lockstep_point((kind), (pc)); } while (0)
+#else
+#define X86_BLOCK(pc, n) X86_COUNT(n)
+#define X86_LOCKSTEP_POINT(kind, pc) ((void)0)
+#endif
 /* Instructions per second; 0 = unthrottled. */
 void x86_set_speed(double ips);
 void x86_throttle(void);
 
-/* Timing probe compiled in before selected instructions (tools/recomp.py
- * PROBES); logs a timestamp with NANPA2_PROBE=1. */
+/* Timing probe run before selected instructions (src/hle/overrides.h
+ * HLE_PROBE); logs a timestamp with NANPA2_PROBE=1. */
 void x86_probe(uint32_t pc);
 
-/* Load the exe image into emulated memory. */
+/* Load the exe image into emulated memory: 1 ok, 0 cannot read, -1 not
+ * the nanpa2.exe this engine runs (wrong file or another build). */
 int x86_load_image(const char *exe_path);
+/* 1 if the first n bytes of a file are the header of that nanpa2.exe */
+int x86_exe_check(const uint8_t *d, size_t n);
 /* Call a lifted (or HLE) function with stdcall/cdecl args; returns EAX.
  * Saves and restores the caller's registers (for callbacks). */
 uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args);

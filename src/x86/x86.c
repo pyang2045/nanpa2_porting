@@ -48,6 +48,18 @@ static uint32_t le16(const uint8_t *p)
 	return p[0] | p[1] << 8;
 }
 
+int x86_exe_check(const uint8_t *d, size_t n)
+{
+	if (n < 0x400 || le32(d + 0x3c) > n - 0x100)
+		return 0;
+	uint32_t pe = le32(d + 0x3c);
+	/* the Taiwan release built 2000-07-10 (PE TimeDateStamp 0x39697c6a,
+	 * SizeOfImage 0xc1000): the native addresses throughout the engine
+	 * are this build's */
+	return le32(d + pe) == 0x4550u && le32(d + pe + 52) == MEM_BASE &&
+	       le32(d + pe + 8) == 0x39697c6au && le32(d + pe + 80) == 0xc1000u;
+}
+
 int x86_load_image(const char *exe_path)
 {
 	FILE *f = fopen(exe_path, "rb");
@@ -56,26 +68,26 @@ int x86_load_image(const char *exe_path)
 	fseek(f, 0, SEEK_END);
 	long n = ftell(f);
 	fseek(f, 0, SEEK_SET);
-	uint8_t *d = malloc((size_t)n);
+	uint8_t *d = n > 0 ? malloc((size_t)n) : NULL;
 	if (!d || fread(d, 1, (size_t)n, f) != (size_t)n) {
 		fclose(f);
 		free(d);
 		return 0;
 	}
 	fclose(f);
-
+	if (!x86_exe_check(d, (size_t)n)) {
+		free(d);
+		return -1;
+	}
 	x86_mem = calloc(1, MEM_END - MEM_BASE);
-	if (!x86_mem)
-		return 0;
-	uint32_t pe = le32(d + 0x3c);
-	uint32_t nsec = le16(d + pe + 6);
-	uint32_t base = le32(d + pe + 52);
-	uint32_t hdr = le32(d + pe + 84);
-	uint32_t secs = pe + 24 + le16(d + pe + 20);
-	if (base != MEM_BASE) {
+	if (!x86_mem) {
 		free(d);
 		return 0;
 	}
+	uint32_t pe = le32(d + 0x3c);
+	uint32_t nsec = le16(d + pe + 6);
+	uint32_t hdr = le32(d + pe + 84);
+	uint32_t secs = pe + 24 + le16(d + pe + 20);
 	memcpy(x86_mem, d, hdr < (uint32_t)n ? hdr : (uint32_t)n);
 	for (uint32_t i = 0; i < nsec; i++) {
 		const uint8_t *s = d + secs + i * 40;
@@ -89,8 +101,36 @@ int x86_load_image(const char *exe_path)
 	return 1;
 }
 
+#ifdef NANPA2_HAVE_RECOMP
+int x86_use_interp;
+#else
+int x86_use_interp = 1;
+#endif
+
+const char *x86_backend_name(void)
+{
+#ifdef NANPA2_HAVE_RECOMP
+	if (x86_lockstep_on)
+		return "lockstep";
+#endif
+	return x86_use_interp ? "interp" : "recomp";
+}
+
+void x86_exec(uint32_t pc)
+{
+#ifdef NANPA2_HAVE_RECOMP
+	if (!x86_use_interp) {
+		x86_exec_recomp(pc);
+		X86_LOCKSTEP_POINT(LS_RET, X86_RET_SENTINEL);
+		return;
+	}
+#endif
+	x86_interp(pc);
+}
+
 uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args)
 {
+	X86_LOCKSTEP_POINT(LS_NEST, addr);
 	struct cpu saved = cpu;
 	for (int i = nargs - 1; i >= 0; i--)
 		push32(args[i]);

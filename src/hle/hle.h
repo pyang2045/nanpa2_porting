@@ -24,7 +24,6 @@
 
 void hle_call(uint32_t addr);
 int hle_is_target(uint32_t addr);
-extern const uint32_t x86_hle_targets[]; /* from the generated code */
 
 /* After hle_call popped the return address: argument i (0-based). */
 static inline uint32_t hle_arg(int i)
