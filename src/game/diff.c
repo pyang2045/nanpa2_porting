@@ -47,7 +47,7 @@ void diff_record_from_trace(struct diff_record *rec, uint32_t unit, const struct
 		const struct trace_byte *b = &t->b[i];
 		if (b->state & TRACE_READ_FIRST)
 			add(&rec->in, &rec->n_in, &rec->cap_in, b->addr, b->pre);
-		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, in->r[ESP]))
+		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, out->r[ESP]))
 			add(&rec->out, &rec->n_out, &rec->cap_out, b->addr, b->post);
 	}
 }
@@ -92,7 +92,7 @@ int diff_check(const struct game_unit *u, const struct diff_record *rec, uint32_
 	if (u->jump && pc != rec->out_pc)
 		note(&w, " exit pc want %08x got %08x;", rec->out_pc, pc);
 	for (int r = 0; r < 8; r++)
-		if (!(u->scratch_regs & REG_BIT(r)) && cpu.r[r] != rec->out_r[r])
+		if ((cpu.r[r] ^ rec->out_r[r]) & diff_live_bits(u, r))
 			note(&w, " %s want %08x got %08x;", reg_names[r], rec->out_r[r], cpu.r[r]);
 	if (u->flags_out && (diff_flags(&cpu) & 0x8c5) != (rec->out_flags & 0x8c5))
 		note(&w, " flags want %03x got %03x;", rec->out_flags & 0x8c5, diff_flags(&cpu) & 0x8c5);
@@ -101,10 +101,10 @@ int diff_check(const struct game_unit *u, const struct diff_record *rec, uint32_
 		if (v != rec->out[i].value)
 			note(&w, " [%08x] want %02x got %02x;", rec->out[i].addr, rec->out[i].value, v);
 	}
-	uint32_t esp = rec->in_r[ESP];
+	uint32_t esp_out = rec->out_r[ESP];
 	for (size_t i = 0; i < t->n; i++) {
 		const struct trace_byte *b = &t->b[i];
-		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, esp)
+		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, esp_out)
 		    && !find(rec->out, rec->n_out, b->addr) && b->post != b->pre)
 			note(&w, " [%08x] written %02x, original kept %02x;", b->addr, b->post, b->pre);
 		if ((b->state & TRACE_READ_FIRST) && !find(rec->in, rec->n_in, b->addr))

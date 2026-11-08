@@ -674,3 +674,59 @@ code change.
 - reimpl_status: 5,267 of 25,597 bytes replaced (20.6%, was 17.3%), 33 of 142 functions;
   game logic 1,471 bytes (5.7%, was 2.4%): 8 functions and 11 opcode handlers. vm module
   849 of 4,295 bytes (19.8%).
+
+## 2026-11-08 (reimplementation stage 3: the remaining opcode handlers, call exits, pacing)
+
+- 8f20643: 16 handlers around native subsystem routines (`src/game/ops_sys.c`): 17
+  0x406b05, 19 0x407204, 1a 0x407096, ext 14 0x406842, 15 0x406916, 16 0x406f06, 17
+  0x406b76, 18 0x406bcb, 19 0x406c20, 1a 0x406c85, 1b 0x406cea, 1c 0x406d8b, 1d 0x406e11,
+  24 0x4073a5, 25 0x4073cd, 26 0x4073ee. The routine they call (blits, loads, slots, music,
+  the map dispatcher 0x403a70) stays native. A `native` predicate leaves the timer-bound or
+  message-pumping sub-ops to the original handler: 19 sub-op 4, 1a sub-op 4, 04 16 mode 3,
+  04 26 sub-ops 5/7/12, and any sub-op given as an expression.
+- 7114ba0: call exits (`HLE_GAME_CALL_EXIT`). A handler that runs a block, a nested VM, a
+  wait or the pump pushes the return address and returns the callee; the code after the
+  call is its own jump unit (`RESUME`, `stack_words`). The oracle also stops at any jump
+  unit at the stop ESP and at a call exit's callee with ra on top (`x86_stop_at`); outputs
+  are dead only below the exit ESP. Units: 0f 0x40659e/0x4065ae/0x4065ed, 11
+  0x4065f6/0x4065fb, ext 10 0x40660c/0x40661e, 13 0x406658/0x40666b, 14 0x406a9a/0x406aa7,
+  16 0x406aad.
+- 49e67a2: ext 13 0x406671 (menu loop, entry plus 22 pieces 0x4066b8-0x40683b), 15
+  0x4069ce/0x4069f7 with the formatter 0x4069fd, ext 1e 0x406f7c, ext 1f
+  0x406fcd/0x40704a, ext 21 0x4070d5. The harness needed three fixes for them:
+  - HLE fread (0x412deb), the GP4 decompressor (0x4075f0) and sprintf wrote game memory
+    untraced, so the original's load of START1.MES over the script was not undone and
+    the C run parsed the new file (a stack-underflow trap). They now report to the trace.
+  - The interpreter checks the oracle stop at every instruction, recomp only at dispatch,
+    so after 04 1e's `mov esp, [0x445cdc]` (0x406fc2) the two stopped at different pcs.
+    recomp.py now ends a block after `mov esp, [mem]` (0x40638d, 0x406fc2; also 0x404729).
+  - ECX's upper half is live where ECX is scratch: 04 1f's `mov cx, 0x1e; rep movsd`
+    (0x40705e) after a called file returns through 0f's `ret`. Poisoning all of ECX made
+    the original copy run off memory (fault at 0x3fffffe). `diff_live_bits` keeps the
+    upper half out of the poison and compares it.
+- 1baf7dc: pacing. The evaluator charges per token type as the native loop runs it (6 for
+  03, 14 a digit, 23 a register, 27 most operators, not 22 each), the block skip 4 a byte
+  before the 01 and 6 inside. Over the runs below the C units' charges total 0.999-1.002
+  of the original's (the argument parser was 135 against 99 per call).
+- 96708e9: docs/reimpl.md "Stage 3", re-notes.md opcode rows.
+- Not done: ext 20 0x4070bc (never reached, stays disabled); the VM loop 0x4060d4/0x4060f9
+  (every iteration calls the native pump 0x401bf0 and animation step 0x403624, and text
+  goes to 0x401900, so it is left for the text/anim stage). Menu pieces for inputs 2-5
+  (0x40676f-0x40683b handled/waited) were never entered: the bot presses no arrow keys;
+  they are the same code as inputs 0/1 with their own addresses.
+- Results on 1baf7dc (the code as committed), explore runs at NANPA2_TURBO=8 with the online diff and
+  poison; no trap, watchdog warning, stall or mismatch in any:
+  - interp seed 31, 300000 frames: 65 MES, ends at S63.MES;
+  - interp seed 33, 300000: 64 MES, OPEN1 at 284713;
+  - interp seed 42 (seed 32's saves), 300000: 63 MES, OPEN1 at 298251;
+  - interp seed 43 (seed 32's saves), 300000: main game, 18 MES, ends at TOWN.MES;
+  - recomp seed 44 (seed 32's saves), 100000: 21 MES, OPEN1 at 90576.
+  Calls compared over the five: op 0c 2.26 M, 0f 1.26 M, ext 10 763 k, ext 15 427 k, 04 19
+  320 k, ext 13 8355 entries (4.64 M pieces), op 0d 505 k, 13 61 k, 14 43 k, 16 26 k, 04 26
+  26 k (26 k left native), 19 5789, 04 1e 314, 21 55, 1f 21, 15 2; 0 mismatches.
+- Lockstep, recomp, seed 9, 120000 frames: 1.62 G instructions compared, 894 checks dropped,
+  no divergence. Sabotage: ext 13 setting [0x445304] = 2 gave 92 mismatches in 92 calls.
+- ctest: 9 of 9 on the interp and on the recomp build.
+- reimpl_status: 10,396 of 25,597 bytes replaced (40.6%, was 20.6%), 53 of 142 functions;
+  game logic 6,600 bytes (25.8%): 9 functions and 67 opcode handlers; vm module 3,724 of
+  4,295 bytes (86.7%). Handlers with native sub-ops count in full, so this is an upper bound.

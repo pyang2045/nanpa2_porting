@@ -25,9 +25,19 @@
  * handler's ESP (x86_stop_esp, src/x86/x86.h). recomp.py reads these lines
  * into GAME_JUMP_OVERRIDES.
  *
+ * HLE_GAME_CALL_EXIT(ra, what): a call made by an opcode handler that the
+ * C handler does not run itself: it pushes ra and continues at the callee,
+ * as the native `call` does, so blocks, waits and the message pump run
+ * once, natively, with no host frames under them. ra is the return
+ * address; the code there is usually a jump unit of its own (the rest of
+ * the handler). The handler's oracle ends at the call (pc = the callee
+ * with ra on top of the stack); recomp.py routes such calls through
+ * dispatch, where the test can stop them, and reads these lines into
+ * CALL_EXITS.
+ *
  * Use as an X-macro: define HLE_OVERRIDE(addr, what), HLE_GAME_OVERRIDE,
- * HLE_GAME_JUMP and/or HLE_PROBE(addr, what), then include this file. No
- * include guard.
+ * HLE_GAME_JUMP, HLE_GAME_CALL_EXIT and/or HLE_PROBE(addr, what), then
+ * include this file. No include guard.
  */
 #ifndef HLE_OVERRIDE
 #define HLE_OVERRIDE(addr, what)
@@ -40,6 +50,10 @@
 #ifndef HLE_GAME_JUMP
 #define HLE_GAME_JUMP(addr, what)
 #define HLE_OVERRIDES_UNDEF_J
+#endif
+#ifndef HLE_GAME_CALL_EXIT
+#define HLE_GAME_CALL_EXIT(ra, what)
+#define HLE_OVERRIDES_UNDEF_C
 #endif
 #ifndef HLE_PROBE
 #define HLE_PROBE(addr, what)
@@ -72,6 +86,7 @@ HLE_GAME_OVERRIDE(0x4061d4, "VM skip block (src/game/vm.c)")
 HLE_GAME_OVERRIDE(0x406395, "VM init (src/game/vm.c)")
 HLE_GAME_OVERRIDE(0x4068e1, "VM menu item (src/game/vm.c)")
 HLE_GAME_OVERRIDE(0x406dc4, "VM string argument (src/game/vm.c)")
+HLE_GAME_OVERRIDE(0x4069fd, "VM number to text, for op 15 (src/game/ops_vm.c)")
 HLE_GAME_OVERRIDE(0x40741b, "VM argument list parser (src/game/vm.c)")
 
 /* Script opcode handlers in C (src/game/ops.c) */
@@ -88,6 +103,100 @@ HLE_GAME_JUMP(0x4069be, "op 18: text colour")
  * written but not enabled until an explore run reaches it under the diff. */
 HLE_GAME_JUMP(0x4071a4, "op 04 23: hit test")
 HLE_GAME_JUMP(0x40739b, "op 04 22: arguments only")
+
+/* Handlers around native subsystem routines (src/game/ops_sys.c); 19, 1a,
+ * 04 16 and 04 26 leave their timer-bound sub-ops to the original */
+HLE_GAME_JUMP(0x406842, "op 04 14: menu item table")
+HLE_GAME_JUMP(0x406916, "op 04 15: cursor")
+HLE_GAME_JUMP(0x406b05, "op 17: clear text window")
+HLE_GAME_JUMP(0x406b76, "op 04 17: fill rectangle")
+HLE_GAME_JUMP(0x406bcb, "op 04 18: XOR rectangle")
+HLE_GAME_JUMP(0x406c20, "op 04 19: copy rectangle")
+HLE_GAME_JUMP(0x406c85, "op 04 1a: swap rectangle")
+HLE_GAME_JUMP(0x406cea, "op 04 1b: masked copy rectangle")
+HLE_GAME_JUMP(0x406d8b, "op 04 1c: load file into a segment")
+HLE_GAME_JUMP(0x406e11, "op 04 1d: picture")
+HLE_GAME_JUMP(0x406f06, "op 04 16: palette")
+HLE_GAME_JUMP(0x407096, "op 1a: animation slot")
+HLE_GAME_JUMP(0x407204, "op 19: misc sub-ops")
+HLE_GAME_JUMP(0x4073a5, "op 04 24: music")
+HLE_GAME_JUMP(0x4073cd, "op 04 25: voice")
+HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
+
+/* Handlers that run a block, a script or a wait, split at those calls
+ * (src/game/ops_vm.c): each call is a call exit, the code after it a
+ * jump unit (16's continuations are `jmp 0x4060f9` and stay native) */
+HLE_GAME_JUMP(0x40659e, "op 0f: if")
+HLE_GAME_JUMP(0x4065ae, "op 0f: after the block of a true condition")
+HLE_GAME_JUMP(0x4065ed, "op 0f: after the else block")
+HLE_GAME_JUMP(0x4065f6, "op 11: wait for a click")
+HLE_GAME_JUMP(0x4065fb, "op 11: after the wait, clear the text window")
+HLE_GAME_JUMP(0x40660c, "op 04 10: while")
+HLE_GAME_JUMP(0x40661e, "op 04 10: after the loop's block")
+HLE_GAME_JUMP(0x406658, "op 13: call label")
+HLE_GAME_JUMP(0x40666b, "op 13: after the label's block")
+HLE_GAME_JUMP(0x406a9a, "op 14: call offset")
+HLE_GAME_JUMP(0x406aa7, "op 14: after the script")
+HLE_GAME_JUMP(0x406aad, "op 16: wait")
+HLE_GAME_JUMP(0x406671, "op 04 13: menu loop")
+HLE_GAME_JUMP(0x4066b8, "op 04 13: round start (pump)")
+HLE_GAME_JUMP(0x4066bd, "op 04 13: after the pump")
+HLE_GAME_JUMP(0x4066e6, "op 04 13: after the frame block, scan the inputs")
+HLE_GAME_JUMP(0x4066f6, "op 04 13: after testing click")
+HLE_GAME_JUMP(0x406704, "op 04 13: after the click block")
+HLE_GAME_JUMP(0x406714, "op 04 13: after testing click for its release")
+HLE_GAME_JUMP(0x406728, "op 04 13: after testing right click")
+HLE_GAME_JUMP(0x406736, "op 04 13: after the right click block")
+HLE_GAME_JUMP(0x40674a, "op 04 13: after testing right click for its release")
+HLE_GAME_JUMP(0x406761, "op 04 13: after testing up")
+HLE_GAME_JUMP(0x40676f, "op 04 13: after the up block")
+HLE_GAME_JUMP(0x406783, "op 04 13: after testing up for its release")
+HLE_GAME_JUMP(0x40679a, "op 04 13: after testing down")
+HLE_GAME_JUMP(0x4067a8, "op 04 13: after the down block")
+HLE_GAME_JUMP(0x4067bc, "op 04 13: after testing down for its release")
+HLE_GAME_JUMP(0x4067d3, "op 04 13: after testing left")
+HLE_GAME_JUMP(0x4067e1, "op 04 13: after the left block")
+HLE_GAME_JUMP(0x4067f5, "op 04 13: after testing left for its release")
+HLE_GAME_JUMP(0x406810, "op 04 13: after testing right")
+HLE_GAME_JUMP(0x406822, "op 04 13: after the right block")
+HLE_GAME_JUMP(0x40683b, "op 04 13: after testing right for its release")
+HLE_GAME_JUMP(0x4069ce, "op 15: print a number")
+HLE_GAME_JUMP(0x4069f7, "op 15: after the digits")
+HLE_GAME_JUMP(0x406f7c, "op 04 1e: jump to a MES file")
+HLE_GAME_JUMP(0x406fcd, "op 04 1f: call a MES file")
+HLE_GAME_JUMP(0x40704a, "op 04 1f: after the called file")
+HLE_GAME_JUMP(0x4070d5, "op 04 21: FLAG file")
+HLE_GAME_CALL_EXIT(0x4065ae, "op 0f: run the block of a true condition (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4065ed, "op 0f: run the else block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4065fb, "op 11: wait for a click (0x406acc)")
+HLE_GAME_CALL_EXIT(0x40661e, "op 04 10: run the loop's block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x40666b, "op 13: run the label's block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x406aa7, "op 14: run the script at the offset (0x4060f9)")
+HLE_GAME_CALL_EXIT(0x406abd, "op 16: wait n frames (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x406ac7, "op 16: wait for a click (0x406acc)")
+HLE_GAME_CALL_EXIT(0x4066b8, "op 04 13: run label 38 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4066bd, "op 04 13: pump messages (0x401bf0)")
+HLE_GAME_CALL_EXIT(0x4066e6, "op 04 13: run label 39 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4066f6, "op 04 13: test click (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406704, "op 04 13: run label 32 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x406714, "op 04 13: test click again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406728, "op 04 13: test right click (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406736, "op 04 13: run label 33 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x40674a, "op 04 13: test right click again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406761, "op 04 13: test up (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x40676f, "op 04 13: run label 34 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x406783, "op 04 13: test up again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x40679a, "op 04 13: test down (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x4067a8, "op 04 13: run label 35 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4067bc, "op 04 13: test down again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x4067d3, "op 04 13: test left (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x4067e1, "op 04 13: run label 36 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4067f5, "op 04 13: test left again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406810, "op 04 13: test right (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x406822, "op 04 13: run label 37 (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x40683b, "op 04 13: test right again (0x4074d5)")
+HLE_GAME_CALL_EXIT(0x4069f7, "op 15: run the digits as a script (0x4060f9)")
+HLE_GAME_CALL_EXIT(0x40704a, "op 04 1f: run the called file (0x4060f9)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
@@ -115,6 +224,10 @@ HLE_PROBE(0x4071bb, "script hit test rectangle table")
 #ifdef HLE_OVERRIDES_UNDEF_J
 #undef HLE_GAME_JUMP
 #undef HLE_OVERRIDES_UNDEF_J
+#endif
+#ifdef HLE_OVERRIDES_UNDEF_C
+#undef HLE_GAME_CALL_EXIT
+#undef HLE_OVERRIDES_UNDEF_C
 #endif
 #ifdef HLE_OVERRIDES_UNDEF_P
 #undef HLE_PROBE

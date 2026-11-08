@@ -29,7 +29,7 @@
 enum { MODE_OFF, MODE_ORACLE, MODE_REIMPL };
 
 struct unit_stats {
-	uint64_t calls, mismatches, recorded, oracle_insns, reimpl_insns;
+	uint64_t calls, mismatches, recorded, oracle_insns, reimpl_insns, native_runs;
 	FILE *file;
 	uint64_t *seen; /* open-addressing set of input hashes */
 	size_t seen_cap, seen_n;
@@ -45,6 +45,9 @@ static void report(void)
 {
 	for (int i = 0; i < game_unit_count; i++) {
 		struct unit_stats *s = &stats[i];
+		if (s->native_runs)
+			fprintf(stderr, "diff: %08x %s left to the native handler %llu times\n",
+			        game_units[i].addr, game_units[i].name, (unsigned long long)s->native_runs);
 		if (!s->calls)
 			continue;
 		fprintf(stderr,
@@ -118,7 +121,7 @@ static int first_seen(struct unit_stats *s, uint64_t h)
 
 static void record(const struct game_unit *u, struct unit_stats *s, const struct diff_record *rec)
 {
-	if (!diff_dir || s->recorded >= diff_max)
+	if (!diff_dir || s->recorded >= diff_max || u->calls_native)
 		return;
 	uint64_t h = diff_input_hash(rec);
 	/* the first half of the budget takes every new input, the rest one in
@@ -142,6 +145,46 @@ static void record(const struct game_unit *u, struct unit_stats *s, const struct
 
 const uint32_t game_vm_exits[] = { 0x4060f9u, 0x40638du, 0 };
 
+/* Where else a jump unit's oracle ends (x86_stop_at): at any jump unit
+ * (the pieces of a handler split at its calls go on at one another), and
+ * at the call exits of src/hle/overrides.h, as {callee, return address}
+ * with the callee read from the `e8 rel32` before the return address. */
+static uint32_t stop_units[256], stop_calls[2 * 64 + 1];
+
+static const uint32_t call_exit_ra[] = {
+#define HLE_GAME_CALL_EXIT(ra, what) ra,
+#include "hle/overrides.h"
+#undef HLE_GAME_CALL_EXIT
+	0
+};
+
+static void stop_tables(void)
+{
+	static int done;
+	if (done)
+		return;
+	done = 1;
+	int n = 0;
+	for (int i = 0; i < game_unit_count; i++)
+		if (game_units[i].jump) {
+			if (n + 1 >= (int)(sizeof stop_units / sizeof stop_units[0]))
+				x86_trap(game_units[i].addr, "game.c: stop_units too small");
+			stop_units[n++] = game_units[i].addr;
+		}
+	stop_units[n] = 0;
+	n = 0;
+	for (const uint32_t *ra = call_exit_ra; *ra; ra++) {
+		const uint8_t *p = x86_ptr(*ra - 5, 5);
+		if (p[0] != 0xe8 || 2 * n + 2 >= (int)(sizeof stop_calls / sizeof stop_calls[0]))
+			x86_trap(*ra, "game.c: call exit without a call before it");
+		uint32_t rel = p[1] | p[2] << 8 | p[3] << 16 | (uint32_t)p[4] << 24;
+		stop_calls[2 * n] = *ra + rel;
+		stop_calls[2 * n + 1] = *ra;
+		n++;
+	}
+	stop_calls[2 * n] = 0;
+}
+
 /* NANPA2_DIFF_POISON=1: after every unit (compared or not) its scratch
  * registers, and the flags if no caller reads them, get garbage, so a
  * register wrongly taken as dead shows up as a divergence or a trap. */
@@ -160,8 +203,10 @@ static void poison(const struct game_unit *u)
 		return;
 	n++;
 	for (int r = 0; r < 8; r++)
-		if (u->scratch_regs & REG_BIT(r))
-			cpu.r[r] = 0xdead0000u ^ (n << 4) ^ (uint32_t)r;
+		if (u->scratch_regs & REG_BIT(r)) {
+			uint32_t keep = diff_live_bits(u, r);
+			cpu.r[r] = (cpu.r[r] & keep) | ((0xdead0000u ^ (n << 4) ^ (uint32_t)r) & ~keep);
+		}
 	if (!u->flags_out)
 		cpu.cf = cpu.zf = cpu.sf = cpu.of = cpu.pf = n & 1;
 }
@@ -176,8 +221,12 @@ static uint32_t oracle(const struct game_unit *u)
 		x86_exec(X86_ORACLE_TAG | u->addr); /* returns at the sentinel */
 		return 0;
 	}
-	x86_stop_esp = cpu.r[ESP];
+	stop_tables();
+	x86_stop_esp = cpu.r[ESP] + 4u * (uint32_t)u->stack_words;
 	x86_stop_exits = game_vm_exits;
+	x86_stop_units = stop_units;
+	x86_stop_calls = stop_calls;
+	x86_stop_started = 0;
 	x86_stop_pc = 0;
 	x86_exec(X86_ORACLE_TAG | u->addr);
 	if (x86_stop_esp)
@@ -283,9 +332,12 @@ int game_jump(uint32_t addr, uint32_t *next)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
-	if (mode == MODE_ORACLE) {
-		/* inside an original: the lifted handler, inline */
+	if (mode == MODE_ORACLE || (u->native && u->native())) {
+		/* inside an original, or a case the C handler leaves to the
+		 * native code: the lifted handler, inline */
 		*next = X86_ORACLE_TAG | addr;
+		if (mode == MODE_OFF && stats)
+			stats[u - game_units].native_runs++;
 		return 1;
 	}
 	if (diff_on && mode == MODE_OFF)

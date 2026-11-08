@@ -59,6 +59,13 @@ GAME_OVERRIDES = read_hooks('GAME_OVERRIDE')
 # stops the oracle (x86_stop_esp, src/x86/x86.h).
 GAME_JUMP_OVERRIDES = read_hooks('GAME_JUMP')
 JUMP_EXITS = (0x4060f9, 0x40638d)  # VM loop head, VM end (src/hle/overrides.h)
+# Calls that end an opcode handler's oracle (HLE_GAME_CALL_EXIT, keyed by the
+# return address): the C handler does what the native `call` does (pushes
+# the return address and goes on at the callee) and the code after the call
+# is a jump unit of its own (or stays native). In a jump body such a call
+# goes through dispatch, where the differential test stops the oracle; the
+# call is the end of the body (its fallthrough is the next unit's).
+CALL_EXITS = read_hooks('GAME_CALL_EXIT')
 HLE_OVERRIDES.update(GAME_OVERRIDES)
 HLE_OVERRIDES.update(GAME_JUMP_OVERRIDES)
 ORACLE_TAG = 0x40000000  # src/x86/x86.h X86_ORACLE_TAG
@@ -75,6 +82,16 @@ PROBES = set(read_hooks('PROBE'))
 # entry points only referenced as immediates: WndProc, the logo window
 # subclass proc
 EXTRA_ENTRIES = [0x401000, 0x4021c0, 0x401fd0]
+
+
+def is_esp_load(insn):
+    """`mov esp, [mem]` (the VM's stack resets, 0x40638d 0x406fc2): the next
+    instruction goes through dispatch, so a differential test's oracle stops
+    right after it, where the interpreter (which checks every instruction)
+    stops too (ESP above the unit's entry: x86_stop_at)."""
+    ops = insn.operands
+    return insn.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == X.X86_OP_REG \
+        and ops[0].reg == X.X86_REG_ESP and ops[1].type == X.X86_OP_MEM
 
 
 class PE:
@@ -184,6 +201,8 @@ class Lifter:
                         if op.imm in self.pe_code_starts():
                             work.append(op.imm)
                             self.labels.add(op.imm)
+                if is_esp_load(insn):
+                    self.labels.add(nxt)
                 if m == 'jmp':
                     if ops[0].type == X.X86_OP_IMM:
                         self.labels.add(ops[0].imm)
@@ -225,6 +244,8 @@ class Lifter:
             m, ops = insn.mnemonic, insn.operands
             if m in ('ret', 'retf', 'int3', 'hlt'):
                 continue
+            if m == 'call' and a + insn.size in CALL_EXITS and stop:
+                continue  # a jump body ends at its call exits
             if m == 'jmp':
                 if ops[0].type == X.X86_OP_IMM:
                     work.append(ops[0].imm)
@@ -249,22 +270,38 @@ class Lifter:
             self.oracle_body[e] = self.body(e)
         self.jump_body = set()
         for e in GAME_JUMP_OVERRIDES:
-            self.oracle_body[e] = self.body(e, JUMP_EXITS)
+            # an oracle stops at the exits, at other jump units (pieces of
+            # one handler split at its calls, src/game/ops_vm.c) and at its
+            # call exits
+            stop = set(JUMP_EXITS) | (set(GAME_JUMP_OVERRIDES) - {e})
+            self.oracle_body[e] = self.body(e, stop)
             self.jump_body |= self.oracle_body[e]
         for a, insn in self.insns.items():
             m, ops = insn.mnemonic, insn.operands
             if not ops or ops[0].type != X.X86_OP_IMM:
                 continue
             t = ops[0].imm
+            # A jump unit's body runs only as an oracle (its entries are all
+            # units), and there a jump to a jump unit goes through dispatch
+            # (goto), so it may jump into any of them.
             if (m == 'jmp' or m.startswith('j') or m.startswith('loop')) and t in ORACLES \
-                    and a not in self.oracle_body[t]:
+                    and a not in self.oracle_body[t] \
+                    and not (t in GAME_JUMP_OVERRIDES and a in self.jump_body):
                 raise Unsupported('jump into reimplemented %x from %x' % (t, a))
             if m == 'call' and t in GAME_JUMP_OVERRIDES:
                 raise Unsupported('call to opcode handler %x from %x' % (t, a))
-        # nor may the code before it fall into it
+        # nor may the code before it fall into it (a call exit returns
+        # there: ret goes through dispatch)
         for a, insn in self.insns.items():
-            if a + insn.size in GAME_JUMP_OVERRIDES and insn.mnemonic not in ('jmp', 'ret'):
+            if a + insn.size in GAME_JUMP_OVERRIDES and insn.mnemonic not in ('jmp', 'ret') \
+                    and not (insn.mnemonic == 'call' and a + insn.size in CALL_EXITS):
                 raise Unsupported('%x falls into opcode handler %x' % (a, a + insn.size))
+        for ra in CALL_EXITS:
+            c = self.insns.get(ra - 5)
+            if c is None or c.mnemonic != 'call' or c.operands[0].type != X.X86_OP_IMM:
+                raise Unsupported('call exit %x does not follow a direct call' % ra)
+            if ra - 5 not in self.jump_body:
+                raise Unsupported('call exit %x is not in an opcode handler' % ra)
 
     def table_ranges(self):
         r = set()
@@ -329,8 +366,9 @@ class Lifter:
             # backward jumps poll the host (timer ticks, screen), since the
             # native code spins on counters its timer thread updates
             poll = 'X86_POLL(0x%xu); ' % here if here is not None and target <= here else ''
-            if here in self.jump_body and target in JUMP_EXITS:
-                # the exit of an opcode handler's oracle: through dispatch,
+            if here in self.jump_body and (target in JUMP_EXITS or target in GAME_JUMP_OVERRIDES):
+                # the exit of an opcode handler's oracle (the loop, the VM
+                # end, another handler or piece of one): through dispatch,
                 # where the differential test can stop it
                 return poll + 'pc = 0x%xu; goto dispatch;' % target
             return poll + 'goto L_%x;' % target
@@ -494,6 +532,9 @@ class Lifter:
             ret = 'push32(0x%xu); ' % nxt
             if ops[0].type == X.X86_OP_IMM:
                 t = ops[0].imm
+                if nxt in CALL_EXITS:
+                    # the end of an opcode handler's oracle (see CALL_EXITS)
+                    return ret + 'pc = 0x%xu; goto dispatch;' % t
                 if in_code(t) and t not in HLE_OVERRIDES:
                     return ret + 'goto L_%x;' % t
                 return ret + 'hle_call(0x%xu);' % t
@@ -563,6 +604,8 @@ class Lifter:
             except Unsupported as e:
                 self.unsupported.setdefault(str(e), []).append(a)
                 body = 'x86_trap(0x%xu, "unsupported: %s");' % (a, insn.mnemonic)
+            if is_esp_load(insn):
+                body += ' pc = 0x%xu; goto dispatch;' % (a + insn.size)
             if a in PROBES:
                 body = 'x86_probe(0x%xu); ' % a + body
             w('\t%s /* %x: %s %s */' % (body, a, insn.mnemonic, insn.op_str))

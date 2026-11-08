@@ -4,9 +4,8 @@
  * A record is one call of a unit as the lifted original ran it: the CPU on
  * entry (ESP pointing at the return address), every byte it read before
  * writing it (its inputs), and the CPU and every byte it wrote at or above
- * the entry ESP on return (its outputs; writes below are dead stack). For an
- * opcode handler (a jump unit) the entry ESP is the handler's own and the
- * record also holds the pc it left by.
+ * the exit ESP (its outputs; writes below are dead stack, diff_kept). For an
+ * opcode handler (a jump unit) the record also holds the pc it left by.
  * Records hold game memory, so they stay in the build folder.
  */
 #ifndef NANPA2_GAME_DIFF_H
@@ -35,12 +34,27 @@ struct diff_record {
 };
 
 /* The native stack: the 1 MB below STACK_TOP. A write is dead (not an
- * output) only if it is on the stack below the entry ESP; game globals
+ * output) only if it is on the stack below the exit ESP: free stack once
+ * the unit is done. (An opcode handler that ends at a call exit leaves the
+ * return address and what it pushed before it below its entry ESP: live;
+ * one that pops words its handler pushed leaves them dead.) Game globals
  * (0x4xxxxx) and the heap lie outside and always count. */
 #define DIFF_STACK_FLOOR (STACK_TOP - 0x100000u)
-static inline int diff_kept(uint32_t addr, uint32_t entry_esp)
+static inline int diff_kept(uint32_t addr, uint32_t exit_esp)
 {
-	return addr >= entry_esp || addr < DIFF_STACK_FLOOR;
+	return addr >= exit_esp || addr < DIFF_STACK_FLOOR;
+}
+
+/* The bits of register r that a unit's result must match (and the poison
+ * keeps): all of a non-scratch register, and of a scratch one ECX's upper
+ * half. That is live at the VM loop: 04 1f, after the file it called
+ * returns, copies with `mov cx, 0x1e; rep movsd` (0x40705e), so it relies on
+ * every handler leaving ECX < 0x10000, as the original's do. */
+static inline uint32_t diff_live_bits(const struct game_unit *u, int r)
+{
+	if (!(u->scratch_regs & REG_BIT(r)))
+		return 0xffffffffu;
+	return r == ECX ? 0xffff0000u : 0;
 }
 
 uint32_t diff_flags(const struct cpu *c);   /* CF PF ZF SF DF OF as EFLAGS */

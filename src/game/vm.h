@@ -127,6 +127,72 @@ uint32_t game_op_click_handler(void);   /* 04 20 0x4070bc */
 uint32_t game_op_hit_test(void);        /* 04 23 0x4071a4 */
 uint32_t game_op_args_only(void);       /* 04 22 0x40739b */
 
+/* ---- src/game/ops_vm.c: handlers split at the blocks and waits they run ---- */
+uint32_t game_op_if(void);               /* 0f 0x40659e */
+uint32_t game_op_if_then(void);          /* 0f 0x4065ae */
+uint32_t game_op_if_else(void);          /* 0f 0x4065ed */
+uint32_t game_op_wait(void);             /* 11 0x4065f6 */
+uint32_t game_op_wait_clear(void);       /* 11 0x4065fb */
+uint32_t game_op_while(void);            /* 04 10 0x40660c */
+uint32_t game_op_while_next(void);       /* 04 10 0x40661e */
+uint32_t game_op_call_label(void);       /* 13 0x406658 */
+uint32_t game_op_call_label_done(void);  /* 13 0x40666b */
+uint32_t game_op_call_offset(void);      /* 14 0x406a9a */
+uint32_t game_op_call_offset_done(void); /* 14 0x406aa7 */
+uint32_t game_op_delay(void);            /* 16 0x406aad */
+uint32_t game_op_print_number(void);      /* 15 0x4069ce */
+uint32_t game_op_print_number_done(void); /* 15 0x4069f7 */
+void game_format_number_regs(void);       /* 0x4069fd */
+uint32_t game_op_jump_mes(void);          /* 04 1e 0x406f7c */
+uint32_t game_op_call_mes(void);          /* 04 1f 0x406fcd */
+uint32_t game_op_call_mes_done(void);     /* 04 1f 0x40704a */
+uint32_t game_op_flag_file(void);         /* 04 21 0x4070d5 */
+uint32_t game_op_menu(void);              /* 04 13 0x406671 */
+uint32_t game_op_menu_round(void);        /* 04 13 0x4066b8 */
+uint32_t game_op_menu_pumped(void);       /* 04 13 0x4066bd */
+uint32_t game_op_menu_framed(void);       /* 04 13 0x4066e6 */
+uint32_t game_op_menu_tested0(void);  /* 04 13 0x4066f6 */
+uint32_t game_op_menu_handled0(void); /* 04 13 0x406704 */
+uint32_t game_op_menu_waited0(void);  /* 04 13 0x406714 */
+uint32_t game_op_menu_tested1(void);  /* 04 13 0x406728 */
+uint32_t game_op_menu_handled1(void); /* 04 13 0x406736 */
+uint32_t game_op_menu_waited1(void);  /* 04 13 0x40674a */
+uint32_t game_op_menu_tested2(void);  /* 04 13 0x406761 */
+uint32_t game_op_menu_handled2(void); /* 04 13 0x40676f */
+uint32_t game_op_menu_waited2(void);  /* 04 13 0x406783 */
+uint32_t game_op_menu_tested3(void);  /* 04 13 0x40679a */
+uint32_t game_op_menu_handled3(void); /* 04 13 0x4067a8 */
+uint32_t game_op_menu_waited3(void);  /* 04 13 0x4067bc */
+uint32_t game_op_menu_tested4(void);  /* 04 13 0x4067d3 */
+uint32_t game_op_menu_handled4(void); /* 04 13 0x4067e1 */
+uint32_t game_op_menu_waited4(void);  /* 04 13 0x4067f5 */
+uint32_t game_op_menu_tested5(void);  /* 04 13 0x406810 */
+uint32_t game_op_menu_handled5(void); /* 04 13 0x406822 */
+uint32_t game_op_menu_waited5(void);  /* 04 13 0x40683b */
+
+/* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
+uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */
+uint32_t game_op_cursor(void);          /* 04 15 0x406916 */
+uint32_t game_op_clear_text(void);      /* 17 0x406b05 */
+uint32_t game_op_fill_rect(void);       /* 04 17 0x406b76 */
+uint32_t game_op_xor_rect(void);        /* 04 18 0x406bcb */
+uint32_t game_op_copy_rect(void);       /* 04 19 0x406c20 */
+uint32_t game_op_swap_rect(void);       /* 04 1a 0x406c85 */
+uint32_t game_op_masked_rect(void);     /* 04 1b 0x406cea */
+uint32_t game_op_load_file(void);       /* 04 1c 0x406d8b */
+uint32_t game_op_picture(void);         /* 04 1d 0x406e11 */
+uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
+uint32_t game_op_anim(void);            /* 1a 0x407096 */
+uint32_t game_op_misc(void);            /* 19 0x407204 */
+uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
+uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
+uint32_t game_op_map(void);             /* 04 26 0x4073ee */
+/* the cases each leaves to the native handler (struct game_unit.native) */
+int game_native_misc(void);
+int game_native_anim(void);
+int game_native_palette(void);
+int game_native_map(void);
+
 static inline uint32_t vm_script_byte(uint32_t pc)
 {
 	return rd8(VM_SCRIPT + pc);

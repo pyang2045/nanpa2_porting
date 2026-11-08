@@ -17,9 +17,9 @@ void script_set_flag(uint32_t n, uint32_t v);
  * expression ends it at once: *bare_token gets it (else -1) and the
  * caller's EAX keeps its upper bytes (see game_eval_regs). Malformed
  * expressions (stack underflow, leftover values, an unknown token after a
- * value) trap: the native code would return into garbage. *tokens counts
- * the tokens read, for the CPU-time estimate. */
-uint32_t script_eval(uint32_t *pc, int *bare_token, uint32_t *tokens);
+ * value) trap: the native code would return into garbage. *insns is the
+ * number of instructions the native loop runs for it (CPU-time estimate). */
+uint32_t script_eval(uint32_t *pc, int *bare_token, uint32_t *insns);
 /* tokens seen by script_eval, by value (the replay's coverage report) */
 extern uint64_t script_eval_coverage[256];
 
