@@ -13,8 +13,9 @@
 #define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags }
 #define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0 }
 
-/* Sorted by address. Keep in step with tools/recomp.py GAME_OVERRIDES and
- * GAME_JUMP_OVERRIDES; the contracts are documented at each function. */
+/* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
+ * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
+ * at each function. */
 const struct game_unit game_units[] = {
 	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
 	CALL(0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0),

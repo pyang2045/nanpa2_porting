@@ -24,15 +24,12 @@
 
 void hle_call(uint32_t addr);
 int hle_is_target(uint32_t addr);
-extern const uint32_t x86_hle_targets[]; /* from the generated code */
 
-/* Jump overrides (tools/recomp.py GAME_JUMP_OVERRIDES, script opcode
- * handlers reimplemented in src/game): code that reaches one of
- * x86_jump_targets[] by any jump continues at pc = hle_jump(addr). There
- * is no return address; the handler leaves the CPU as the native one would
- * at the returned pc. */
+/* Jump overrides (HLE_GAME_JUMP in overrides.h, script opcode handlers
+ * reimplemented in src/game): code that reaches one by any jump continues
+ * at pc = hle_jump(addr). There is no return address; the handler leaves
+ * the CPU as the native one would at the returned pc. */
 uint32_t hle_jump(uint32_t addr);
-extern const uint32_t x86_jump_targets[]; /* from the generated code */
 
 /* After hle_call popped the return address: argument i (0-based). */
 static inline uint32_t hle_arg(int i)

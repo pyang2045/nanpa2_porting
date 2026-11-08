@@ -426,3 +426,49 @@ code works because the last thing to run before them is the message pump (0x401b
 at every opcode fetch, 0x4060f9), whose PeekMessageA/DispatchMessageA leave ECX changed.
 A replacement pump has to clobber ECX (to a value with a zero high half) or the copy runs off
 memory.
+
+## Running the game code: interpreter, recompile, lockstep
+
+The game code the engine runs is 0x401000-0x407800 (the MSVC runtime after it is replaced
+by address in src/hle/crt.c). It is 6045 reachable instructions (traversal from WinMain
+0x402090, WndProc 0x4021c0, the logo subclass proc 0x401fd0, the jump tables listed in
+tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435e60).
+
+- Instruction set actually used (opcode bytes, counts in the reachable code): ALU 00-3d in all
+  forms, 80/81/83 groups (add or adc and sub xor cmp), 84/85 test, 86 xchg, 88-8b mov, 8d lea,
+  40-4f inc/dec, 50-5f push/pop, 60/61 pushad/popad, 68/6a push imm, 0faf/f7 imul, f7 mul/div,
+  c0/c1/d0/d1 shifts and rotates (rol 6, rcl 1, rcr 2, sar 1), f6/f7 test/not, fe/ff
+  inc/dec/call/jmp/push, 0fb6/0fb7 movzx (no movsx), 0f95 setne, 0fc8 bswap, 98/99 (cwd only,
+  with 66), a0-a3 moffs, string ops (rep movsb/movsd, rep stosw/stosd, repne scasb, lodsd,
+  movsb, movsd, stosd; cld/std once each), e2 loop (24), e3 jecxz (2), 70-7f/0f8x jcc, e8/e9/eb,
+  c2/c3. Prefixes: 0x66 on 781 instructions (16-bit arithmetic, moffs16, `66 c7` with imm16),
+  f3 30, f2 1; no 0x67, no segment overrides, no x87 (the one x87 routine, the timer
+  callback 0x4028c0, is an override). Indirect calls are `call [reg+disp]` (COM methods),
+  `call [IAT]` and `call [eax*4+table]`; none uses ESP as base, so the order of the target
+  read and the return-address push does not matter here.
+- Overrides and probes are listed once, in src/hle/overrides.h (X-macro). The interpreter
+  marks override addresses in a per-byte table over the code range; entering one, or any
+  address outside the range (import/COM thunks, CRT), calls hle_call with the return address
+  on the stack, as the recompiled dispatch does.
+- Semantics shared by both backends: flags from the x86.h helpers; a poll (X86_POLL) on every
+  taken direct branch (jmp, jcc, loop, jecxz) to game code at or before the branch address;
+  one instruction count per instruction plus one per repeated string iteration (the recompile
+  adds a block's count at its start, so the totals agree at every block boundary); the
+  replaced pump 0x401bf0 clears ECX and EDX in both.
+- Lockstep (recomp build, NANPA2_LOCKSTEP=1): tools/recomp.py starts every block with
+  `X86_BLOCK(address, instructions)`. There the interpreter runs those instructions first, on
+  a copy of the registers, its writes journalled (a bit per byte of emulated memory, reads see
+  the journal), without polls, probes or HLE; then the recompiled block runs with its writes
+  logged (X86_WTRACK, compiled into recomp.c only). The two are compared at the next block
+  start, at hle_call entry (before the HLE touches anything), at x86_poll entry (before the
+  timer callback writes 0x446292 and the palette) and at the return to the host. A host call
+  in the middle of a block (a probe running game code through x86_call, as the exploration
+  bot does with 0x4037fc) drops that block's comparison.
+- nanpa2.exe is recognised by its PE TimeDateStamp 0x39697c6a (2000-07-10 07:34:02 UTC) and
+  SizeOfImage 0xc1000; it is not on the CD as a file but inside `data1.cab`, an InstallShield
+  5 cabinet (`ISc(` magic, version 0x01005100, 114486 bytes for nanpa2.exe and FLAG0..6).
+- Oracle entries (HLE_GAME_OVERRIDE, reimplemented game logic): x86_exec(X86_ORACLE_TAG |
+  addr) runs the original body. Recompile: a `case` on the tagged address into the lifted
+  body. Interpreter: the override check is skipped for the first fetch of addr, and again
+  after any direct jump (jmp, jcc, loop) to addr, which recomp.py allows only from inside
+  that body (check_oracles); calls and indirect transfers to addr still reach the override.

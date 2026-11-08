@@ -1,6 +1,7 @@
 # Reimplementing the game logic
 
-The port runs the game code of `nanpa2.exe` as a static recompile (`tools/recomp.py`). The
+The port runs the game code of `nanpa2.exe` in an interpreter (`src/x86/interp.c`, the default)
+or as a static recompile (`tools/recomp.py`, development and reference). The
 goal is an engine that needs only the game's data files: every game function written as C
 from an understanding of what it does, until neither `nanpa2.exe` nor the generated
 `recomp.c` is needed. This file is the inventory, the plan and the test method.
@@ -97,14 +98,16 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
 
 ## Override mechanism
 
-- `tools/recomp.py` `GAME_OVERRIDES` (merged into `HLE_OVERRIDES`): calls to and dispatches
-  into these addresses go to `hle_call`, which hands them to `game_call` (`src/game/game.c`)
-  before the CRT and HLE switches. The interpreter backend honours `HLE_OVERRIDES` too.
+- `HLE_GAME_OVERRIDE(addr, "what")` lines in `src/hle/overrides.h`, the list both backends
+  read (the interpreter includes it, `tools/recomp.py` parses it into `GAME_OVERRIDES`, merged
+  into `HLE_OVERRIDES`): calls to and dispatches into these addresses go to `hle_call`, which
+  hands them to `game_call` (`src/game/game.c`) before the CRT and HLE switches. A new unit
+  is one line there plus its entry in `src/game/units.c`.
 - Unlike the HLE overrides, the lifted body of a game override is kept as the **oracle**: it
   is reachable only through the tagged entry `x86_exec(X86_ORACLE_TAG | addr)` (0x40000000
-  | addr), never from game code. Another backend (the runtime interpreter) has to implement
-  the tag as "execute addr, skipping the override check for that entry". Only
-  `NANPA2_DIFF` uses it; the overrides themselves need nothing more than `HLE_OVERRIDES`. recomp refuses to build if any instruction outside a
+  | addr), never from game code. The interpreter implements the tag as "execute addr,
+  skipping the override check for that entry" (and after direct jumps back to the entry from
+  inside the body), so `NANPA2_DIFF` works on both backends. recomp refuses to build if any instruction outside a
   function's own body jumps to its entry, because that jump would bypass the override.
 - A unit (`src/game/units.c`) is the address, the register-level entry point (the native
   calling convention: hle_call has popped the return address; arguments on the stack or in

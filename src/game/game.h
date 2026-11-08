@@ -2,7 +2,7 @@
  * Game logic reimplemented in C (docs/reimpl.md).
  *
  * Each reimplemented native function is a "unit": an override in
- * tools/recomp.py GAME_OVERRIDES whose lifted original is kept as the
+ * src/hle/overrides.h (HLE_GAME_OVERRIDE) whose original is kept as the
  * oracle (x86_exec(X86_ORACLE_TAG | addr)). Units use the native calling
  * convention of their function: hle_call has popped the return address,
  * arguments are on the stack or in registers, results go to registers and

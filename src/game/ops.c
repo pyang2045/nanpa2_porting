@@ -186,6 +186,11 @@ uint32_t game_op_hit_test(void)
 	vm_parse_args(&pc, &table);
 	uint32_t rec = base + table, x = vm_arg(1), y = vm_arg(2), id;
 	X86_COUNT(10);
+	/* the timing probe of the native 0x4071bb (overrides.h), with edi = the
+	 * rectangle table as there: the exploration bot and NANPA2_HOTSPOTS
+	 * read the table through it */
+	cpu.r[EDI] = rec;
+	x86_probe(0x4071bb);
 	for (;; rec += 10) {
 		id = rd16(rec);
 		X86_COUNT(8);

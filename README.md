@@ -18,9 +18,19 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 ## Build
 
-The build reads your own `nanpa2.exe` (default `game/nanpa2.exe`, see Game data):
-`tools/recomp.py` lifts its game code to C in the build folder, with Python and capstone. No
-public CI can build it for that reason. The scripts check the tools, name the packages
+Two backends run the game code of `nanpa2.exe` (`-DNANPA2_BACKEND`, `--backend`):
+
+- `interp` (default): an x86 interpreter (`src/x86/interp.c`) loads the player's own
+  `nanpa2.exe` from the game folder at run time. The build needs neither the exe nor
+  capstone, and the binary and `.app` hold nothing of the game (ctest `no_game_bytes`): this
+  is the build to share, like xsystem4, the player supplies the game files.
+- `recomp`: `tools/recomp.py` lifts the game code of your `nanpa2.exe` (default
+  `game/nanpa2.exe`) to C in the build folder, with Python and capstone. For development and
+  reference only; never share it. It also holds the interpreter: `NANPA2_INTERP=1` runs that
+  instead, and `NANPA2_LOCKSTEP=1` checks the two against each other block by block (ctest
+  `lockstep`).
+
+The scripts check the tools, name the packages
 when something is missing (they never run `sudo`), and pass `--exe`, `--game-dir`,
 `--build-dir`, `--release` (default) or `--debug`, `--test` (ctest) and `--backend` (passed as
 `-DNANPA2_BACKEND`) through to CMake. Re-running reuses the venv and the build folder.
@@ -29,8 +39,9 @@ when something is missing (they never run `sudo`), and pass `--exe`, `--game-dir
 
 ```sh
 brew install sdl2 cmake ninja python
-tools/build.sh                 # build/nanpa2; creates tools/.venv with capstone on first run
-tools/build.sh --test --app    # plus ctest and build/同級生２.app (this machine only)
+tools/build.sh                 # build/nanpa2 (interp)
+tools/build.sh --test --app    # plus ctest and build/同級生２.app
+tools/build.sh --backend recomp --build-dir build-recomp  # creates tools/.venv with capstone
 ```
 
 ### Linux (not built or run yet)
@@ -54,14 +65,15 @@ tools/build_msys2.sh --test
 
 It builds `nanpa2-port.exe` (a GUI program, so no console; set `NANPA2_LOG_FILE` for the
 log), named so it never replaces the game's own `nanpa2.exe`, and copies it with `SDL2.dll`
-and the MinGW runtime DLLs into `build/dist`. Like the `.app`, it holds code lifted from
-your `nanpa2.exe`: for your machine only, never share it.
+and the MinGW runtime DLLs into `build/dist`. A `--backend recomp` build holds code lifted
+from your `nanpa2.exe`: for your machine only, never share that one. (capstone is needed for
+recomp only.)
 
 ### By hand
 
 ```sh
-cmake -S . -B build -G Ninja   # -DNANPA2_EXE=... -DNANPA2_PYTHON=... (Python with capstone)
-ninja -C build
+cmake -S . -B build -G Ninja   # interp; or -DNANPA2_BACKEND=recomp -DNANPA2_EXE=...
+ninja -C build                 #   -DNANPA2_PYTHON=... (Python with capstone)
 ```
 
 ## Game data
@@ -112,8 +124,10 @@ Homebrew's paths: Homebrew's SDL2 is sdl2-compat, which loads SDL3 at run time, 
 `tools/bundle_macos.sh` copies both into `Contents/Frameworks`, rewrites the load paths to
 `@executable_path`/`@loader_path` and signs everything ad hoc. It runs on the macOS version
 the libraries were built for and later (`LSMinimumSystemVersion` is taken from them; with
-current Homebrew bottles that is macOS 26). It contains no game data, but **the binary
-contains code translated from your own `nanpa2.exe`: do not share or upload the app.** On
+current Homebrew bottles that is macOS 26). It contains no game data; built with the
+default `interp` backend it contains nothing of `nanpa2.exe` either (ctest `no_game_bytes`
+scans it), **but a `recomp` app contains code translated from your own `nanpa2.exe`: do not
+share or upload that one.** On
 the first start choose the game folder in the picker (or put the app next to a `game`
 folder).
 

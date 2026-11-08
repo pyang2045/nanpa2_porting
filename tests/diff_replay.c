@@ -32,6 +32,12 @@ void x86_poll(void)
 	x86_poll_countdown = 1 << 30;
 }
 
+/* the hit test (04 23) fires the hotspot probe for the exploration bot */
+void x86_probe(uint32_t pc)
+{
+	(void)pc;
+}
+
 struct counts {
 	unsigned long records, mismatches;
 };
