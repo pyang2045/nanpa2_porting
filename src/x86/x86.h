@@ -28,7 +28,9 @@ extern uint8_t *x86_mem;
 /* Return address the host pushes before entering lifted code. */
 #define X86_RET_SENTINEL 0xfffffff0u
 /* x86_exec(X86_ORACLE_TAG | addr) runs the lifted original of a function
- * reimplemented in src/game (tools/recomp.py GAME_OVERRIDES). */
+ * reimplemented in src/game (tools/recomp.py GAME_OVERRIDES). Another
+ * backend implements the tag as "execute addr, skipping the override check
+ * for that entry"; it is used only by the differential test (NANPA2_DIFF). */
 #define X86_ORACLE_TAG 0x40000000u
 
 _Noreturn void x86_trap(uint32_t pc, const char *why);

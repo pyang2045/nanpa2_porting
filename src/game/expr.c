@@ -136,14 +136,15 @@ uint32_t script_eval(uint32_t *pc, int *bare_token, uint32_t *tokens)
 		if (t >= TOK_OP && t < TOK_OP + 16) {
 			++*pc;
 			uint32_t op = t - TOK_OP, a = 0, b = 0;
-			/* unary: the flag and random operators */
+			/* unary: the flag and random operators. A byte that is
+			 * not a constant serves as the number itself (0x4039f7
+			 * falls through with EAX = that byte; 0x403861 cleared
+			 * the upper bytes). */
 			if (op == OP_FLAG) {
-				if (!script_read_constant(pc, &v))
-					bad_expression(start, "flag number");
+				script_read_constant(pc, &v);
 				v = script_flag(v);
 			} else if (op == OP_RANDOM) {
-				if (!script_read_constant(pc, &v))
-					bad_expression(start, "random range");
+				script_read_constant(pc, &v);
 				v = next_random(v);
 			} else if (op == OP_FLAG_AT) {
 				if (depth < 1)

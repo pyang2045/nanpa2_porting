@@ -455,3 +455,55 @@ code change.
   over_image 1` with the pointer over the image and focus, and `host_shown 1` after the
   window lost focus; ctest smoke, selftest, selftest_dir, wavcheck pass. Not checked by
   eye: fullscreen letterbox (code path only).
+
+## 2026-11-08 (reimplementation stage 1: inventory, differential harness, script expressions)
+
+- Decision: the game logic is reimplemented by hand in C, function by function, through
+  the override mechanism, until neither nanpa2.exe nor recomp.c is needed. Plan,
+  inventory and method are in `docs/reimpl.md`; `tools/reimpl_status.py` measures progress.
+- Inventory: the game code is 25,597 bytes in 142 functions, 0x401000-0x4077ac. CLAUDE.md's
+  0x412210 included a statically linked MP3 decoder library (0x4077b0-0x412c81, already
+  replaced by minimp3), and the MSVC runtime starts at 0x412c90. By module: map 63
+  functions / 9,764 bytes, vm 10 / 4,295 (the loop 0x4060d4 owns all opcode handlers),
+  screen 21 / 3,045, sound 16 / 2,511, startup 8 / 2,236, input 5 / 956, file 7 / 806,
+  anim 4 / 687, text 4 / 675, expr 4 / 622. Many map functions are handlers in .data
+  pointer tables 0x435576 (ext op 0x26 sub-ops, via 0x403a70) and 0x435dfc (cell draw,
+  sprite move kinds, flood-fill direction orders).
+- 83187f7: script expressions reimplemented (`src/game/expr.c`): evaluator 0x4037fc
+  (operators 0x4038ae-0x4039d1, flag read 0x4039d6), constant reader 0x4039f7 (tails
+  0x403a06/12/22/42), flag write 0x406455, on accessors for the VM globals
+  (`src/game/vm.h`). Exact semantics and register contracts are in re-notes.md. recomp.py
+  `GAME_OVERRIDES` keeps their lifted bodies as the oracle (`x86_exec(0x40000000 | addr)`).
+- Differential harness (83187f7): `NANPA2_DIFF=1` runs original and reimplementation from
+  the same state on every call (memory traced through rd*/wr*), then compares registers,
+  flags if used and every byte written above the entry ESP; the original's result is kept
+  on a mismatch. `NANPA2_DIFF_DIR` records calls, and `build/diff_replay` replays them
+  without SDL, HLE or lifted code. ctest `diffcapture` (40 s headless explore run with the
+  online diff) and `diffreplay` (skipped without records).
+- Results. Explore runs, 300000 frames each at NANPA2_TURBO=8:
+  - seed 31 (online diff): Prologue to OPEN1 at frame 264322, 3,745,731 evaluator calls;
+  - seed 33 (online diff): OPEN1 at 261034, 3,913,913 calls;
+  - seed 42 (online diff, from seed 32's diary save): main game, 37 MES files to
+    TOWN.MES, 3,636,403 calls;
+  - seed 32 (reimplementation only, no diff): Prologue to OPEN1 at 249593 and on to 33.MES.
+  None had a trap, watchdog warning or stall. That makes 11.3 M evaluator, 19,758
+  constant-reader and 55,929 flag-write calls compared, with 0 real mismatches. Seed 31
+  logged 3 mismatches, all a harness bug: the status writer thread reads 0x446292 and
+  0x4ac4ec (src/hle/status.c) while the trace was on. Since 83187f7 only the tracing thread
+  is traced. Replay of the 92,932 recorded calls: 0 mismatches. Every operator token
+  occurred; 0x2c and 0x2f only in the main game (50 and 10 times in seed 42). Sabotage
+  check: a wrapping 0x21 gave 2 mismatching records.
+- Pacing: replaced code charges native instruction estimates (22 per expression token).
+  Measured per call: 116-250 native against 129-255 estimated.
+- Share now replaced: 4,418 of 25,597 bytes (17.3%) and 27 of 142 functions (19.0%);
+  3,796 bytes are the older HLE overrides, 622 bytes (2.4%) are game logic.
+- re-notes.md: VM state table; register `@` is 0x40 (so S = register 0x13). Music ext op
+  0x24 (0x4073a5) was described backwards: first argument 0 plays MUSIC n, anything else
+  stops (0x4073aa `cmp eax, 0; je 0x4073b9`).
+- Follow-up commit: `2d`/`2f` with a non-constant operand use the byte itself, as
+  natively, instead of trapping (never met in the runs). The oracle-tag contract is
+  documented for other backends.
+- ctest: all 8 pass. One smoke failure during a run alongside two explore jobs passed on
+  rerun (load).
+- Next (docs/reimpl.md order): VM helpers 0x4061d4, 0x40741b, 0x406dc4, 0x406395, 0x4068e1;
+  then jump overrides for the opcode handlers.

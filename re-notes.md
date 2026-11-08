@@ -104,8 +104,9 @@ buffer ever gets SetVolume/SetPan/SetFrequency (vtable calls used: 0x0c CreateSo
     waits for a voice to finish. Language: the dub is Chinese (Mandarin); listened to
     `A10012.WAV` only, the other clips are assumed the same.
 - Script music opcode (0x4073a5): arguments parsed by 0x40741b into words at `0x445d06`...;
-  first argument 0 stops the music, otherwise music number = second argument (`0x445d08`,
-  zero-extended).
+  first argument 0 plays music number = second argument (`0x445d08`, zero-extended,
+  0x4073b9 -> 0x402cb0), any other first argument stops the music (0x4073af -> 0x4032c0)
+  (corrected 2026-11-08: `cmp eax, 0; je 0x4073b9` at 0x4073aa).
   Voice opcode 0x4073cd copies the name (0x406dc4) to `0x445d26` and calls 0x403360.
 - The `MUSIC\4x-5x.WAV` files (22050 Hz 8-bit mono, 0.3-17 s) are jingles and effects; they go
   through the music channel and replace the BGM. MP3s are all 44100 Hz stereo 96 kbit/s.
@@ -264,7 +265,8 @@ item takes the highlighted item.
 ## Script expressions and menus (0x4037fc)
 
 RPN on the native stack, ended by 0x03. Tokens: 0x30-0x3f literal 0-15; `07 b` literal b>>2;
-`08 h l` literal ((h>>2)<<6 | l>>2); 0x40-0x5a register A-Z (u16 at `0x445298 + 2*n`);
+`08 h l` literal ((h>>2)<<6 | l>>2); 0x40-0x5a register `@`-`Z` (u16 at `0x445298 + 2*n`,
+n = token - 0x40; exact semantics below);
 0x20 + 0x21 - (saturating at 0) 0x22 * 0x23 / 0x24 % 0x25 | 0x26 & 0x27 == 0x28 != 0x29 <
 (a b -> 1 if b < a... pops top first), 0x2d n: 4-bit flag n (nibbles at `0x444e98`, odd n in the
 high nibble, 0x4039d6), 0x2f n: random (0x403999). Statements: `0f expr 01 ... 00` if-block
@@ -274,6 +276,76 @@ click (0x4065f6 -> 0x406acc), 0x13 call, 0x04 xx extended opcodes (table 0x40626
 Menus: item lists `02 [0f expr 03] text` ... `00`; the choice comes back in register S
 (1-based, 0 = cancelled). OPEN.MES (Prologue) keeps the main choice in V and the sub
 choice in N; the main loop starts at script offset 0x2a3c.
+
+### Script VM state
+
+Set up by 0x406395 (called before every MES file runs):
+
+| Address | Type | Meaning |
+|---|---|---|
+| `0x435e78` | bytes | script image; the VM pc (ESI) is an offset from here; segment 0 |
+| `0x444e78` | char[32] | name of the running MES file |
+| `0x444e98` | nibbles | flags: flag n in byte n/2, low nibble for even n, high for odd |
+| `0x445298` | u16[27] | registers `@` (0x40) to `Z` (0x5a); token 0x40 + i is register i |
+| `0x4452ce` | u16[] | word array; register `@` = its segment-0 offset (0x4452ce - 0x435e78) |
+| `0x4452dc` | u16 | `@[7]`: data segment used by array reads and writes (0x2b/0x2c, ops 0x0d/0x0e) |
+| `0x44533c` | u32[4] | segment bases: 0x435e78, 0x4462be, 0x4562be, 0x4562be |
+| `0x4313c4` | u16 | random seed |
+
+So the register letters are one more than an index from `A`: `S` (0x53) is register 0x13.
+
+### Script expressions: exact semantics (0x4037fc, reimplemented in src/game/expr.c)
+
+The evaluator is called (`call 0x4037fc`) with ESI = script offset of the first token and
+returns EAX = value, ESI past the 0x03. It pushes 32-bit values on the native stack above its
+return address, and 0x03 is `pop eax; ret`. Values are 32-bit unsigned throughout.
+
+Operands (each pushes one value):
+
+| Token | Value |
+|---|---|
+| `30`-`3f` | 0-15 (0x403a06) |
+| `07 b` | b >> 2 (0x403a12) |
+| `08 h l` | (h>>2) << 6 \| l>>2 (0x403a22) |
+| `09 h m l` | ((h>>2) << 12 \| (m>>2) << 6 \| l>>2) & 0xffff (0x403a42; built in BX through `shr ax` / `rcr bl` twice, so the top two bits are lost) |
+| `40`-`5a` | register (token - 0x40), zero-extended |
+
+Each byte of a constant carries 6 bits in its upper bits. Operators (a = the value below the
+top, b = the top; both popped, the result pushed):
+
+| Token | Handler | Result |
+|---|---|---|
+| `20` | 0x4038ae | a + b (32-bit wrap) |
+| `21` | 0x4038b8 | a - b, 0 if b > a |
+| `22` | 0x4038c6 | a * b (low 32 bits, `mul`) |
+| `23` / `24` | 0x4038d0 / 0x4038dc | a / b, a % b (`div ebx`, EDX = 0; b = 0 is a divide error) |
+| `25` / `26` | 0x4038e8 / 0x4038f2 | a \| b, a & b |
+| `27` / `28` | 0x4038fc / 0x40390b | a == b, a != b (1 or 0) |
+| `29` / `2a` | 0x40391a / 0x403929 | a > b, a < b (unsigned) |
+| `2b` | 0x403938 | word at segment_base[s] + a + 2b; s = 0 if (a & 0xffff) == register `@`, else `@[7]`; the result keeps the upper half of 2b (16-bit load into AX after `add eax, eax`) |
+| `2c` | 0x403961 | byte at segment_base[`@[7]`] + a + b (no `@` check) |
+| `2d n` | 0x40397d | flag n, n a constant operand (read by 0x4039f7) |
+| `2e` | 0x40398d | flag b (pops one value) |
+| `2f n` | 0x403999 | seed = (5 * seed + 1) & 0xffff, then seed % n as 16-bit `div bx` (n = 0: divide error) |
+
+Any other token (0x00-0x02, 0x04-0x06, 0x0a-0x1f, 0x5b-0xff) ends at 0x4038ad with a bare
+`ret`: with nothing pushed that returns normally with AL = the token and EAX's upper bytes
+unchanged; with values pushed it returns into a value (crash). 0x03 with no value or more
+than one returns into garbage the same way. For `2d`/`2f` a non-constant operand byte is used
+as the number itself (0x4039f7's fall-through, EAX = that byte).
+
+Constant reader 0x4039f7 (callers: the evaluator, and op 0x0a at 0x406491): one constant
+operand as above into EAX; for `09` BX also holds the value; any other byte is returned in AL
+with EAX's upper bytes kept, ESI past it. Flag read 0x4039d6: EAX = flag EAX (EBX = n>>1);
+only the evaluator calls it. Flag write 0x406455: EBX = n, AX = value; values >= 0x10 (as
+16-bit) store 15; EBX is preserved, AX ends clamped and for odd n AL = AL << 4.
+
+Register contract of 0x4037fc, from its twelve call sites (0x406499, 0x4064b5, 0x4064bd,
+0x4064e5, 0x406522, 0x40652d, 0x40656b, 0x406574, 0x40659e, 0x40660e, 0x4068f9, 0x40747c):
+all save EBX around the call or overwrite it, reload EDX before use and read no flags, so
+EBX, EDX and the flags are scratch; ECX, EDI, EBP are untouched. The full EAX matters
+(0x406528 `add eax, eax` after the call). The native loop costs about 22 instructions per
+token (measured: 247 per call against 11 tokens per call on average).
 
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 
