@@ -128,7 +128,7 @@ FALLBACK_STOPS = {0x40616e}
 
 
 def native_calls():
-    """Native game routines the C side calls (game_ncall / ncall / blit with
+    """Native game routines the C side calls (game_ncall / ncall / blit / colour_rect with
     a game code address or a #define of one): they run, so they are needed."""
     out = {}
     for fn in sorted(os.listdir(SRC_GAME)):
@@ -137,7 +137,7 @@ def native_calls():
         src = open(os.path.join(SRC_GAME, fn), encoding='utf-8').read()
         defs = dict((m.group(1), int(m.group(2), 16)) for m in
                     re.finditer(r'#define\s+(\w+)\s+(0x[0-9a-fA-F]+)u?\b', src))
-        for m in re.finditer(r'\b(?:game_ncall|ncall|blit)\(\s*(\w+)', src):
+        for m in re.finditer(r'\b(?:game_ncall|ncall|blit|colour_rect)\(\s*(\w+)', src):
             a = m.group(1)
             v = int(a, 16) if a.startswith('0x') else defs.get(a)
             if v is not None and recomp.in_code(v):

@@ -341,6 +341,8 @@ void x86_native_summary(char *out, size_t cap)
 #define MWR32(a, v) wr32((a), (v))
 #define COUNT(n) X86_COUNT(n)
 #define STEP() (x86_interp_steps++, native_step(pc, d))
+#define NATIVE_ENTRY(p) do { if (native_entry && (p) - CODE_START < NATIVE_END - CODE_START) \
+	native_entry[(p) - CODE_START] = 1; } while (0)
 #define HLE_CALL(pc) timed_hle_call(pc)
 #define HLE_JUMP(pc) timed_hle_jump(pc)
 #define POLL(at) X86_POLL(at)
@@ -369,9 +371,12 @@ void x86_interp(uint32_t pc)
 			for (size_t i = 0; i < sizeof jump_overrides / sizeof jump_overrides[0]; i++)
 					if (jump_overrides[i] - CODE_START < NATIVE_END - CODE_START)
 					native_entry[jump_overrides[i] - CODE_START] = 1;
+			native_entry[0x40638du - CODE_START] = 1; /* the VM end, reached by jump */
 			atexit(x86_native_report);
 		}
 	}
+	if (native_entry && (pc & ~X86_ORACLE_TAG) - CODE_START < NATIVE_END - CODE_START)
+		native_entry[(pc & ~X86_ORACLE_TAG) - CODE_START] = 1; /* entered by x86_call/ncall */
 	if (x86_is_oracle_pc(pc)) {
 		/* the original of a reimplemented function (NANPA2_DIFF) */
 		pc &= ~X86_ORACLE_TAG;
