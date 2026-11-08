@@ -364,6 +364,16 @@ static void fuzz_op_map(uint32_t *s)
 	wr8(0x435e61u, 0);
 }
 
+/* 0x403eff: the cell record at EDI gets 0-3 sprite tiles (small tile
+ * numbers, which every sprite sheet has), EDX stays the screen offset */
+static void fuzz_cell_draw(uint32_t *s)
+{
+	uint32_t cell = cpu.r[EDI];
+	uint32_t layers = below(s, 4);
+	for (uint32_t i = 0; i < 3; i++)
+		wr16(cell + 2 + 2 * i, i < layers ? 1 + below(s, 60) : 0);
+}
+
 /* the fuzz function of a unit, or NULL */
 void (*game_map_fuzz_for(uint32_t addr))(uint32_t *)
 {
@@ -382,6 +392,8 @@ void (*game_map_fuzz_for(uint32_t addr))(uint32_t *)
 		return fuzz_sprite_step;
 	case 0x4073ee:
 		return fuzz_op_map;
+	case 0x403eff:
+		return fuzz_cell_draw;
 	default:
 		return NULL;
 	}

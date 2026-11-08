@@ -321,8 +321,8 @@ static uint32_t compare(const struct game_unit *u)
 static void fuzz_unit(const struct game_unit *u)
 {
 	static long iters = -1, limit = 30;
-	static uint8_t *save_lo, *save_hi;
-	enum { LO = 0x400000, LO_END = 0x4c0000, HI = 0xff0000, HI_END = 0x1000000 };
+	static uint8_t *save_lo, *save_hi, *save_px;
+	enum { LO = 0x400000, LO_END = 0x4c0000, HI = 0xff0000, HI_END = 0x1000000, PIXELS = 0x60000 };
 	if (iters < 0) {
 		const char *e = getenv("NANPA2_FUZZ");
 		iters = e ? atol(e) : 0;
@@ -341,12 +341,18 @@ static void fuzz_unit(const struct game_unit *u)
 	if (!save_lo) {
 		save_lo = malloc(LO_END - LO);
 		save_hi = malloc(HI_END - HI);
-		if (!save_lo || !save_hi)
+		save_px = malloc(PIXELS);
+		if (!save_lo || !save_hi || !save_px)
 			abort();
 	}
+	/* the locked screen, which the cell drawing writes (0x435548) */
+	uint32_t px = rd32(0x435548);
+	int have_px = px >= MEM_BASE && px + PIXELS <= MEM_END;
 	s->fuzzed++;
 	memcpy(save_lo, x86_ptr(LO, LO_END - LO), LO_END - LO);
 	memcpy(save_hi, x86_ptr(HI, HI_END - HI), HI_END - HI);
+	if (have_px)
+		memcpy(save_px, x86_ptr(px, PIXELS), PIXELS);
 	struct cpu c0 = cpu;
 	uint64_t icount = x86_icount, mism = s->mismatches;
 	uint32_t seed = 0x9e3779b9u ^ (uint32_t)(u->addr * 2654435761u) ^ (uint32_t)(s->fuzzed * 40503u);
@@ -394,6 +400,8 @@ static void fuzz_unit(const struct game_unit *u)
 		s->fuzz_runs++;
 		memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
 		memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
+		if (have_px)
+			memcpy(x86_ptr(px, PIXELS), save_px, PIXELS);
 	}
 	fuzzing = 0;
 	cpu = c0;
