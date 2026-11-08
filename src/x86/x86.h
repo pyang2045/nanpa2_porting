@@ -47,6 +47,13 @@ extern uint8_t *x86_mem;
  * one of the x86_stop_exits (zero-terminated). x86_stop_pc is that pc. */
 extern uint32_t x86_stop_esp, x86_stop_pc;
 extern const uint32_t *x86_stop_exits;
+/* Also, from the second check on, any of x86_stop_units (zero-terminated:
+ * the jump units) at ESP == x86_stop_esp, and below it the call exits
+ * x86_stop_calls (zero-terminated pairs {callee, return address}: pc is the
+ * callee and the return address is on top of the stack). The caller
+ * clears x86_stop_started when it sets x86_stop_esp. */
+extern const uint32_t *x86_stop_units, *x86_stop_calls;
+extern int x86_stop_started;
 int x86_stop_at(uint32_t pc);
 
 _Noreturn void x86_trap(uint32_t pc, const char *why);

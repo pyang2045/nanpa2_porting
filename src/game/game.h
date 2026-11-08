@@ -36,6 +36,10 @@ struct game_unit {
 	/* the C side runs native game code (x86_exec): its diff records
 	 * cannot be replayed offline, so none are written */
 	int calls_native;
+	/* jump units that are the rest of a handler after a call exit: the
+	 * words the handler pushed before that call, still on the stack (the
+	 * handler's own level, where its oracle ends, is that far up) */
+	int stack_words;
 };
 
 extern const struct game_unit game_units[];

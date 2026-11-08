@@ -25,9 +25,19 @@
  * handler's ESP (x86_stop_esp, src/x86/x86.h). recomp.py reads these lines
  * into GAME_JUMP_OVERRIDES.
  *
+ * HLE_GAME_CALL_EXIT(ra, what): a call made by an opcode handler that the
+ * C handler does not run itself: it pushes ra and continues at the callee,
+ * as the native `call` does, so blocks, waits and the message pump run
+ * once, natively, with no host frames under them. ra is the return
+ * address; the code there is usually a jump unit of its own (the rest of
+ * the handler). The handler's oracle ends at the call (pc = the callee
+ * with ra on top of the stack); recomp.py routes such calls through
+ * dispatch, where the test can stop them, and reads these lines into
+ * CALL_EXITS.
+ *
  * Use as an X-macro: define HLE_OVERRIDE(addr, what), HLE_GAME_OVERRIDE,
- * HLE_GAME_JUMP and/or HLE_PROBE(addr, what), then include this file. No
- * include guard.
+ * HLE_GAME_JUMP, HLE_GAME_CALL_EXIT and/or HLE_PROBE(addr, what), then
+ * include this file. No include guard.
  */
 #ifndef HLE_OVERRIDE
 #define HLE_OVERRIDE(addr, what)
@@ -40,6 +50,10 @@
 #ifndef HLE_GAME_JUMP
 #define HLE_GAME_JUMP(addr, what)
 #define HLE_OVERRIDES_UNDEF_J
+#endif
+#ifndef HLE_GAME_CALL_EXIT
+#define HLE_GAME_CALL_EXIT(ra, what)
+#define HLE_OVERRIDES_UNDEF_C
 #endif
 #ifndef HLE_PROBE
 #define HLE_PROBE(addr, what)
@@ -108,6 +122,30 @@ HLE_GAME_JUMP(0x4073a5, "op 04 24: music")
 HLE_GAME_JUMP(0x4073cd, "op 04 25: voice")
 HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
 
+/* Handlers that run a block, a script or a wait, split at those calls
+ * (src/game/ops_vm.c): each call is a call exit, the code after it a
+ * jump unit (16's continuations are `jmp 0x4060f9` and stay native) */
+HLE_GAME_JUMP(0x40659e, "op 0f: if")
+HLE_GAME_JUMP(0x4065ae, "op 0f: after the block of a true condition")
+HLE_GAME_JUMP(0x4065ed, "op 0f: after the else block")
+HLE_GAME_JUMP(0x4065f6, "op 11: wait for a click")
+HLE_GAME_JUMP(0x4065fb, "op 11: after the wait, clear the text window")
+HLE_GAME_JUMP(0x40660c, "op 04 10: while")
+HLE_GAME_JUMP(0x40661e, "op 04 10: after the loop's block")
+HLE_GAME_JUMP(0x406658, "op 13: call label")
+HLE_GAME_JUMP(0x40666b, "op 13: after the label's block")
+HLE_GAME_JUMP(0x406a9a, "op 14: call offset")
+HLE_GAME_JUMP(0x406aa7, "op 14: after the script")
+HLE_GAME_JUMP(0x406aad, "op 16: wait")
+HLE_GAME_CALL_EXIT(0x4065ae, "op 0f: run the block of a true condition (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4065ed, "op 0f: run the else block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x4065fb, "op 11: wait for a click (0x406acc)")
+HLE_GAME_CALL_EXIT(0x40661e, "op 04 10: run the loop's block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x40666b, "op 13: run the label's block (0x4061cd)")
+HLE_GAME_CALL_EXIT(0x406aa7, "op 14: run the script at the offset (0x4060f9)")
+HLE_GAME_CALL_EXIT(0x406abd, "op 16: wait n frames (0x4075c6)")
+HLE_GAME_CALL_EXIT(0x406ac7, "op 16: wait for a click (0x406acc)")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
@@ -134,6 +172,10 @@ HLE_PROBE(0x4071bb, "script hit test rectangle table")
 #ifdef HLE_OVERRIDES_UNDEF_J
 #undef HLE_GAME_JUMP
 #undef HLE_OVERRIDES_UNDEF_J
+#endif
+#ifdef HLE_OVERRIDES_UNDEF_C
+#undef HLE_GAME_CALL_EXIT
+#undef HLE_OVERRIDES_UNDEF_C
 #endif
 #ifdef HLE_OVERRIDES_UNDEF_P
 #undef HLE_PROBE

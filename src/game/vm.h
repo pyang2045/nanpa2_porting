@@ -127,6 +127,20 @@ uint32_t game_op_click_handler(void);   /* 04 20 0x4070bc */
 uint32_t game_op_hit_test(void);        /* 04 23 0x4071a4 */
 uint32_t game_op_args_only(void);       /* 04 22 0x40739b */
 
+/* ---- src/game/ops_vm.c: handlers split at the blocks and waits they run ---- */
+uint32_t game_op_if(void);               /* 0f 0x40659e */
+uint32_t game_op_if_then(void);          /* 0f 0x4065ae */
+uint32_t game_op_if_else(void);          /* 0f 0x4065ed */
+uint32_t game_op_wait(void);             /* 11 0x4065f6 */
+uint32_t game_op_wait_clear(void);       /* 11 0x4065fb */
+uint32_t game_op_while(void);            /* 04 10 0x40660c */
+uint32_t game_op_while_next(void);       /* 04 10 0x40661e */
+uint32_t game_op_call_label(void);       /* 13 0x406658 */
+uint32_t game_op_call_label_done(void);  /* 13 0x40666b */
+uint32_t game_op_call_offset(void);      /* 14 0x406a9a */
+uint32_t game_op_call_offset_done(void); /* 14 0x406aa7 */
+uint32_t game_op_delay(void);            /* 16 0x406aad */
+
 /* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
 uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */
 uint32_t game_op_cursor(void);          /* 04 15 0x406916 */

@@ -145,6 +145,46 @@ static void record(const struct game_unit *u, struct unit_stats *s, const struct
 
 const uint32_t game_vm_exits[] = { 0x4060f9u, 0x40638du, 0 };
 
+/* Where else a jump unit's oracle ends (x86_stop_at): at any jump unit
+ * (the pieces of a handler split at its calls go on at one another), and
+ * at the call exits of src/hle/overrides.h, as {callee, return address}
+ * with the callee read from the `e8 rel32` before the return address. */
+static uint32_t stop_units[256], stop_calls[2 * 64 + 1];
+
+static const uint32_t call_exit_ra[] = {
+#define HLE_GAME_CALL_EXIT(ra, what) ra,
+#include "hle/overrides.h"
+#undef HLE_GAME_CALL_EXIT
+	0
+};
+
+static void stop_tables(void)
+{
+	static int done;
+	if (done)
+		return;
+	done = 1;
+	int n = 0;
+	for (int i = 0; i < game_unit_count; i++)
+		if (game_units[i].jump) {
+			if (n + 1 >= (int)(sizeof stop_units / sizeof stop_units[0]))
+				x86_trap(game_units[i].addr, "game.c: stop_units too small");
+			stop_units[n++] = game_units[i].addr;
+		}
+	stop_units[n] = 0;
+	n = 0;
+	for (const uint32_t *ra = call_exit_ra; *ra; ra++) {
+		const uint8_t *p = x86_ptr(*ra - 5, 5);
+		if (p[0] != 0xe8 || 2 * n + 2 >= (int)(sizeof stop_calls / sizeof stop_calls[0]))
+			x86_trap(*ra, "game.c: call exit without a call before it");
+		uint32_t rel = p[1] | p[2] << 8 | p[3] << 16 | (uint32_t)p[4] << 24;
+		stop_calls[2 * n] = *ra + rel;
+		stop_calls[2 * n + 1] = *ra;
+		n++;
+	}
+	stop_calls[2 * n] = 0;
+}
+
 /* NANPA2_DIFF_POISON=1: after every unit (compared or not) its scratch
  * registers, and the flags if no caller reads them, get garbage, so a
  * register wrongly taken as dead shows up as a divergence or a trap. */
@@ -179,8 +219,12 @@ static uint32_t oracle(const struct game_unit *u)
 		x86_exec(X86_ORACLE_TAG | u->addr); /* returns at the sentinel */
 		return 0;
 	}
-	x86_stop_esp = cpu.r[ESP];
+	stop_tables();
+	x86_stop_esp = cpu.r[ESP] + 4u * (uint32_t)u->stack_words;
 	x86_stop_exits = game_vm_exits;
+	x86_stop_units = stop_units;
+	x86_stop_calls = stop_calls;
+	x86_stop_started = 0;
 	x86_stop_pc = 0;
 	x86_exec(X86_ORACLE_TAG | u->addr);
 	if (x86_stop_esp)

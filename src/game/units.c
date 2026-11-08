@@ -10,11 +10,17 @@
  * (only ESP, EBP and ESI are live there, tools/liveness.py). */
 #define AT_LOOP (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
 
-#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0 }
-#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0 }
+/* After a block (0f's pieces): they may `ret` out of the running block
+ * with AL, so EAX is live there too. */
+#define AFTER_BLOCK (REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
+
+#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0 }
+#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0 }
+/* the rest of a handler after a call exit, with `words` pushed before it */
+#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words }
 /* a handler that calls native routines (src/game/ops_sys.c); native: the
  * cases it leaves to the original handler, or NULL */
-#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1 }
+#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0 }
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -30,13 +36,26 @@ const struct game_unit game_units[] = {
 	JUMP(0x4064d9, "op_0c_set_reg", game_op_set_reg, AT_LOOP),
 	JUMP(0x4064f8, "op_0d_store_words", game_op_store_words, AT_LOOP),
 	JUMP(0x406557, "op_0e_store_bytes", game_op_store_bytes, AT_LOOP),
+	JUMP(0x40659e, "op_0f_if", game_op_if, AT_LOOP),
+	JUMP(0x4065ae, "op_0f_if_then", game_op_if_then, AFTER_BLOCK),
+	JUMP(0x4065ed, "op_0f_if_else", game_op_if_else, AFTER_BLOCK),
+	JUMP(0x4065f6, "op_11_wait", game_op_wait, AT_LOOP),
+	JUMP_SYS(0x4065fb, "op_11_wait_clear", game_op_wait_clear, NULL),
+	JUMP(0x40660c, "op_0410_while", game_op_while, AT_LOOP),
+	RESUME(0x40661e, "op_0410_while_next", game_op_while_next, AT_LOOP, 1),
 	JUMP(0x406638, "op_0411_continue", game_op_continue, 0),
 	JUMP(0x40663b, "op_0412_break", game_op_break, 0),
 	JUMP(0x40663e, "op_12_set_label", game_op_set_label, AT_LOOP),
+	JUMP(0x406658, "op_13_call_label", game_op_call_label, AT_LOOP),
+	RESUME(0x40666b, "op_13_call_label_done", game_op_call_label_done, AT_LOOP, 1),
 	JUMP_SYS(0x406842, "op_0414_menu_items", game_op_menu_items, NULL),
 	CALL(0x4068e1, "vm_menu_item", game_menu_item_regs, REG_BIT(EDX), 0),
 	JUMP_SYS(0x406916, "op_0415_cursor", game_op_cursor, NULL),
 	JUMP(0x4069be, "op_18_text_colour", game_op_text_colour, AT_LOOP),
+	JUMP(0x406a9a, "op_14_call_offset", game_op_call_offset, AT_LOOP),
+	RESUME(0x406aa7, "op_14_call_offset_done", game_op_call_offset_done, AT_LOOP, 1),
+	/* ECX (the frame count) goes into 0x4075c6 */
+	JUMP(0x406aad, "op_16_delay", game_op_delay, AT_LOOP & ~REG_BIT(ECX)),
 	JUMP_SYS(0x406b05, "op_17_clear_text", game_op_clear_text, NULL),
 	JUMP_SYS(0x406b76, "op_0417_fill_rect", game_op_fill_rect, NULL),
 	JUMP_SYS(0x406bcb, "op_0418_xor_rect", game_op_xor_rect, NULL),

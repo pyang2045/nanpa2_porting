@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct cpu cpu;
 uint8_t *x86_mem;
@@ -10,15 +11,29 @@ uint32_t x86_poll_pc;
 uint64_t x86_icount;
 void (*x86_trap_hook)(void);
 uint32_t x86_stop_esp, x86_stop_pc;
-const uint32_t *x86_stop_exits;
+const uint32_t *x86_stop_exits, *x86_stop_units, *x86_stop_calls;
+int x86_stop_started;
 
 int x86_stop_at(uint32_t pc)
 {
 	uint32_t esp = cpu.r[ESP];
 	int stop = esp > x86_stop_esp;
-	if (esp == x86_stop_esp)
+	if (esp == x86_stop_esp) {
 		for (const uint32_t *e = x86_stop_exits; e && *e; e++)
 			stop |= *e == pc;
+		/* another jump unit (or this one again), not at the first check:
+		 * that is the oracle's own entry */
+		for (const uint32_t *e = x86_stop_units; x86_stop_started && e && *e; e++)
+			stop |= *e == pc;
+	} else if (esp < x86_stop_esp && x86_stop_calls) {
+		/* a call exit: the callee's entry with the return address on top
+		 * (read past the memory trace) */
+		uint32_t ra;
+		memcpy(&ra, x86_ptr(esp, 4), 4);
+		for (const uint32_t *c = x86_stop_calls; *c; c += 2)
+			stop |= c[0] == pc && c[1] == ra;
+	}
+	x86_stop_started = 1;
 	if (stop) {
 		x86_stop_pc = pc;
 		x86_stop_esp = 0;
