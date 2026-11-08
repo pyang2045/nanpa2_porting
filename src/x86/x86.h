@@ -27,6 +27,11 @@ extern uint8_t *x86_mem;
 #define HEAP_BASE 0x01000000u
 /* Return address the host pushes before entering lifted code. */
 #define X86_RET_SENTINEL 0xfffffff0u
+/* x86_exec(X86_ORACLE_TAG | addr) runs the lifted original of a function
+ * reimplemented in src/game (tools/recomp.py GAME_OVERRIDES). Another
+ * backend implements the tag as "execute addr, skipping the override check
+ * for that entry"; it is used only by the differential test (NANPA2_DIFF). */
+#define X86_ORACLE_TAG 0x40000000u
 
 _Noreturn void x86_trap(uint32_t pc, const char *why);
 /* called by x86_trap after the register dump (dev logging), may be NULL */
@@ -40,12 +45,18 @@ static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 	return x86_mem + (a - MEM_BASE);
 }
 
-static inline uint32_t rd8(uint32_t a) { return *x86_ptr(a, 1); }
-static inline uint32_t rd16(uint32_t a) { uint16_t v; memcpy(&v, x86_ptr(a, 2), 2); return v; }
-static inline uint32_t rd32(uint32_t a) { uint32_t v; memcpy(&v, x86_ptr(a, 4), 4); return v; }
-static inline void wr8(uint32_t a, uint32_t v) { *x86_ptr(a, 1) = (uint8_t)v; }
-static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; memcpy(x86_ptr(a, 2), &t, 2); }
-static inline void wr32(uint32_t a, uint32_t v) { memcpy(x86_ptr(a, 4), &v, 4); }
+/* Differential tests (src/game/trace.c): while x86_trace_on is set every
+ * access through rd*()/wr*() is reported before it happens. */
+extern int x86_trace_on;
+void x86_trace_access(uint32_t a, uint32_t n, int write);
+#define X86_TRACE(a, n, w) do { if (x86_trace_on) x86_trace_access((a), (n), (w)); } while (0)
+
+static inline uint32_t rd8(uint32_t a) { X86_TRACE(a, 1, 0); return *x86_ptr(a, 1); }
+static inline uint32_t rd16(uint32_t a) { uint16_t v; X86_TRACE(a, 2, 0); memcpy(&v, x86_ptr(a, 2), 2); return v; }
+static inline uint32_t rd32(uint32_t a) { uint32_t v; X86_TRACE(a, 4, 0); memcpy(&v, x86_ptr(a, 4), 4); return v; }
+static inline void wr8(uint32_t a, uint32_t v) { X86_TRACE(a, 1, 1); *x86_ptr(a, 1) = (uint8_t)v; }
+static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; X86_TRACE(a, 2, 1); memcpy(x86_ptr(a, 2), &t, 2); }
+static inline void wr32(uint32_t a, uint32_t v) { X86_TRACE(a, 4, 1); memcpy(x86_ptr(a, 4), &v, 4); }
 
 static inline void set16(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffff0000u) | (v & 0xffffu); }
 static inline void set8l(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffffff00u) | (v & 0xffu); }
@@ -433,7 +444,7 @@ static inline void str_movs(int sz, int rep)
 		cpu.r[ESI] += STR_STEP(sz); cpu.r[EDI] += STR_STEP(sz);
 		return;
 	}
-	if (!cpu.df && cpu.r[ECX]) {
+	if (!cpu.df && cpu.r[ECX] && !x86_trace_on) {
 		uint32_t n = cpu.r[ECX] * (uint32_t)sz;
 		uint8_t *d = x86_ptr(cpu.r[EDI], n), *s = x86_ptr(cpu.r[ESI], n);
 		/* byte-forward copy: overlapping moves replicate as on x86 */

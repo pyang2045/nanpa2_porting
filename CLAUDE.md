@@ -39,6 +39,11 @@ imports, COM methods, CRT functions and a few hand-replaced game functions go to
   `win32.c` (message queue, SDL events to WM_*, timer), `ddraw.c` (surfaces, Blt, palette),
   `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
   `crt.c` (MSVC CRT by address), `dev.c` (scripted input and screenshots).
+- `src/game/`: game logic reimplemented in C (`docs/reimpl.md`): units overriding native
+  functions (`tools/recomp.py` `GAME_OVERRIDES`, lifted originals kept as the oracle),
+  `vm.h` accessors for native globals, `expr.c` script expressions, `game.c`/`trace.c`/
+  `diff.c` the differential harness (`NANPA2_DIFF=1`, `NANPA2_DIFF_DIR`; replay
+  `build/diff_replay`). `tools/reimpl_status.py` prints the share replaced.
 - `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
   `launch.c` (game folder lookup and picker, remembered path, log file for Finder launches),
   `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`,
@@ -94,5 +99,6 @@ $G/support/analyzeHeadless decomp/ghidra Nanpa2 -import game/nanpa2.exe -overwri
 About a quarter of the game functions are hand-written assembly with register arguments
 (`unaff_ESI`, `in_EAX` in the decompile); read those with
 `objdump -d --x86-asm-syntax=intel --start-address=0x... --stop-address=0x... game/nanpa2.exe`.
-Game code is 0x401000-0x412210; the MSVC runtime follows. Cite native addresses in code
+Game code is 0x401000-0x4077ac (142 functions, `docs/reimpl.md`); a statically linked MP3
+decoder library follows to 0x412c81, then the MSVC runtime from 0x412c90. Cite native addresses in code
 comments, commits and notes.
