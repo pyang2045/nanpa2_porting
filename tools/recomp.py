@@ -273,7 +273,7 @@ class Lifter:
             # an oracle stops at the exits, at other jump units (pieces of
             # one handler split at its calls, src/game/ops_vm.c) and at its
             # call exits
-            stop = set(JUMP_EXITS) | (set(GAME_JUMP_OVERRIDES) - {e})
+            stop = (set(JUMP_EXITS) | set(GAME_JUMP_OVERRIDES)) - {e}
             self.oracle_body[e] = self.body(e, stop)
             self.jump_body |= self.oracle_body[e]
         for a, insn in self.insns.items():
@@ -288,14 +288,11 @@ class Lifter:
                     and a not in self.oracle_body[t] \
                     and not (t in GAME_JUMP_OVERRIDES and a in self.jump_body):
                 raise Unsupported('jump into reimplemented %x from %x' % (t, a))
-            if m == 'call' and t in GAME_JUMP_OVERRIDES:
-                raise Unsupported('call to opcode handler %x from %x' % (t, a))
-        # nor may the code before it fall into it (a call exit returns
-        # there: ret goes through dispatch)
-        for a, insn in self.insns.items():
-            if a + insn.size in GAME_JUMP_OVERRIDES and insn.mnemonic not in ('jmp', 'ret') \
-                    and not (insn.mnemonic == 'call' and a + insn.size in CALL_EXITS):
-                raise Unsupported('%x falls into opcode handler %x' % (a, a + insn.size))
+        # A call to a jump unit (the VM loop pieces entered by call: the
+        # entry 0x4060d4, 0x4061cd, the waits) and code falling into one
+        # (0x4060d4 into 0x4060f9) go through dispatch (lift, emit), where
+        # the override takes them; a call exit's return also comes back
+        # through dispatch (ret).
         for ra in CALL_EXITS:
             c = self.insns.get(ra - 5)
             if c is None or c.mnemonic != 'call' or c.operands[0].type != X.X86_OP_IMM:
@@ -532,8 +529,9 @@ class Lifter:
             ret = 'push32(0x%xu); ' % nxt
             if ops[0].type == X.X86_OP_IMM:
                 t = ops[0].imm
-                if nxt in CALL_EXITS:
-                    # the end of an opcode handler's oracle (see CALL_EXITS)
+                if nxt in CALL_EXITS or t in GAME_JUMP_OVERRIDES:
+                    # the end of an opcode handler's oracle (see CALL_EXITS),
+                    # or a jump unit entered by call (src/game/loop.c)
                     return ret + 'pc = 0x%xu; goto dispatch;' % t
                 if in_code(t) and t not in HLE_OVERRIDES:
                     return ret + 'goto L_%x;' % t
@@ -605,6 +603,10 @@ class Lifter:
                 self.unsupported.setdefault(str(e), []).append(a)
                 body = 'x86_trap(0x%xu, "unsupported: %s");' % (a, insn.mnemonic)
             if is_esp_load(insn):
+                body += ' pc = 0x%xu; goto dispatch;' % (a + insn.size)
+            elif a + insn.size in GAME_JUMP_OVERRIDES and insn.mnemonic not in ('jmp', 'ret'):
+                # falling into a jump unit (0x4060d4 into the loop head):
+                # through dispatch, to the override (or an oracle's stop)
                 body += ' pc = 0x%xu; goto dispatch;' % (a + insn.size)
             if a in PROBES:
                 body = 'x86_probe(0x%xu); ' % a + body

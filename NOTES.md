@@ -730,3 +730,99 @@ code change.
 - reimpl_status: 10,396 of 25,597 bytes replaced (40.6%, was 20.6%), 53 of 142 functions;
   game logic 6,600 bytes (25.8%): 9 functions and 67 opcode handlers; vm module 3,724 of
   4,295 bytes (86.7%). Handlers with native sub-ops count in full, so this is an upper bound.
+
+## 2026-11-08 (reimplementation stage 4: the VM loop, text output, animation)
+
+- 5731507: the harness changes the VM loop needed. recomp.py sends a call to a jump unit
+  and code that falls into one (0x4060d4 into 0x4060f9) through dispatch, and an oracle
+  no longer stops at its own entry when that is an exit. `x86_stop_at` never stops at
+  the first check. `x86_is_oracle_pc` accepts only a tagged game code address (the HLE
+  COM thunk 0x71000244 has the tag bit too, and was taken for an original). A call unit's
+  `native` predicate is honoured.
+- dce1208: `src/game/loop.c`, the VM loop as pieces split at its calls: entry 0x4060d4,
+  loop head 0x4060f9, 0x4060fe after the pump, 0x406124/0x406134 after the button tests,
+  the fetch 0x40616e (probe kept), blocks 0x4061c2/0x4061cd/0x4061d3, text
+  0x406315/0x406383, input test 0x4074d5/0x4074db, frame wait 0x4075c6/0x4075d7, click
+  wait 0x406acc-0x406b02, and op 16's continuations 0x406abd/0x406ac7. `src/game/text.c`:
+  0x401900, 0x4063ee/0x406415, 0x406b24. `src/game/anim.c`: 0x403624, 0x403661, 0x403510
+  (sub-op 4 native), 0x406dff, 0x40752c. Native screen routines go through `game_ncall`.
+- Found by the long runs: 0x401900 leaves EDX = the scratch surface (0x401a2d
+  `mov edx, [0x4ab058]` before the first unlock). The unit has EDX as scratch, but a Big5
+  character with no delay ends its piece at the next piece (0x406383) with EDX live. A
+  20000-frame run gave 4,421 mismatches in 0x406124/0x406134. A quit inside 0x4074db must
+  set the flags before it unwinds.
+- 3556756: the fetch's dispatch tables held as 32-bit addresses were the exe's bytes at
+  0x40620b/0x406262 (ctest no_game_bytes). They are now 16-bit offsets. diffcapture now
+  checks op 0c 0x4064d9. 0x4037fc is no longer compared as a unit: the C handlers call it
+  directly, and the bot's evaluation at the fetch probe now runs inside a compare.
+- ff7009c: docs/reimpl.md "Stage 4", re-notes.md (VM loop, text window, animation slots).
+- Under the diff the fetch probe fires twice per fetch (oracle, then C). This is harmless
+  for the bot, whose state updates are idempotent.
+- Results, explore runs with the online diff and poison. None had a trap, watchdog warning
+  or mismatch. Runs at 300000 frames:
+
+  | Build, commit | Seed (start) | Turbo | Frames | Reached | Mismatches |
+  |---|---|---|---|---|---|
+  | interp dce1208 | 31 (new game) | 8 | 300000 | Prologue to S37 (40 MES) | 0 |
+  | interp dce1208 | 33 (new game) | 8 | 300000 | Prologue to S38 (42 MES) | 0 |
+  | interp dce1208 | 42 (seed 32's saves) | 2 | 300000 | Prologue, OPEN1 at 277010, 40.MES at 286513 (66 MES) | 0 |
+  | interp dce1208 | 43 (seed 32's saves) | 2 | 300000 | main game: 40.MES at 11355, 41, TOWN at 95486, ends at 35.MES (16 MES) | 0 |
+
+  Shorter runs:
+
+  | Build, commit | Seed (start) | Turbo | Frames | Reached | Mismatches |
+  |---|---|---|---|---|---|
+  | interp dce1208 | 42 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
+  | interp dce1208 | 43 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
+  | recomp dce1208 | 44 (seed 32's saves) | 8 | 150000 | 17 MES, ends at OPEN1 | 0 |
+  | recomp dce1208 | 45 (seed 32's saves) | 2 | 150000 | main game: 40.MES at 76691, TOWN at 121456, ends at 42.MES | 0 |
+  | interp 3556756 | 34 (new game) | 8 | 100000 | Prologue to S7 | 0 |
+
+  At turbo 8 with the diff, seeds 42 and 43 never left OPEN1. Stage 3's seed 43 did, so
+  the main-game criterion is not met at turbo 8. The likely cause is the bot, not the C:
+  - the timer is real time and the diff runs the whole loop twice;
+  - seed 31 reaches S5 at frame 23953 plain against 33395 with the diff (stage 3: 23258
+    and 26758);
+  - the bot times its clicks in frames;
+  - plain at turbo 8 (seed 42) and with the diff at turbo 2 (seeds 42, 43, 45), the same
+    saves reach the main game.
+- Compared calls over the nine diff runs:
+  - loop head and pump piece 7.5 M;
+  - button tests;
+  - input test 5.9 M;
+  - frame wait 7.2 M;
+  - Big5 characters 466 k, ASCII 13 k;
+  - blocks 418 k;
+  - click wait 236 k;
+  - slot interpreter 2358 (through 0x403510 sub-op 4);
+  - VM entry once per run;
+  - op 16's click continuation 2.
+
+  Not exercised:
+  - 0x4061c2 (a bare 01 block as a statement);
+  - the click handler path 0x40613f;
+  - ext 20.
+
+  The called units 0x401900, 0x403624, 0x4063ee, 0x406b24, 0x406dff and 0x40752c are
+  compared as part of their pieces. The sabotage shows this works: 0x4063ee writing x ^ 1
+  gave 1222 mismatches in 1237 calls of 0x406383 (reverted).
+- Pacing: the C units' charges total 0.9993-1.0008 of the original's per run, 1.0001 over
+  the 300000-frame runs. Per piece they agree to 0.1 instruction, except the VM entry: 102
+  against 103, once.
+- Lockstep, recomp, seed 9, 120000 frames: 167.6 M instructions compared, 0 dropped, no
+  divergence. Stage 3 had 1.62 G; the loop is C now.
+- ctest: 9 of 9 on the interp build (no_game_bytes, diffcapture) and on the recomp build
+  (lockstep), on 3556756.
+- reimpl_status: 12,902 of 25,597 bytes (50.4%, was 40.6%), 66 of 142 functions; game
+  logic 9,106 bytes (35.6%, was 25.8%): 17 functions and 88 opcode handlers and pieces.
+  Modules vm, anim, text and expr are at 100%. This is an upper bound, for two reasons:
+  - 19 functions (2,707 bytes) that it counts as replaced are still run natively through
+    `ncall` from the C: blits, fill, palette, file load and save, picture load 0x406e20,
+    the map dispatcher 0x403a70, cursor and fades. Without them, 10,195 bytes (39.8%).
+  - Handlers with native sub-ops count in full.
+
+  reimpl_status should take ncall targets as roots.
+- Not done:
+  - the click handler path 0x40613f-0x40616c and ext 20 0x4070bc (never reached; left
+    native by predicates, and the C traps if it gets there without them);
+  - 0x403510 sub-op 4 (spins on the frame counter).

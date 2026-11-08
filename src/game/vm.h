@@ -106,6 +106,14 @@ uint32_t vm_skip_block(uint32_t pc);
  * argument 0, see re-notes.md). */
 uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax);
 
+/* `call addr` into native game code, an import or an HLE routine, with the
+ * CPU as it is: the callee runs on the emulated stack and leaves the CPU
+ * as it does. The caller pushed the arguments; `popped` of them are the
+ * callee's to pop (stdcall), the rest the caller's. Traps if the stack
+ * does not come back to that. No callee used so may leave by the VM's
+ * stack reset (0x40638d). */
+void game_ncall(uint32_t addr, uint32_t popped);
+
 /* Register-level entry points (src/game/units.c). */
 void game_skip_block_regs(void);   /* 0x4061d4 */
 void game_vm_init_regs(void);      /* 0x406395 */
@@ -140,6 +148,8 @@ uint32_t game_op_call_label_done(void);  /* 13 0x40666b */
 uint32_t game_op_call_offset(void);      /* 14 0x406a9a */
 uint32_t game_op_call_offset_done(void); /* 14 0x406aa7 */
 uint32_t game_op_delay(void);            /* 16 0x406aad */
+uint32_t game_op_delay_done(void);       /* 16 0x406abd */
+uint32_t game_op_delay_click_done(void); /* 16 0x406ac7 */
 uint32_t game_op_print_number(void);      /* 15 0x4069ce */
 uint32_t game_op_print_number_done(void); /* 15 0x4069f7 */
 void game_format_number_regs(void);       /* 0x4069fd */
@@ -192,6 +202,46 @@ int game_native_misc(void);
 int game_native_anim(void);
 int game_native_palette(void);
 int game_native_map(void);
+
+/* ---- src/game/loop.c: the VM loop, blocks, text, waits (stage 4) ---- */
+uint32_t game_vm_entry(void);           /* 0x4060d4 */
+uint32_t game_vm_loop(void);            /* 0x4060f9 */
+uint32_t game_vm_pumped(void);          /* 0x4060fe */
+uint32_t game_vm_click_tested0(void);   /* 0x406124 */
+uint32_t game_vm_click_tested1(void);   /* 0x406134 */
+uint32_t game_vm_block_done(void);      /* 0x4061c2 */
+uint32_t game_vm_run_block(void);       /* 0x4061cd */
+uint32_t game_vm_block_return(void);    /* 0x4061d3 */
+uint32_t game_vm_string_next(void);     /* 0x406315 */
+uint32_t game_vm_big5_next(void);       /* 0x406383 */
+uint32_t game_input_test(void);         /* 0x4074d5 */
+uint32_t game_input_tested(void);       /* 0x4074db */
+uint32_t game_wait_frames(void);        /* 0x4075c6 */
+uint32_t game_wait_frames_pumped(void); /* 0x4075d7 */
+uint32_t game_wait_click(void);         /* 0x406acc */
+uint32_t game_wait_click_framed(void);  /* 0x406adf */
+uint32_t game_wait_click_tested(void);  /* 0x406ae6 */
+uint32_t game_wait_click_release_framed(void); /* 0x406afb */
+uint32_t game_wait_click_release_tested(void); /* 0x406b02 */
+int game_native_click0(void);
+int game_native_click1(void);
+
+/* ---- src/game/text.c ---- */
+void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
+                    uint32_t bg);       /* 0x401900 */
+void game_draw_char_regs(void);
+void game_text_advance(void);           /* 0x4063ee */
+void game_text_newline(void);           /* 0x406415 */
+void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
+
+/* ---- src/game/anim.c ---- */
+void game_anim_step(void);              /* 0x403624 */
+void game_anim_run_slot(void);          /* 0x403661, ESI = slot offset */
+void game_anim_control_regs(void);      /* 0x403510, EAX sub-op, EBX slot */
+int game_native_anim_control(void);
+void game_anim_reset(void);             /* 0x406dff */
+void game_palette_copy(uint32_t src);   /* 0x40752c */
+void game_palette_copy_regs(void);
 
 static inline uint32_t vm_script_byte(uint32_t pc)
 {

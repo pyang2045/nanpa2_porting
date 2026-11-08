@@ -153,7 +153,7 @@ uint32_t game_op_clear_text(void)
 	if (cpu.r[ECX])
 		cpu.r[EBX] = cpu.r[EAX] = a << 4;
 	X86_COUNT(5);
-	ncall(0x406b24);
+	game_clear_text_window();
 	return loop_at(0x406b1f);
 }
 
@@ -483,7 +483,7 @@ uint32_t game_op_anim(void)
 	cpu.r[ECX] = rd16(ARG(2));
 	cpu.r[EDX] = rd16(ARG(3));
 	X86_COUNT(5);
-	ncall(0x403510);
+	game_anim_control_regs();
 	cpu.r[ESI] = esi;
 	X86_COUNT(1);
 	return loop_at(0x4070b7);
@@ -500,7 +500,7 @@ uint32_t game_op_map(void)
 	X86_COUNT(2);
 	if (a == 5 || a == 4) {
 		push32(a);
-		ncall(0x406dff);
+		game_anim_reset();
 		cpu.r[EAX] = pop32();
 		X86_COUNT(2);
 	}

@@ -279,7 +279,7 @@ static uint32_t timed_hle_jump(uint32_t pc)
 void x86_interp(uint32_t pc)
 {
 	x86_interp_init();
-	if (pc != X86_RET_SENTINEL && (pc & X86_ORACLE_TAG)) {
+	if (x86_is_oracle_pc(pc)) {
 		/* the original of a reimplemented function (NANPA2_DIFF) */
 		pc &= ~X86_ORACLE_TAG;
 		if (pc - CODE_START >= CODE_LEN || x86_interp_override[pc - CODE_START] < OVR_GAME)

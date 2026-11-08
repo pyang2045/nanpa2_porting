@@ -156,6 +156,20 @@ negative heights, i.e. em heights 15/24/32, weights 700/700/400, charset CHINESE
 cells are 16/24/32 for ems 15/24/32. ASCII uses the same N x N cell at 8-pixel columns, so a
 glyph wider than 8 pixels is overwritten by the next character's cell.
 
+Exact behaviour (reimplemented in src/game/text.c): the string is built in ECX's save slot
+(the char's bytes over ECX's low bytes), so ECX returns as that dword; the DC comes from the
+scratch surface's GetDC (vtable +0x44) and goes back through ReleaseDC (+0x68); the cell copy
+locks the scratch surface, then the screen (0x401190, which hides the cursor on the
+screen), and unlocks them in the same order (0x4012b0, which redraws it), so EDX returns as
+the scratch surface object unless the cursor redraw changes it. The window and cursor,
+u16 each unless noted: 0x4452e8/ea/ec/ee left, top, right, bottom (x in 8-pixel columns, y
+in pixels), 0x4452f0/f2 cursor x, y, u8 0x4452f8 line height, u8 0x4452f9 character width
+in columns, u8 0x4452f6 the Big5 size, 0x4452de (@[8]) the delay after each character
+(0x4075c6 with ECX = it, so v/4 + 1 frames; 0 none). 0x4063ee advances x by the width and
+takes a new line when x + width - 2 >= right; the newline 0x406415 (also Big5 A1BE) sets
+x = left, y += height, and y = top when y + height - 2 >= bottom. 0x406b24 fills the window
+on surface @[6] with colour EBX (0x4017b0) and homes the cursor.
+
 Port fonts (not game data, read from the system): Apple LiSung Light (`AppleLiSung-Light.ttf`,
 a macOS download under `/System/Library/AssetsV2/com_apple_MobileAsset_Font8/<hash>.asset/
 AssetData/`) has Apple `bloc`/`bdat` tables (same layout as OpenType EBLC/EBDT) with 1-bit
@@ -294,6 +308,26 @@ Set up by 0x406395 (called before every MES file runs):
 
 So the register letters are one more than an index from `A`: `S` (0x53) is register 0x13.
 
+### The VM loop (0x4060d4, reimplemented in src/game/loop.c)
+
+0x4060d4: push ebp, [0x445cdc] = ESP (the top-level frame), VM init 0x406395, load the MES
+file named at 0x444e78 into the script image, ESI = its first word. Then each pass at
+0x4060f9: pump 0x401bf0 (0: WM_QUIT, `mov esp, [0x445cdc]; pop ebp; ret` at 0x40638d),
+the animation step 0x403624, and unless bit 2 of @[9] (0x4452e0) or a click handler is
+running (0x445ce1), the button tests 0x4074d5 (AL 0 then 1): a button down whose handler
+(0x445ce2/ce4, set by ext 0x20) is set waits for the release and runs the handler's block
+(0x40613f-0x40616c); a button down without one skips straight to the fetch. The fetch
+0x40616e: 00 and 02 end the block (`inc esi`; at the top level, ESP = [0x445cdc], the VM
+ends; else `ret` with AL = 0 and EAX's upper bytes ESP's); 01 pushes ESI, runs the block
+(0x4061cd: `inc esi; call 0x4060f9`), pops ESI back to the 01, skips the block with
+0x4061d4 and loops; 04 xx indexes table 0x406262 with xx - 0x10; 06 starts ASCII text
+(each byte drawn at size 0 until 06); a byte from 0x80 and the next are one Big5
+character; bytes below 9 and from 0x20 end the VM; 09-1f index table 0x40620b with op -
+0x0a (09 and 1b-1f fall outside it). The input test 0x4074d5 pumps (WM_QUIT ends the VM)
+and tests [0x445d8f] against 0x10, 0x20, 1, 2, 4, 8 for AL 0-5 (ZF set: up). The click wait
+0x406acc returns as soon as Ctrl is down (bit 0x40, tested each round), else waits frame by frame (0x4075c6,
+ECX = 1) for input 0 down and then up.
+
 ### Script expressions: exact semantics (0x4037fc, reimplemented in src/game/expr.c)
 
 The evaluator is called (`call 0x4037fc`) with ESI = script offset of the first token and
@@ -431,6 +465,25 @@ backward and polls; each loop over a 02 list polls at its own backward jump.
 | 04 1d | 0x406e11 | [name]: picture to surface @[6] (0x406e20; no argument: the one at 0x4662be) |
 | 04 24 / 04 25 | 0x4073a5 / 0x4073cd | music (0x402cb0 / stop 0x4032c0) / voice clip (0x403360) |
 | 04 26 | 0x4073ee | n, args: map sub-op n through 0x403a70 with ESI = the argument values, S = AX after; 4 and 5 first reset the slots (0x406dff) |
+
+### Animation slots (0x403510, 0x403624, 0x403661; reimplemented in src/game/anim.c)
+
+Ten slots of 24 bytes at 0x4312cc: u8 state (0 stopped, 1 stop at the next mark, 0xff
+running), u8 delay, u8 loop counters A and B, u32 first instruction, u32 next instruction,
+u32 loop starts A and B, u16 x and y (set by sub-op 5, never read). The ANI file (04 1c to
+0x4a62be) holds from its byte 1 a u16 offset per script; scripts, rectangles and palettes are offsets
+from 0x4a62be. 0x403624 runs once a frame (u32 0x4313bc = the last frame) unless bit 1 of
+@[9]: each slot in order through 0x403661, which returns for a stopped slot, counts a delay
+down, or runs instructions until one that ends the slot's frame: 00 stop; 01 mark (stops a
+slot in state 1); 02 n delay n frames; 03 restart; 04 n / 06 n loop A / B n times from
+here; 05 / 07 next A / B (back while the counter is nonzero); 08 off / 09 off copy / masked
+copy (colour 8 transparent) the rectangle record {x0, y0, w, h, dx, dy} at off from surface
+1 to 0 (0x401430 / 0x4014f0); 0a off the palette at off (16 + 240 u16 into 0x44530c and
+0x445eae, 0x40752c), uploaded with 0x401ca0. 08-0a go on in the same frame. 0x403510 (EAX
+sub-op, EBX slot): 0 ECX = n load script n stopped; 1 start; 2 stop at the next mark if
+running; 3 stop; 4 start and wait (spinning on the frame counter) until it stops; 5 x, y;
+6 slots 1-7 stop at their next mark; 7 every slot stopped at the idle script 0x4313c0
+(0x406dff: sub-op 7 with slot 0).
 
 ## Main game scenes (OPEN1.MES, 40.MES): hotspots and the right-click menu
 

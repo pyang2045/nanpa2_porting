@@ -17,13 +17,19 @@ int x86_stop_started;
 int x86_stop_at(uint32_t pc)
 {
 	uint32_t esp = cpu.r[ESP];
+	/* never at the first check: that is the oracle's own entry, which may
+	 * be an exit (the loop head 0x4060f9) or lie above the stop ESP (the
+	 * VM entry 0x4060d4 stops a word below, after its push ebp) */
+	if (!x86_stop_started) {
+		x86_stop_started = 1;
+		return 0;
+	}
 	int stop = esp > x86_stop_esp;
 	if (esp == x86_stop_esp) {
 		for (const uint32_t *e = x86_stop_exits; e && *e; e++)
 			stop |= *e == pc;
-		/* another jump unit (or this one again), not at the first check:
-		 * that is the oracle's own entry */
-		for (const uint32_t *e = x86_stop_units; x86_stop_started && e && *e; e++)
+		/* another jump unit (or this one again) */
+		for (const uint32_t *e = x86_stop_units; e && *e; e++)
 			stop |= *e == pc;
 	} else if (esp < x86_stop_esp && x86_stop_calls) {
 		/* a call exit: the callee's entry with the return address on top
@@ -33,7 +39,6 @@ int x86_stop_at(uint32_t pc)
 		for (const uint32_t *c = x86_stop_calls; *c; c += 2)
 			stop |= c[0] == pc && c[1] == ra;
 	}
-	x86_stop_started = 1;
 	if (stop) {
 		x86_stop_pc = pc;
 		x86_stop_esp = 0;

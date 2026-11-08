@@ -311,7 +311,11 @@ int game_call(uint32_t addr)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
-	if (mode == MODE_ORACLE) {
+	if (mode == MODE_ORACLE || (u->native && u->native())) {
+		/* inside an original, or a case the C side leaves to the
+		 * original (it waits on the timer): the lifted body */
+		if (mode == MODE_OFF && stats)
+			stats[u - game_units].native_runs++;
 		push32(X86_RET_SENTINEL);
 		x86_exec(X86_ORACLE_TAG | addr);
 		return 1;
