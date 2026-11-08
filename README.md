@@ -7,7 +7,7 @@ Linux and Windows. It needs your own copy of the game CD; no game data is in thi
 ## Status
 
 Playable from boot through the full Prologue and into the first town. Working: boot, the
-`LOGO.AVI` intro, name entry, the full Prologue, OPEN1 and walking around the town, save and
+`LOGO.AVI` intro (off by default, `--logo`), name entry, the full Prologue, OPEN1 and walking around the town, save and
 load, MP3 music and Chinese voice, the Metal FD Trinitron CRT shader (window and fullscreen), pacing
 at 486 speed, and a macOS `.app` bundle. See `NOTES.md` for the dated log.
 
@@ -36,6 +36,11 @@ Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` 
 ./build/nanpa2 --game game        # play
 ./build/nanpa2 --view             # picture viewer: Left/Right, Esc
 ```
+
+At launch the game shows two openings: `LOGO.AVI`, the Taiwan publisher's movie (15 seconds), then ELF's own animated logo (`start.mes`), followed by the title. The port
+skips the publisher movie by default, from the binary and from the `.app`; `--logo` (or
+`NANPA2_LOGO=1`) plays it, and a key or click skips it as in the original. `--no-logo` is
+still accepted.
 
 Without `--game` the game folder is looked up in this order: `NANPA2_GAME_DIR`; the folder
 remembered from an earlier choice; next to the executable or the `.app`, or in a `game` folder

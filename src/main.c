@@ -11,7 +11,9 @@
  *   --cpu-mips N (or NANPA2_CPU_MIPS=N)                 emulated CPU speed, 0 = unthrottled
  *   --no-crt                                            plain pixels (F12 toggles)
  *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
- *   --no-logo                                           skip LOGO.AVI
+ *   --logo (or NANPA2_LOGO=1)                           play the LOGO.AVI publisher
+ *                                                       movie (skipped by default;
+ *                                                       --no-logo is accepted)
  *   --window WxH                                        initial window size (points)
  *   --fullscreen                                        start fullscreen
  *                                                       (Alt+Enter, Cmd+F toggle)
@@ -250,6 +252,8 @@ int main(int argc, char **argv)
 			crt = 0;
 		else if (!strcmp(argv[i], "--logo-frame") && i + 1 < argc)
 			logo_frame_n = atoi(argv[++i]);
+		else if (!strcmp(argv[i], "--logo"))
+			SDL_setenv("NANPA2_LOGO", "1", 1);
 		else if (!strcmp(argv[i], "--no-logo"))
 			SDL_setenv("NANPA2_LOGO", "0", 1);
 		else if (!strcmp(argv[i], "--window") && i + 1 < argc)

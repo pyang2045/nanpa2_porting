@@ -11,8 +11,17 @@
  * Here the AVI is parsed directly: video is Cinepak (src/cinepak.c), shown
  * at the stream rate through present_frame_rgb; audio is PCM, queued on an
  * SDL audio device of its own (the game's sound device is opened later, by
- * 0x402ad0). Scripted runs (NANPA2_INPUT or NANPA2_SHOT_DIR) skip it so
- * their timings stay valid; NANPA2_LOGO=0/1 forces it off/on. */
+ * 0x402ad0).
+ *
+ * LOGO.AVI is the publisher's movie (15 s); the game's own
+ * ELF logo animation follows from start.mes (ELF.GP4/ELF.ANI, then
+ * START1.MES, the title). The movie is skipped unless asked for (--logo or
+ * NANPA2_LOGO=1; NANPA2_LOGO=0 / --no-logo keep it off). Skipping leaves
+ * the same state as playing: the caller 0x402166 ignores the return value
+ * (add esp, 4; call 0x402620), 0x4ac4f8 ends 0 either way, and the timer,
+ * palette, 8-bit mode and sound device are all set up afterwards by
+ * 0x402620. The native ShowCursor(0) / SetWindowPos have no lasting effect
+ * here (the cursor is drawn by the game from MOUSE.DAT). */
 #include "logo.h"
 
 #include <SDL.h>
@@ -159,9 +168,7 @@ static SDL_AudioDeviceID open_audio(const struct avi *a)
 static int wanted(void)
 {
 	const char *e = getenv("NANPA2_LOGO");
-	if (e)
-		return atoi(e) != 0;
-	return !getenv("NANPA2_INPUT") && !getenv("NANPA2_SHOT_DIR");
+	return e && atoi(e) != 0; /* off by default */
 }
 
 void logo_play(void)

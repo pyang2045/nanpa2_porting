@@ -418,3 +418,18 @@ code change.
   renders of the same glyph strip at 32 px showed ridge strokes too thin for the 32 px
   weight-400 font (no bold, no LiSung strike), so outlines from em 28 up keep the plain
   threshold (`RIDGE_MAX_EM`, follow-up commit).
+
+## 2026-11-08 (opening: publisher movie skipped by default)
+
+- The game shows two openings at launch: `LOGO.AVI`, the Taiwan publisher's movie (451 frames, 15 s; native 0x401e20, one caller, WinMain 0x402166), then ELF's
+  animated logo, run by `start.mes` (0x4060d4; `elf.gp4` + `elf.ani`, then `start1.mes`).
+  It was not one video played twice: `logo_play` replaces 0x401e20 and the MCI path in
+  win32.c is never reached.
+- 0e3be74: the publisher movie is skipped by default (binary and `.app`); `--logo` or
+  `NANPA2_LOGO=1` plays it, `--no-logo` still works. Same state either way: 0x402166 drops
+  EAX (`add esp, 4; call 0x402620`), 0x4ac4f8 ends 0, and 0x402620 then sets the 8-bit mode,
+  palette, sound device and 16 ms timer.
+- Checked: headless launch shows the ELF animation from about 1 s, then name entry (empty
+  save); frame counter 247 at 6 s and 633 at 12 s, no warnings. With `--logo` the log reads
+  "LOGO.AVI: ended after 451 of 451 frames" and the game's frame counter stays at 0 until it
+  ends. ctest: smoke, selftest, selftest_dir, wavcheck pass.

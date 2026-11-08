@@ -133,6 +133,14 @@ MM_MCINOTIFY (0x3b9) with wParam 1, or WM_KEYDOWN / WM_LBUTTONDOWN / WM_RBUTTOND
 Afterwards `stop vfw wait`, `close vfw wait`, the old window procedure and full-screen size
 are restored. Port: `src/cinepak.c` (decoder), `src/hle/logo.c` (player).
 
+Content: the Taiwan publisher's logo. It is the first of two openings; the
+second is ELF's animated logo, run by `start.mes` (loads `mouse.dat`, `elf.gp4`, `elf.ani`,
+then jumps to `start1.mes`, the title). 0x401e20 has one caller, WinMain 0x402166 (`push
+0x431134` "LOGO.AVI"; `call 0x401e20`; `add esp, 4`; `call 0x402620`), which ignores EAX.
+Its only global is 0x4ac4f8 (the play loop flag), 0 on return. Display mode, palette, sound
+device and the 16 ms timer are all set up afterwards by 0x402620, so skipping the movie
+leaves the game in the same state.
+
 ## Text routine (0x401900)
 
 cdecl (char, x, y, size, fg, bg); called from the script VM at 0x4062ff (ASCII, size 0) and
