@@ -123,18 +123,6 @@ int game_native_misc(void) /* 19: sub-op 4 is the dissolve wipe */
 	return !literal_arg0(&v) || v == 4 || v > 5;
 }
 
-int game_native_anim(void) /* 1a: sub-op 4 runs a slot to its end */
-{
-	uint32_t v;
-	return !literal_arg0(&v) || v == 4 || v > 7;
-}
-
-int game_native_palette(void) /* 04 16: mode 3 fades and spins on the timer */
-{
-	uint32_t v;
-	return !literal_arg0(&v) || v == 3;
-}
-
 int game_native_map(void) /* 04 26: sub-ops 5, 7 and 12 pump messages */
 {
 	uint32_t v;
@@ -160,7 +148,7 @@ uint32_t game_op_clear_text(void)
 
 /* 04 17 / 04 18 x0 y0 x1 y1: fill (0x4017b0) or XOR (0x401870) the
  * rectangle of surface @[6] with the text colour. */
-static uint32_t colour_rect(uint32_t fn, uint32_t exit_pc)
+static uint32_t colour_rect(void (*fn)(void), uint32_t exit_pc)
 {
 	parse();
 	uint32_t eax = rd16(SURFACE_SELECT);
@@ -169,19 +157,19 @@ static uint32_t colour_rect(uint32_t fn, uint32_t exit_pc)
 	push32(eax);
 	push_rect(eax);
 	X86_COUNT(20);
-	ncall(fn);
+	fn();
 	drop(6);
 	return loop_at(exit_pc);
 }
 
 uint32_t game_op_fill_rect(void)
 {
-	return colour_rect(0x4017b0, 0x406bc6);
+	return colour_rect(game_fill_rect, 0x406bc6);
 }
 
 uint32_t game_op_xor_rect(void)
 {
-	return colour_rect(0x401870, 0x406c1b);
+	return colour_rect(game_xor_rect, 0x406c1b);
 }
 
 /* 04 19 / 04 1a / 04 1b x0 y0 x1 y1 s dx dy d: copy (0x401430), swap
@@ -200,23 +188,23 @@ static void push_blit(void)
 	X86_COUNT(24);
 }
 
-static uint32_t blit(uint32_t fn, uint32_t exit_pc)
+static uint32_t blit(void (*fn)(void), uint32_t exit_pc)
 {
 	parse();
 	push_blit();
-	ncall(fn);
+	fn();
 	drop(7);
 	return loop_at(exit_pc);
 }
 
 uint32_t game_op_copy_rect(void)
 {
-	return blit(0x401430, 0x406c80);
+	return blit(game_blit_copy, 0x406c80);
 }
 
 uint32_t game_op_swap_rect(void)
 {
-	return blit(0x401670, 0x406ce5);
+	return blit(game_blit_swap, 0x406ce5);
 }
 
 /* With no arguments 04 1b draws the last picture's rectangle (0x44538a-
@@ -226,7 +214,7 @@ uint32_t game_op_masked_rect(void)
 	parse();
 	if (cpu.r[ECX]) {
 		push_blit();
-		ncall(0x4014f0);
+		game_blit_masked();
 		drop(7);
 		return loop_at(0x406d4e);
 	}
@@ -245,7 +233,7 @@ uint32_t game_op_masked_rect(void)
 	cpu.r[EAX] = eax;
 	cpu.r[ECX] = ecx;
 	X86_COUNT(16);
-	ncall(0x4014f0);
+	game_blit_masked();
 	drop(7);
 	return loop_at(0x406d86);
 }
@@ -343,7 +331,7 @@ uint32_t game_op_cursor(void)
 		X86_COUNT(3);
 		if (rd8(CURSOR_SHOWN))
 			return loop_at(0x40693d);
-		ncall(0x401c40);
+		game_cursor_show();
 		wr8(CURSOR_SHOWN, 1);
 		X86_COUNT(1);
 		return loop_at(0x40694f);
@@ -351,7 +339,7 @@ uint32_t game_op_cursor(void)
 		X86_COUNT(3);
 		if (!rd8(CURSOR_SHOWN))
 			return loop_at(0x40695b);
-		ncall(0x401c60);
+		game_cursor_hide();
 		wr8(CURSOR_SHOWN, 0);
 		X86_COUNT(1);
 		return loop_at(0x40696d);
@@ -365,7 +353,7 @@ uint32_t game_op_cursor(void)
 		push32(eax);
 		cpu.r[EAX] = eax;
 		X86_COUNT(6);
-		ncall(0x401c80);
+		game_cursor_setpos();
 		drop(2);
 		return loop_at(0x406989);
 	}
@@ -393,26 +381,47 @@ uint32_t game_op_cursor(void)
 
 /* 04 16 n [v]: the palette. 2: set it now (0x401ca0) from the picture's
  * palette, or with v from all entries = v (0x40754d); the tables are saved
- * before (0x40756c) and restored after (0x407599). 3 (fade and wait) is
- * left to the native handler; others do nothing. */
+ * before (0x40756c) and restored after (0x407599). 3: the same, but fade
+ * to it (0x401d30) and wait until the timer has finished the fade
+ * (game_palette_wait_piece, 0x406f41); others do nothing. */
 uint32_t game_op_palette(void)
 {
 	uint32_t a = parse();
-	X86_COUNT(2);
-	if (a == 3)
-		x86_trap(0x406f10, "op 04 16 3 is left to the native handler, but reached C");
-	if (a != 2)
+	X86_COUNT(a == 2 ? 2 : 4); /* the compares with 2 and 3 */
+	if (a != 2 && a != 3)
 		return loop_at(0x406f13);
-	ncall(0x40756c);
+	X86_COUNT(1); /* call 0x40756c */
+	game_palette_save();
 	X86_COUNT(2);
 	if (rd8(VM_ARG_TYPES + 1) == VM_ARG_EXPR) {
 		cpu.r[EAX] = ax_(cpu.r[EAX], rd16(ARG(1)));
-		X86_COUNT(1);
-		ncall(0x40754d);
+		X86_COUNT(2);
+		game_palette_fill(cpu.r[EAX]);
 	}
-	ncall(0x401ca0);
-	ncall(0x407599);
+	if (a == 3) {
+		wr32(FADE_STEPS, 1);
+		X86_COUNT(2);
+		game_fade_start();
+		return 0x406f41;
+	}
+	X86_COUNT(2);
+	game_palette_upload();
+	game_palette_restore();
 	return loop_at(0x406f77);
+}
+
+/* 0x406f41: while the fade runs the native code asks again (a backward
+ * jump: game_jump polls for the piece that returns itself); then it puts
+ * the tables back. */
+uint32_t game_palette_wait_piece(void)
+{
+	cpu.r[EAX] = game_fade_active();
+	X86_COUNT(3);
+	if (cpu.r[EAX])
+		return 0x406f41;
+	game_palette_restore();
+	X86_COUNT(1);
+	return loop_at(0x406f4f);
 }
 
 /* 04 1c name, off: load a file into segment @[7] at off (0x401050). */
@@ -437,7 +446,7 @@ uint32_t game_op_load_file(void)
 uint32_t game_op_picture(void)
 {
 	parse();
-	ncall(0x406e20);
+	game_picture_load();
 	return loop_at(0x406e1b);
 }
 
@@ -473,19 +482,24 @@ uint32_t game_op_voice(void)
 }
 
 /* 1a n, slot, a, b: animation slot control 0x403510 (EAX sub-op, EBX
- * slot, ECX, EDX). Sub-op 4 (run to the end) is the native handler's. */
+ * slot, ECX, EDX), a call exit (0x4070b1, return 0x4070b6): the control
+ * is the jump unit game_anim_control_piece, which for sub-op 4 goes on in
+ * the wait loop 0x4035b5 until the slot has stopped. */
 uint32_t game_op_anim(void)
 {
-	uint32_t a = parse();
-	if (a == 4 || a > 7)
-		x86_trap(0x4070b1, "op 1a: sub-op left to the native handler reached C");
-	uint32_t esi = cpu.r[ESI];
+	parse();
+	push32(cpu.r[ESI]);
 	cpu.r[EBX] = rd16(ARG(1));
 	cpu.r[ECX] = rd16(ARG(2));
 	cpu.r[EDX] = rd16(ARG(3));
+	push32(0x4070b6);
 	X86_COUNT(5);
-	game_anim_control_regs();
-	cpu.r[ESI] = esi;
+	return 0x403510;
+}
+
+uint32_t game_op_anim_done(void) /* 0x4070b6 */
+{
+	cpu.r[ESI] = pop32();
 	X86_COUNT(1);
 	return loop_at(0x4070b7);
 }
@@ -549,7 +563,7 @@ static uint32_t misc_restore(void)
 	cpu.r[EDX] = edx;
 	push32(edx);
 	X86_COUNT(7);
-	ncall(0x406e20);
+	game_picture_load();
 	cpu.r[EDX] = pop32();
 	wr8(VM_FLAGS9, rd8(VM_FLAGS9) & 0xfe);
 	wr16(SURFACE_SELECT, cpu.r[EDX]);
@@ -568,12 +582,12 @@ static uint32_t misc_row_swap(void)
 	push32(rd32(0x44629e));
 	cpu.r[EAX] = off1;
 	X86_COUNT(9);
-	ncall(0x401190);
+	game_lock_regs();
 	drop(1);
 	uint32_t esi = cpu.r[EAX];
 	push32(rd32(0x4462a2));
 	X86_COUNT(2);
-	ncall(0x401190);
+	game_lock_regs();
 	drop(1);
 	uint32_t edi = cpu.r[EAX];
 	edi += pop32();
@@ -597,11 +611,11 @@ static uint32_t misc_row_swap(void)
 	cpu.r[ECX] = 0;
 	push32(rd32(0x44629e));
 	X86_COUNT(2);
-	ncall(0x4012b0);
+	game_unlock_regs();
 	drop(1);
 	push32(rd32(0x4462a2));
 	X86_COUNT(2);
-	ncall(0x4012b0);
+	game_unlock_regs();
 	drop(1);
 	return cpu.r[EAX];
 }
@@ -626,7 +640,7 @@ uint32_t game_op_misc(void)
 		X86_COUNT(3);
 		if (a & 0x8000) { /* js: a was 0 (or above 0x8000) */
 			cpu.r[EAX] = eax;
-			ncall(0x401d30);
+			game_fade_start();
 			eax = cpu.r[EAX];
 			X86_COUNT(1);
 		} else if (a == 0) {
@@ -636,7 +650,7 @@ uint32_t game_op_misc(void)
 				X86_COUNT(3);
 			} else {
 				cpu.r[EAX] = eax;
-				ncall(0x401e10);
+				game_fade_active();
 				eax = cpu.r[EAX];
 				X86_COUNT(1);
 			}

@@ -43,6 +43,10 @@ struct game_unit {
 	/* bits of EAX that stay compared although EAX is in scratch_regs (a
 	 * result in AL: the movers 0x404731...), 0 = none */
 	uint32_t eax_live;
+	/* a piece of a wait loop that returns its own address while it waits:
+	 * game_jump polls the timer (X86_POLL) for each such return, after the
+	 * comparison, because the compare holds the timer off */
+	int poll_self;
 };
 
 extern const struct game_unit game_units[];

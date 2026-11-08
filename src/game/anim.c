@@ -84,7 +84,7 @@ void game_palette_copy_regs(void)
 
 /* the blit of a rectangle record {x0, y0, w, h, dx, dy} (u16 each, the
  * surfaces in the cdecl's seventh argument as 0x100: surface 1 to 0) */
-static void blit(uint32_t fn, uint32_t rect)
+static void blit(void (*fn)(void), uint32_t rect)
 {
 	cpu.r[EDI] = rect;
 	push32(0x100);
@@ -93,7 +93,7 @@ static void blit(uint32_t fn, uint32_t rect)
 		push32(cpu.r[EAX]);
 	}
 	X86_COUNT(17);
-	game_ncall(fn, 0);
+	fn();
 	cpu.r[ESP] += 0x1c;
 	X86_COUNT(1);
 }
@@ -171,7 +171,7 @@ void game_anim_run_slot(void)
 		case ANI_MASKED: {
 			uint32_t rect = ANIM_DATA + rd16(pc);
 			cpu.r[EBX] = pc + 2;
-			blit(op == ANI_COPY ? BLIT_COPY : BLIT_MASKED, rect);
+			blit(op == ANI_COPY ? game_blit_copy : game_blit_masked, rect);
 			wr32(slot + SLOT_PC, cpu.r[EBX]);
 			X86_COUNT(2);
 			X86_POLL(op == ANI_COPY ? 0x403787 : 0x4037c8);
@@ -183,7 +183,7 @@ void game_anim_run_slot(void)
 			X86_COUNT(6);
 			game_palette_copy(cpu.r[EAX]);
 			X86_COUNT(2);
-			game_ncall(PALETTE_SET, 0);
+			game_palette_upload();
 			wr32(slot + SLOT_PC, cpu.r[EBX]);
 			X86_COUNT(2);
 			X86_POLL(0x4037ed);
@@ -241,16 +241,11 @@ void game_anim_step(void)
  *   1 start it from its first instruction;
  *   2 stop it at its next mark (if running);
  *   3 stop it now;
- *   4 start it and wait until it stops (the native code, which spins on
- *     the frame counter: game_native_anim_control);
+ *   4 start it and wait until it stops (the loop piece 0x4035b5,
+ *     game_anim_wait_piece, which waits on the frame counter);
  *   5 ECX, EDX = x, y (stored, unused);
  *   6 slots 1-7: stop each at its next mark (if running);
  *   7 all slots: stop and point at ANIM_IDLE (EAX = ANIM_IDLE). */
-int game_native_anim_control(void)
-{
-	return cpu.r[EAX] == 4;
-}
-
 void game_anim_control_regs(void)
 {
 	uint32_t op = cpu.r[EAX], n = cpu.r[EBX];
@@ -327,6 +322,48 @@ void game_anim_control_regs(void)
 	default:
 		x86_trap(0x40351a, "animation sub-op outside the native table");
 	}
+}
+
+/* 0x403510 as a jump unit, entered by the call of op 1a (the return
+ * address is on top of the stack): sub-op 4 starts the slot (0x4035a0) and
+ * goes on in the wait loop; the others do their work and `ret`. */
+uint32_t game_anim_control_piece(void)
+{
+	if (cpu.r[EAX] != 4) {
+		game_anim_control_regs();
+		X86_COUNT(1);
+		return pop32();
+	}
+	uint32_t n = cpu.r[EBX], s = n * ANIM_SLOT_SIZE, slot = ANIM_SLOTS + s;
+	cpu.r[EDI] = s;
+	cpu.r[EBX] = n << 4;
+	wr8(slot + SLOT_STATE, SLOT_RUNNING);
+	cpu.r[EAX] = rd32(slot + SLOT_START);
+	wr32(slot + SLOT_PC, cpu.r[EAX]);
+	cpu.r[ESI] = s;
+	X86_COUNT(5 + 4);
+	return 0x4035b5;
+}
+
+/* 0x4035b5: wait for a new frame, run the slot (ESI), and again until its
+ * state is stopped. Each time round the loop the native code takes a
+ * backward jump (which polls: game_jump does it for a piece that returns
+ * itself), then `ret`. */
+uint32_t game_anim_wait_piece(void)
+{
+	uint32_t frame = rd32(FRAME);
+	cpu.r[EAX] = frame;
+	X86_COUNT(3);
+	if (frame == rd32(ANIM_LAST_FRAME))
+		return 0x4035b5;
+	wr32(ANIM_LAST_FRAME, frame);
+	X86_COUNT(2);
+	game_anim_run_slot();
+	X86_COUNT(2);
+	if (rd8(ANIM_SLOTS + cpu.r[ESI] + SLOT_STATE))
+		return 0x4035b5;
+	X86_COUNT(1);
+	return pop32();
 }
 
 /* 0x406dff: reset all slots (sub-op 7, slot 0); ESI kept. */

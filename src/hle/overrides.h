@@ -216,7 +216,6 @@ HLE_GAME_CALL_EXIT(0x40704a, "op 04 1f: run the called file (0x4060f9)")
  * (src/game/text.c, anim.c); 0x403510 leaves sub-op 4 (run a slot to its
  * end, spinning on the frame counter) to the original */
 HLE_GAME_OVERRIDE(0x401900, "draw one character (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x403510, "animation slot control (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x403624, "animation step, once a frame (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x403661, "run one animation slot (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x4063ee, "text cursor advance (src/game/text.c)")
@@ -326,6 +325,25 @@ HLE_GAME_DEAD(0x405e5a, "map: flood case 5")
 HLE_GAME_DEAD(0x405ed0, "map: flood case 6")
 HLE_GAME_DEAD(0x405f24, "map: flood case 7")
 HLE_GAME_DEAD(0x405fb6, "map: approach cells")
+
+/* Stage 5B (src/game/anim.c, ops_sys.c): the slot control 0x403510 is a
+ * jump unit entered by the call of op 1a (call exit 0x4070b6); sub-op 4
+ * goes on in the wait loop 0x4035b5, a piece that returns itself while it
+ * waits (game_jump polls for it, as the native backward jump does) */
+HLE_GAME_JUMP(0x403510, "animation slot control (src/game/anim.c)")
+HLE_GAME_JUMP(0x4035b5, "animation slot wait loop (src/game/anim.c)")
+HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
+HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
+/* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
+HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
+
+/* Stage 5B (src/game/screen.c): the surface lock and unlock and the cursor
+ * restore, which native code (the map, the window procedure) still calls.
+ * The other screen routines (cursor draw, show, hide, blits, fill, XOR,
+ * palette, fades) are called only from C and have no override. */
+HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
+HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
+HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the

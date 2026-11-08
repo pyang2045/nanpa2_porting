@@ -120,11 +120,11 @@ void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t 
 	uint32_t screen = rd32(SURFACES);
 	push32(scratch);
 	X86_COUNT(3);
-	game_ncall(LOCK, 0);
+	game_lock_regs();
 	uint32_t src = cpu.r[EAX];
 	push32(screen);
 	X86_COUNT(4);
-	game_ncall(LOCK, 0);
+	game_lock_regs();
 	uint32_t dst = cpu.r[EAX] + rd32(PITCHES) * y + x;
 	cpu.r[ESP] += 8;
 	X86_COUNT(10);
@@ -148,11 +148,11 @@ void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t 
 	cpu.r[EDX] = scratch; /* 0x401a2d: mov edx, [0x4ab058]; push edx */
 	push32(scratch);
 	X86_COUNT(3);
-	game_ncall(UNLOCK, 0);
+	game_unlock_regs();
 	cpu.r[EAX] = rd32(SURFACES); /* 0x401a39: mov eax, [0x44629e]; push eax */
 	push32(cpu.r[EAX]);
 	X86_COUNT(3);
-	game_ncall(UNLOCK, 0);
+	game_unlock_regs();
 	cpu.r[ESP] = esp;
 	cpu.r[ECX] = rd32(str);
 	X86_COUNT(7);
@@ -224,7 +224,7 @@ void game_clear_text_window(void)
 	push32(a);
 	cpu.r[EAX] = a;
 	X86_COUNT(20);
-	game_ncall(FILL, 0);
+	game_fill_rect();
 	cpu.r[ESP] += 0x18;
 	X86_COUNT(2);
 }

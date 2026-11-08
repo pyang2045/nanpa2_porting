@@ -69,6 +69,7 @@ set(GAME_SOURCES
   src/game/map_path.c
   src/game/map_sprite.c
   src/game/map_fuzz.c
+  src/game/screen.c
   src/game/units.c
   src/game/trace.c
   src/game/diff.c
