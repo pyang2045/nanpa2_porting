@@ -435,9 +435,9 @@ static void paint(void)
 		COM(dd, DD_WAITVBLANK, 1, 0);
 	}
 	X86_COUNT(2);
-	game_ncall(0x4011f0, 0); /* cursor restore */
+	game_cursor_restore();
 	X86_COUNT(2);
-	game_ncall(0x4012e0, 0); /* cursor draw */
+	game_cursor_draw();
 }
 
 /* Under the harness's second run (the C after the original) the calls that

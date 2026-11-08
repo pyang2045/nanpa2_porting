@@ -62,7 +62,10 @@ set(GAME_SOURCES
   src/game/ops_vm.c
   src/game/loop.c
   src/game/text.c
-  src/game/anim.c src/game/file.c src/game/startup.c
+  src/game/anim.c
+  src/game/file.c
+  src/game/startup.c
+  src/game/screen.c
   src/game/units.c
   src/game/trace.c
   src/game/diff.c

@@ -33,6 +33,57 @@ So the script VM 0x4060d4 owns all opcode handlers reached through its jump tabl
 (3,765 bytes). About a third of the functions are hand-written assembly with register
 arguments.
 
+## Stage 5B: measurement, palette, screen routines, spin pieces (src/game/screen.c)
+
+**Measurement.** `tools/reimpl_status.py` used to count a function as replaced when nothing
+reachable from the roots called it, so routines that the C still runs through `game_ncall`
+counted as done. It now also takes as needed (a) every game address passed to `game_ncall` /
+`ncall` / `blit` / `colour_rect` in `src/game/*.c` (or a `#define` of one) and (b) the original body
+of every unit whose `native` predicate sends cases back to the native code (a body is walked
+from its entry, stopping at the VM fetch 0x40616e). A handler with a native case counts in
+full, so the figure is a lower bound for those. Stage 4's 50.4% became 36.9% at the first
+commit of this stage. The interpreter counts the instructions it runs in 0x401000-0x4077ac
+outside a differential oracle: `NANPA2_NATIVE_REPORT=1` prints the total and the functions
+(nearest entry: a call target seen, a unit, an `x86_call`/`ncall` entry) at exit, and the
+status file has `native_game_insns` with the top eight. A finished engine runs none. Spin
+loops weigh most: in a 5000-frame run 68 M of 97 M were 0x403510 sub-op 4 waiting for a
+frame and 25 M the fade wait of op 04 16 3.
+
+**Spin pieces.** The compare holds the timer off (`x86_poll_countdown = INT_MAX`), so a C
+loop that waits for the timer would hang under `NANPA2_DIFF`. A wait loop is a jump unit
+(`SPIN` in units.c, `poll_self`) that does one round and returns its own address while it must
+wait: `game_jump` then calls `X86_POLL` after the compare and the poison, once per round like the
+native backward jump. The oracle of a piece stops when it reaches a jump unit again, so one
+round is compared. Units: 0x4035b5 (slot control sub-op 4, entered from 0x403510, which is now
+a jump unit entered by op 1a's call exit 0x4070b6, `JUMP_SYS_R` keeps the argument registers
+live) and 0x406f41 (op 04 16 3 waiting for the fade flag 0x4ac504, which the HLE timer
+callback 0x4028c0 clears). Native fallbacks removed: 1a sub-op 4, 04 16 mode 3.
+
+**Palette** (`screen.c`): 0x40756c / 0x407599 save and restore the colour tables, 0x40754d
+fill, 0x401ca0 upload (SetEntries through the vtable), 0x401d30 fade start, 0x401e10.
+
+**Surfaces, cursor, rectangles** (`screen.c`): lock 0x401190, unlock 0x4012b0 and cursor
+restore 0x4011f0 are units (native code, the map and the window procedure, calls them); cursor
+draw 0x4012e0, show 0x401c40, hide 0x401c60, position 0x401c80, copy 0x401430, masked copy
+0x4014f0, swap 0x401670, fill 0x4017b0, XOR 0x401870 and picture load 0x406e20 are called from
+C only and compared as part of their callers. Their arguments are on the emulated stack at ESP
+exactly as for the native callee (a unit finds them there after `hle_call`), the COM methods
+go through the vtable with `game_ncall`, rectangles and DDBLTFX live in the native frame
+addresses (a register that holds a frame address, such as EDX after the fill, would
+otherwise differ), and the registers every routine leaves are the native ones: ECX's upper
+half is compared for every unit, which found the cursor restore leaving its width in ECX (it
+stores it over the saved ECX slot, `[esp+0xc]`).
+
+**Not done.**
+
+- The dissolve wipe 0x401a50 (op 19 sub-op 4: 128 passes, 2 frames apart, the pump between;
+  needs pieces with the frame in emulated memory at the native addresses, and no explore run
+  of 20000 frames reached it) and the click path 0x40613f-0x40616c (ext 20, never reached) stay
+  native, with their predicates.
+- File load/save, startup and the window procedure: see "Stage 5B: file, input, startup".
+- Map: 04 26 sub-ops 5, 7, 12 and 0x403a70 belong to the map module (not touched). 0x40609c
+  (module input, called only by the map code) is left to it too.
+
 ## Inventory by module
 
 From `tools/reimpl_status.py` (2026-11-08, after stage 1):
