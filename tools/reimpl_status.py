@@ -7,7 +7,8 @@ Game code is what tools/recomp.py lifts (0x401000-0x4077a0; the MP3 decoder
 library after it and the MSVC runtime from 0x412c90 are not lifted). The
 code is walked twice from the same roots (WinMain, the window procedures, the
 code pointers in .data), once with no overrides and once with
-recomp.HLE_OVERRIDES (which includes GAME_OVERRIDES) as barriers; jump
+recomp.HLE_OVERRIDES (which includes GAME_OVERRIDES and the opcode handlers
+of GAME_JUMP_OVERRIDES) as barriers; jump
 tables are followed only from a reachable indirect jump. Bytes reachable in
 the first walk but not the second are no longer needed: replaced. Lifted
 oracle copies of reimplemented functions do not count as needed.
@@ -227,7 +228,7 @@ def main():
     if args.list:
         for h in heads:
             f = funcs[h]
-            ov = 'game' if h in recomp.GAME_OVERRIDES else 'hle' if h in recomp.HLE_OVERRIDES else \
+            ov = 'game' if h in recomp.ORACLES else 'hle' if h in recomp.HLE_OVERRIDES else \
                 'dead' if not f['live'] else ''
             print('| 0x%06x | %d | %s | %s | %s | %s | %s |%s' % (
                 h, f['bytes'], mods.get(h, '?'), purpose.get(h, ''),
@@ -245,11 +246,12 @@ def main():
     nrep = sum(1 for f in funcs.values() if done(f))
     print('replaced:  %d bytes (%.1f%%), %d functions (%.1f%%)' % (
         total - left, 100.0 * (total - left) / total, nrep, 100.0 * nrep / len(heads)))
-    hle_only = w.walk(set(recomp.HLE_OVERRIDES) - set(recomp.GAME_OVERRIDES))
+    hle_only = w.walk(set(recomp.HLE_OVERRIDES) - recomp.ORACLES)
     hb = total - sum(i.size for a, i in hle_only.items())
     print('  by HLE overrides (sound, timer, pump, decompressor, logo): %d bytes' % hb)
-    print('  by the reimplemented game logic (src/game, %d units): %d bytes (%.1f%%)' % (
-        len(recomp.GAME_OVERRIDES), total - left - hb, 100.0 * (total - left - hb) / total))
+    print('  by the reimplemented game logic (src/game, %d functions and %d opcode handlers):'
+          ' %d bytes (%.1f%%)' % (len(recomp.GAME_OVERRIDES), len(recomp.GAME_JUMP_OVERRIDES),
+                                  total - left - hb, 100.0 * (total - left - hb) / total))
     print()
     print('%-12s %5s %5s %7s %7s %6s' % ('module', 'funcs', 'done', 'bytes', 'done', '%'))
     per = {}
