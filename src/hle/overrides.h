@@ -259,6 +259,12 @@ HLE_GAME_JUMP(0x4035b5, "animation slot wait loop (src/game/anim.c)")
 HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
 HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
 
+/* Stage 5B startup/input/file (src/game/file.c): the file routines, called
+ * by the C pieces directly and by native code (the map module, WinMain) */
+HLE_GAME_OVERRIDE(0x401000, "open a game file (src/game/file.c)")
+HLE_GAME_OVERRIDE(0x401050, "load a game file (src/game/file.c)")
+HLE_GAME_OVERRIDE(0x401160, "save a file (src/game/file.c)")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the

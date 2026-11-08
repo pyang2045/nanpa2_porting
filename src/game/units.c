@@ -3,6 +3,7 @@
 #include <stddef.h>
 
 #include "game/expr.h"
+#include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -46,6 +47,10 @@
 #define SPIN(addr, name, fn, scratch) \
 	{ addr, name, NULL, fn, scratch, 0, NULL, 1, 0, 1 }
 
+/* Stage 5B startup/input/file: file access. They scratch the C runtime's
+ * cdecl registers; EBX, ESI, EDI, EBP are kept */
+#define FILE_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX))
+
 /* Where the fetch dispatches to: handlers (EDX reaches the native map
  * code of 04 26, EAX is the opcode index), the end of a block (`ret` with
  * AL, ECX's and EDX's upper halves), the frame wait (ECX) or the input
@@ -56,6 +61,10 @@
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
  * at each function. */
 const struct game_unit game_units[] = {
+	/* Stage 5B startup/input/file */
+	CALL_SYS(0x401000, "file_open", game_file_open_regs, FILE_SCRATCH),
+	CALL_SYS(0x401050, "file_load", game_file_load_regs, FILE_SCRATCH),
+	CALL_SYS(0x401160, "file_save", game_file_save_regs, FILE_SCRATCH),
 	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
 	PIECE(0x403510, "anim_control", game_anim_control_piece, 0, 0, 0, 1, NULL),
