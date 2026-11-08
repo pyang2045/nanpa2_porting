@@ -79,6 +79,9 @@ const struct game_unit game_units[] = {
 	CALL_SYS(0x4012b0, "surface_unlock", game_unlock_regs, 0),
 	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
+	/* Stage 6: the dissolve wipe, pieces around its message pump (wipe.c) */
+	PIECE(0x401a50, "wipe", game_wipe, 0, 0, 0, 1, NULL),
+	PIECE(0x401b90, "wipe_pumped", game_wipe_pumped, 0, 0x12, 0, 1, NULL),
 	/* Stage 5B startup/input/file; WinMain's pieces run uncompared (game.c) */
 	PIECE(0x402090, "winmain", game_winmain, REG_BIT(ECX) | REG_BIT(EDX), 0, 0, 1, NULL),
 	PIECE(0x4021a3, "winmain_done", game_winmain_done, REG_BIT(ECX) | REG_BIT(EDX), 11, 0, 1, NULL),
@@ -206,7 +209,9 @@ const struct game_unit game_units[] = {
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
 	JUMP_SYS(0x4070d5, "op_0421_flag_file", game_op_flag_file, NULL),
 	JUMP(0x4071a4, "op_0423_hit_test", game_op_hit_test, AT_LOOP),
-	JUMP_SYS(0x407204, "op_19_misc", game_op_misc, game_native_misc),
+	JUMP_SYS(0x407204, "op_19_misc", game_op_misc, NULL),
+	/* 3 words: the saved ESI, 2 and 0 pushed before the wipe's call */
+	RESUME_SYS(0x40738b, "op_19_wipe_done", game_op_wipe_done, AT_LOOP, 3),
 	JUMP(0x40739b, "op_0422_args_only", game_op_args_only, AT_LOOP),
 	JUMP_SYS(0x4073a5, "op_0424_music", game_op_music, NULL),
 	JUMP_SYS(0x4073cd, "op_0425_voice", game_op_voice, NULL),
