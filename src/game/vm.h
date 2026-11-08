@@ -234,6 +234,23 @@ void game_fade_start(void);             /* 0x401d30 */
 uint32_t game_fade_active(void);        /* 0x401e10 */
 uint32_t game_palette_wait_piece(void); /* 0x406f41: 04 16 3 waits for the fade */
 
+/* surfaces, cursor, rectangles (cdecl arguments at ESP, results in EAX) */
+void game_lock_regs(void);              /* 0x401190 */
+void game_unlock_regs(void);            /* 0x4012b0 */
+uint32_t game_surface_lock(uint32_t surf);
+void game_surface_unlock(uint32_t surf);
+void game_cursor_restore(void);         /* 0x4011f0 */
+void game_cursor_restore_regs(void);
+void game_cursor_draw(void);            /* 0x4012e0 */
+void game_cursor_show(void);            /* 0x401c40 */
+void game_cursor_hide(void);            /* 0x401c60 */
+void game_cursor_setpos(void);          /* 0x401c80 (cdecl x, y) */
+void game_blit_copy(void);              /* 0x401430 (dx, dy, sx, sy, w, h, surfaces) */
+void game_blit_masked(void);            /* 0x4014f0 */
+void game_blit_swap(void);              /* 0x401670 */
+void game_fill_rect(void);              /* 0x4017b0 (x, y, w, h, colour << 4, surface) */
+void game_xor_rect(void);               /* 0x401870 */
+
 /* ---- src/game/text.c ---- */
 void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
                     uint32_t bg);       /* 0x401900 */

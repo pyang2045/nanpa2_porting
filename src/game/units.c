@@ -56,6 +56,10 @@
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
  * at each function. */
 const struct game_unit game_units[] = {
+	/* Stage 5B (src/game/screen.c): the units that native code still calls */
+	CALL_SYS(0x401190, "surface_lock", game_lock_regs, 0),
+	CALL_SYS(0x4011f0, "cursor_restore", game_cursor_restore_regs, 0),
+	CALL_SYS(0x4012b0, "surface_unlock", game_unlock_regs, 0),
 	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
 	PIECE(0x403510, "anim_control", game_anim_control_piece, 0, 0, 0, 1, NULL),

@@ -147,7 +147,7 @@ uint32_t game_op_clear_text(void)
 
 /* 04 17 / 04 18 x0 y0 x1 y1: fill (0x4017b0) or XOR (0x401870) the
  * rectangle of surface @[6] with the text colour. */
-static uint32_t colour_rect(uint32_t fn, uint32_t exit_pc)
+static uint32_t colour_rect(void (*fn)(void), uint32_t exit_pc)
 {
 	parse();
 	uint32_t eax = rd16(SURFACE_SELECT);
@@ -156,19 +156,19 @@ static uint32_t colour_rect(uint32_t fn, uint32_t exit_pc)
 	push32(eax);
 	push_rect(eax);
 	X86_COUNT(20);
-	ncall(fn);
+	fn();
 	drop(6);
 	return loop_at(exit_pc);
 }
 
 uint32_t game_op_fill_rect(void)
 {
-	return colour_rect(0x4017b0, 0x406bc6);
+	return colour_rect(game_fill_rect, 0x406bc6);
 }
 
 uint32_t game_op_xor_rect(void)
 {
-	return colour_rect(0x401870, 0x406c1b);
+	return colour_rect(game_xor_rect, 0x406c1b);
 }
 
 /* 04 19 / 04 1a / 04 1b x0 y0 x1 y1 s dx dy d: copy (0x401430), swap
@@ -187,23 +187,23 @@ static void push_blit(void)
 	X86_COUNT(24);
 }
 
-static uint32_t blit(uint32_t fn, uint32_t exit_pc)
+static uint32_t blit(void (*fn)(void), uint32_t exit_pc)
 {
 	parse();
 	push_blit();
-	ncall(fn);
+	fn();
 	drop(7);
 	return loop_at(exit_pc);
 }
 
 uint32_t game_op_copy_rect(void)
 {
-	return blit(0x401430, 0x406c80);
+	return blit(game_blit_copy, 0x406c80);
 }
 
 uint32_t game_op_swap_rect(void)
 {
-	return blit(0x401670, 0x406ce5);
+	return blit(game_blit_swap, 0x406ce5);
 }
 
 /* With no arguments 04 1b draws the last picture's rectangle (0x44538a-
@@ -213,7 +213,7 @@ uint32_t game_op_masked_rect(void)
 	parse();
 	if (cpu.r[ECX]) {
 		push_blit();
-		ncall(0x4014f0);
+		game_blit_masked();
 		drop(7);
 		return loop_at(0x406d4e);
 	}
@@ -232,7 +232,7 @@ uint32_t game_op_masked_rect(void)
 	cpu.r[EAX] = eax;
 	cpu.r[ECX] = ecx;
 	X86_COUNT(16);
-	ncall(0x4014f0);
+	game_blit_masked();
 	drop(7);
 	return loop_at(0x406d86);
 }
@@ -330,7 +330,7 @@ uint32_t game_op_cursor(void)
 		X86_COUNT(3);
 		if (rd8(CURSOR_SHOWN))
 			return loop_at(0x40693d);
-		ncall(0x401c40);
+		game_cursor_show();
 		wr8(CURSOR_SHOWN, 1);
 		X86_COUNT(1);
 		return loop_at(0x40694f);
@@ -338,7 +338,7 @@ uint32_t game_op_cursor(void)
 		X86_COUNT(3);
 		if (!rd8(CURSOR_SHOWN))
 			return loop_at(0x40695b);
-		ncall(0x401c60);
+		game_cursor_hide();
 		wr8(CURSOR_SHOWN, 0);
 		X86_COUNT(1);
 		return loop_at(0x40696d);
@@ -352,7 +352,7 @@ uint32_t game_op_cursor(void)
 		push32(eax);
 		cpu.r[EAX] = eax;
 		X86_COUNT(6);
-		ncall(0x401c80);
+		game_cursor_setpos();
 		drop(2);
 		return loop_at(0x406989);
 	}
@@ -581,12 +581,12 @@ static uint32_t misc_row_swap(void)
 	push32(rd32(0x44629e));
 	cpu.r[EAX] = off1;
 	X86_COUNT(9);
-	ncall(0x401190);
+	game_lock_regs();
 	drop(1);
 	uint32_t esi = cpu.r[EAX];
 	push32(rd32(0x4462a2));
 	X86_COUNT(2);
-	ncall(0x401190);
+	game_lock_regs();
 	drop(1);
 	uint32_t edi = cpu.r[EAX];
 	edi += pop32();
@@ -610,11 +610,11 @@ static uint32_t misc_row_swap(void)
 	cpu.r[ECX] = 0;
 	push32(rd32(0x44629e));
 	X86_COUNT(2);
-	ncall(0x4012b0);
+	game_unlock_regs();
 	drop(1);
 	push32(rd32(0x4462a2));
 	X86_COUNT(2);
-	ncall(0x4012b0);
+	game_unlock_regs();
 	drop(1);
 	return cpu.r[EAX];
 }
@@ -639,7 +639,7 @@ uint32_t game_op_misc(void)
 		X86_COUNT(3);
 		if (a & 0x8000) { /* js: a was 0 (or above 0x8000) */
 			cpu.r[EAX] = eax;
-			ncall(0x401d30);
+			game_fade_start();
 			eax = cpu.r[EAX];
 			X86_COUNT(1);
 		} else if (a == 0) {
@@ -649,7 +649,7 @@ uint32_t game_op_misc(void)
 				X86_COUNT(3);
 			} else {
 				cpu.r[EAX] = eax;
-				ncall(0x401e10);
+				game_fade_active();
 				eax = cpu.r[EAX];
 				X86_COUNT(1);
 			}

@@ -261,6 +261,14 @@ HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
 /* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
 HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
 
+/* Stage 5B (src/game/screen.c): the surface lock and unlock and the cursor
+ * restore, which native code (the map, the window procedure) still calls.
+ * The other screen routines (cursor draw, show, hide, blits, fill, XOR,
+ * palette, fades) are called only from C and have no override. */
+HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
+HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
+HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
