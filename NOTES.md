@@ -418,3 +418,25 @@ code change.
   renders of the same glyph strip at 32 px showed ridge strokes too thin for the 32 px
   weight-400 font (no bold, no LiSung strike), so outlines from em 28 up keep the plain
   threshold (`RIDGE_MAX_EM`, follow-up commit).
+
+## 2026-11-08 (double cursor)
+
+- Report: two mouse cursors over the game. Cause: the game hides the system cursor and
+  draws its own 32x32 sprite (0x4012e0, bitmaps at 0x4be900, blink 0x4ac514 from the timer
+  0x4028c0). ShowCursor (IAT 0x41b11c) runs at 0x401e27 (0, the logo player 0x401e20,
+  unconditional), 0x40262a (1), 0x4028ab (0), 0x402ac6 (1, shutdown): -1 in game. The
+  override of 0x401e20 (src/hle/logo.c) skipped the first call, so the HLE counter ended at
+  0 and SDL showed the host arrow too. No SetCursor/SetClassLong import, no WM_SETCURSOR in
+  0x4021c0; the class cursor is IDC_ARROW (0x4020cd). Details in `re-notes.md`, Input.
+- Fix (4e7d53a): the 0x401e20 override applies 0x401e27 first; `win32_cursor_update`
+  (src/hle/win32.c) hides the host cursor only while the count is negative, the window has
+  input focus and the pointer is over the game image (`present_window_to_screen`, the same
+  fit with the CRT on or off, windowed or fullscreen), so letterbox borders, the title bar,
+  other windows and an unfocused window keep it. Re-checked on mouse motion, window events
+  and the CRT/fullscreen hotkeys. The launch dialogs (folder picker, message boxes) run before
+  the window exists, while the count is still 0. The status file has
+  `"cursor": {"count", "host_shown", "over_image"}`.
+- Checked: windowed runs (NANPA2_LOGO=0 and =1) show `count -1, host_shown 0,
+  over_image 1` with the pointer over the image and focus, and `host_shown 1` after the
+  window lost focus; ctest smoke, selftest, selftest_dir, wavcheck pass. Not checked by
+  eye: fullscreen letterbox (code path only).
