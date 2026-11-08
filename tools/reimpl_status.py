@@ -144,7 +144,9 @@ def main():
     pe = recomp.PE(args.exe)
     w = Walker(pe)
     full = w.walk(set())
-    live = w.walk(set(recomp.HLE_OVERRIDES))
+    # HLE_GAME_DEAD (src/hle/overrides.h): native code nothing enters any more
+    dead = set(recomp.read_hooks('GAME_DEAD'))
+    live = w.walk(set(recomp.HLE_OVERRIDES) | dead)
     iat = imports(pe)
 
     # functions
