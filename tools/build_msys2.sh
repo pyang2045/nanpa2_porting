@@ -69,6 +69,10 @@ case $backend in
 esac
 recomp=1
 [ "$backend" = interp ] && recomp=0
+if [ -n "$backend" ] && ! grep -q NANPA2_BACKEND "$here/CMakeLists.txt"; then
+	echo "build_msys2.sh: --backend needs the NANPA2_BACKEND option in CMakeLists.txt (not there yet)" >&2
+	exit 2
+fi
 
 if [ "${MSYSTEM:-}" != MINGW64 ]; then
 	echo "build_msys2.sh: run this from the MSYS2 MINGW64 shell (MSYSTEM=${MSYSTEM:-unset})" >&2

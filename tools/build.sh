@@ -59,6 +59,10 @@ case $backend in
 esac
 recomp=1
 [ "$backend" = interp ] && recomp=0
+if [ -n "$backend" ] && ! grep -q NANPA2_BACKEND "$here/CMakeLists.txt"; then
+	echo "build.sh: --backend needs the NANPA2_BACKEND option in CMakeLists.txt (not there yet)" >&2
+	exit 2
+fi
 
 os=$(uname -s)
 case $os in
