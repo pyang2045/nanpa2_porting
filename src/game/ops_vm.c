@@ -25,6 +25,7 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
+#include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -239,23 +240,12 @@ uint32_t game_op_delay_click_done(void)
 
 /* ---- calling into the native routines that load files and draw */
 
-/* `call addr` into native code that returns (file loads, the anim step),
- * the CPU as it leaves it */
-static void ncall(uint32_t addr)
-{
-	uint32_t esp = cpu.r[ESP];
-	push32(X86_RET_SENTINEL);
-	x86_exec(addr);
-	if (cpu.r[ESP] != esp)
-		x86_trap(addr, "native routine called by an opcode handler did not return");
-}
-
 static void load(uint32_t name, uint32_t dst)
 {
 	push32(dst);
 	push32(name);
 	X86_COUNT(2);
-	ncall(0x401050);
+	game_file_load(name, dst);
 	cpu.r[ESP] += 8;
 	X86_COUNT(1);
 }
@@ -350,7 +340,7 @@ uint32_t game_op_flag_file(void)
 		push32(MES_NAME);
 		push32(FLAG_NAME);
 		X86_COUNT(3);
-		ncall(0x401160);
+		game_file_save(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4), rd32(cpu.r[ESP] + 8));
 		cpu.r[ESP] += 12;
 		X86_COUNT(1);
 		return loop_at(0x40719f);

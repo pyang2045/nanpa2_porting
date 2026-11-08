@@ -345,6 +345,23 @@ HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
 
+/* Stage 5B startup/input/file (src/game/file.c): the file routines, called
+ * by the C pieces directly and by native code (the map module, WinMain) */
+HLE_GAME_OVERRIDE(0x401000, "open a game file (src/game/file.c)")
+HLE_GAME_OVERRIDE(0x401050, "load a game file (src/game/file.c)")
+HLE_GAME_OVERRIDE(0x401160, "save a file (src/game/file.c)")
+
+/* Stage 5B startup/input/file (src/game/startup.c): WinMain is a jump unit
+ * split at its call of the script VM (call exit 0x4021a3, then the
+ * shutdown); the window procedure is entered by the HLE message pump */
+HLE_GAME_JUMP(0x402090, "WinMain (src/game/startup.c)")
+HLE_GAME_JUMP(0x4021a3, "WinMain: after the script VM (src/game/startup.c)")
+HLE_GAME_CALL_EXIT(0x4021a3, "WinMain: the script VM (0x4060d4)")
+HLE_GAME_OVERRIDE(0x4021c0, "window procedure (src/game/startup.c)")
+/* the logo's window procedure: installed (SetWindowLongA) only by the logo
+ * player 0x401e20, an HLE override, so nothing enters it */
+HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the

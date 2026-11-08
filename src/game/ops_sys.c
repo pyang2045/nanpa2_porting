@@ -20,6 +20,7 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
+#include "game/file.h"
 #include "game/map.h"
 #include "game/vm.h"
 #include "x86/x86.h"
@@ -436,7 +437,7 @@ uint32_t game_op_load_file(void)
 	push32(eax);
 	push32(STRING_BUF);
 	X86_COUNT(9);
-	ncall(0x401050);
+	game_file_load(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
 	drop(2);
 	return loop_at(0x406dbf);
 }

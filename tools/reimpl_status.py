@@ -127,6 +127,7 @@ SRC_GAME = os.path.join(os.path.dirname(HERE), 'src', 'game')
 FALLBACK_STOPS = {0x40616e}
 
 
+
 def native_calls():
     """Native game routines the C side calls (game_ncall / ncall / blit / colour_rect with
     a game code address or a #define of one): they run, so they are needed."""

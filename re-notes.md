@@ -706,3 +706,46 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
   rounded up to 4.
 - Picture 0x406e20: header u16 x / 8, y, w / 8, h at 0x4662be (copied to 0x44538a-0x445390),
   palette block at +8 (0x40752c unless @[9] bit 0), pixels at +0x208.
+
+## File access, window procedure and start-up (0x401000-0x401160, 0x4021c0, 0x402090-0x402a20)
+
+- File 0x401000(name): fopen(name, "rb") (mode string 0x43103c); if it fails,
+  sprintf(buf, "%s%s", CD prefix 0x431030, name) and fopen that. 0x401050(name, buf): path =
+  name if its first 4 characters are "DATA" (case-insensitive, 0x431058), else "DATA\%s"
+  (0x431050); open as above; nothing happens if it cannot be opened. A name whose last
+  extension is .GP4 (0x431048) or .ANI (0x431040) is read whole into a malloc block and
+  decompressed into buf (0x4075f0), anything else is read into buf. 0x401160(name, buf, size):
+  fopen "wb" (0x431060), fwrite(buf, 1, size), fclose; the name is used as given. Register
+  effects the callers see: ECX = buf after a plain read, = the path buffer (native local_28)
+  after the "DATA\%s" sprintf or a CD-prefix retry, 0 after the copy of a name already under
+  DATA; EDX = the path buffer.
+- Window procedure 0x4021c0 (stdcall hwnd, msg, wparam, lparam, `ret 0x10`): 0x200 mouse
+  move: x = low word -> 0x4ac064 and u16 0x4452e2; y = high word -> 0x4ac060; u16 0x4452e4 =
+  y, minus 40 when 0x4ac068 is set, clamped to 0..399; if the game cursor is shown (0x4ac510)
+  the repaint 0x402570 (IDirectDraw::WaitForVerticalBlank(1, 0), cursor restore 0x4011f0,
+  cursor draw 0x4012e0). 0x201/0x204 left/right button down: voice stop 0x403440, set input
+  bit 0x10/0x20 in 0x445d8f; 0x202/0x205 up: clear it (no voice stop). 0x100 key down (VK -
+  0x0d must be <= 0x63): up 0x26 -> 1, down 0x28 -> 2, left 0x25 -> 4, right 0x27 -> 8,
+  Enter/Space 0x0d/0x20 -> 0x10, Esc/Insert 0x1b/0x2d -> 0x20, Ctrl 0x11 -> 0x40, End 0x23 ->
+  0x80 (OR into 0x445d8f); F1 (0x70) DestroyWindow. 0x101 key up (VK - 0x0d <= 0x20): clears
+  the same bits, with the voice stop for Enter/Space/Esc/Insert. 2 WM_DESTROY: PostQuitMessage(0).
+  0x1c WM_ACTIVATEAPP: wparam 0: 0x4ac518 = 1, 0x4ac4ec = 0, voice stop, music pause 0x403220;
+  else (if 0x4ac518) music resume 0x403250, SetFocus(hwnd), 0x4ac4ec = 1. Everything else:
+  DefWindowProcA. EAX = 0 except the DefWindowProc result.
+- Start-up 0x402090 (WinMain): 0x4ac06c = hInstance; WNDCLASS {style 0, proc 0x4021c0, 0, 0,
+  hInstance, LoadIcon "IDI_ICON1", LoadCursor(IDC_ARROW), WHITE_BRUSH(4), no menu, "Nanpa2"};
+  RegisterClassA (0 -> return -1); CreateWindowExA(0, "Nanpa2", "Nanpa2", WS_POPUP, 0, 0, screen
+  size) -> 0x4ab05c; CD search 0x402590 (0 -> MessageBox, return 0); logo 0x401e20; display
+  init 0x402620 (0 -> return 0); ShowWindow(5), UpdateWindow; the VM 0x4060d4; shutdown
+  0x402a20; return 1. CD search: for drive letters A to Z, 0x431030[0] = the letter,
+  GetDriveTypeA == 5 (CD-ROM) and fopen of "%sSPEECH\A\A10930.WAV" succeeds; else prefix "" and
+  the same file in the current folder.
+- Display init 0x402620: ShowCursor(1); DirectSound init 0x402ad0(hwnd); DirectDrawCreate;
+  SetCooperativeLevel(hwnd, 0x11); SetDisplayMode(640, 480, 8); 0x4ac068 = 1; primary surface
+  (desc size 0x6c at 0x4ac480, flags 1, caps 0x200) -> 0x44629e; Restore; Lock/Unlock to read the
+  pitch -> 0x4462ae; colour key {8, 8} on it; 256 black palette entries at 0x4ac07c; CreatePalette
+  (0x44) -> 0x4ac4f4, SetPalette; off-screen surfaces (flags 7, caps 0x840) 640 x 400 x 3 at
+  0x4462a2.. (pitch 640 each, colour key {8, 8}), 640 x 480 scratch surface at 0x4ab058; fonts
+  15, 24, 32 px (weights 700, 700, 400, charset 0x88) at 0x4ac070..; timeSetEvent(16, 16,
+  0x4028c0, 0, 1) -> 0x4ac500; ShowCursor(0). Shutdown 0x402a20 reverses it (timer, fonts,
+  palette, scratch, surfaces, DirectDraw, sound exit 0x402c70, ShowCursor(1)).

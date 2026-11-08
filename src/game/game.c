@@ -23,6 +23,7 @@
 
 #include "game/diff.h"
 #include "game/expr.h"
+#include "game/startup.h"
 #include "game/map.h"
 #include "game/trace.h"
 #include "x86/x86.h"
@@ -283,6 +284,7 @@ static uint32_t compare(const struct game_unit *u)
 	cpu = in;
 	trace_begin();
 	mode = MODE_REIMPL;
+	game_replay_pass = 1;
 	uint32_t got_pc = 0;
 	if (u->jump) {
 		got_pc = u->jump();
@@ -291,6 +293,7 @@ static uint32_t compare(const struct game_unit *u)
 		u->run();
 	}
 	mode = MODE_OFF;
+	game_replay_pass = 0;
 	trace_end();
 	trace_set_clear(&mine);
 	trace_collect(&mine);
@@ -318,6 +321,13 @@ static uint32_t compare(const struct game_unit *u)
 	return got_pc;
 }
 
+/* Stage 5B: units whose effects on the host (window, DirectDraw and timer
+ * set-up, the exit) cannot be done twice: they run once, uncompared, and
+ * are checked by the HLE call trace against the original's (docs/reimpl.md) */
+static int uncompared(const struct game_unit *u)
+{
+	return u->addr == 0x402090 || u->addr == 0x4021a3;
+}
 
 /* NANPA2_FUZZ=N: before the first NANPA2_FUZZ_CALLS (default 30) compared
  * calls of a unit that has a fuzzer (src/game/map_fuzz.c), compare it N
@@ -430,7 +440,7 @@ int game_call(uint32_t addr)
 		x86_exec(X86_ORACLE_TAG | addr);
 		return 1;
 	}
-	if (diff_on && mode == MODE_OFF) {
+	if (diff_on && mode == MODE_OFF && !uncompared(u)) {
 		fuzz_unit(u);
 		compare(u);
 	} else {
@@ -456,7 +466,7 @@ int game_jump(uint32_t addr, uint32_t *next)
 			stats[u - game_units].native_runs++;
 		return 1;
 	}
-	if (diff_on && mode == MODE_OFF) {
+	if (diff_on && mode == MODE_OFF && !uncompared(u)) {
 		fuzz_unit(u);
 		*next = compare(u);
 	} else

@@ -63,6 +63,8 @@ set(GAME_SOURCES
   src/game/loop.c
   src/game/text.c
   src/game/anim.c
+  src/game/file.c
+  src/game/startup.c
   src/game/map.c
   src/game/map_draw.c
   src/game/map_move.c

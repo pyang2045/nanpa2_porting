@@ -27,6 +27,7 @@
  * (game_native_click*), as ext op 20 that sets the handlers is: no run has
  * reached it.
  */
+#include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 
@@ -84,7 +85,7 @@ uint32_t game_vm_entry(void)
 	push32(VM_SCRIPT);
 	push32(VM_SCRIPT_NAME);
 	X86_COUNT(3);
-	game_ncall(LOAD_FILE, 0);
+	game_file_load(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
 	cpu.r[ESP] += 8;
 	cpu.r[ESI] = rd16(VM_SCRIPT);
 	X86_COUNT(2);
