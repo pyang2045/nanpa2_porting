@@ -126,4 +126,7 @@ void game_map_redraw_changed(void);   /* 0x403d45, sub-op 4 */
 void game_map_cell_draw(void);        /* 0x403eff */
 void game_map_cell_clear_bit3(void);  /* 0x4040f0 */
 
+/* ---- map_fuzz.c: random states for the differential test (NANPA2_FUZZ) ---- */
+void (*game_map_fuzz_for(uint32_t addr))(uint32_t *);
+
 #endif

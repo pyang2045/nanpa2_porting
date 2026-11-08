@@ -23,6 +23,7 @@
 
 #include "game/diff.h"
 #include "game/expr.h"
+#include "game/map.h"
 #include "game/trace.h"
 #include "x86/x86.h"
 
@@ -30,6 +31,7 @@ enum { MODE_OFF, MODE_ORACLE, MODE_REIMPL };
 
 struct unit_stats {
 	uint64_t calls, mismatches, recorded, oracle_insns, reimpl_insns, native_runs;
+	uint64_t fuzzed, fuzz_runs, fuzz_mismatches;
 	FILE *file;
 	uint64_t *seen; /* open-addressing set of input hashes */
 	size_t seen_cap, seen_n;
@@ -39,6 +41,7 @@ static int diff_on = -1;
 static const char *diff_dir;
 static uint64_t diff_max = 40000;
 static int mode = MODE_OFF;
+static int fuzzing; /* inside fuzz_unit: no records */
 static struct unit_stats *stats;
 
 static void report(void)
@@ -48,6 +51,10 @@ static void report(void)
 		if (s->native_runs)
 			fprintf(stderr, "diff: %08x %s left to the native handler %llu times\n",
 			        game_units[i].addr, game_units[i].name, (unsigned long long)s->native_runs);
+		if (s->fuzz_runs)
+			fprintf(stderr, "diff: %08x %s fuzzed: %llu states from %llu calls, mismatches %llu\n",
+			        game_units[i].addr, game_units[i].name, (unsigned long long)s->fuzz_runs,
+			        (unsigned long long)s->fuzzed, (unsigned long long)s->fuzz_mismatches);
 		if (!s->calls)
 			continue;
 		fprintf(stderr,
@@ -121,7 +128,7 @@ static int first_seen(struct unit_stats *s, uint64_t h)
 
 static void record(const struct game_unit *u, struct unit_stats *s, const struct diff_record *rec)
 {
-	if (!diff_dir || s->recorded >= diff_max || u->calls_native)
+	if (!diff_dir || s->recorded >= diff_max || u->calls_native || fuzzing)
 		return;
 	uint64_t h = diff_input_hash(rec);
 	/* the first half of the budget takes every new input, the rest one in
@@ -306,6 +313,60 @@ static uint32_t compare(const struct game_unit *u)
 	return got_pc;
 }
 
+
+/* NANPA2_FUZZ=N: before the first NANPA2_FUZZ_CALLS (default 30) compared
+ * calls of a unit that has a fuzzer (src/game/map_fuzz.c), compare it N
+ * times from random states. Memory (the game's data and the stack) and the
+ * CPU are put back after each, so the game goes on with its real state. */
+static void fuzz_unit(const struct game_unit *u)
+{
+	static long iters = -1, limit = 30;
+	static uint8_t *save_lo, *save_hi;
+	enum { LO = 0x400000, LO_END = 0x4c0000, HI = 0xff0000, HI_END = 0x1000000 };
+	if (iters < 0) {
+		const char *e = getenv("NANPA2_FUZZ");
+		iters = e ? atol(e) : 0;
+		if ((e = getenv("NANPA2_FUZZ_CALLS")))
+			limit = atol(e);
+		if (iters)
+			fprintf(stderr, "diff: fuzzing the map units, %ld states from each of their first %ld calls\n",
+			        iters, limit);
+	}
+	if (!iters || fuzzing)
+		return;
+	void (*f)(uint32_t *) = game_map_fuzz_for(u->addr);
+	struct unit_stats *s = &stats[u - game_units];
+	if (!f || s->fuzzed >= (uint64_t)limit)
+		return;
+	if (!save_lo) {
+		save_lo = malloc(LO_END - LO);
+		save_hi = malloc(HI_END - HI);
+		if (!save_lo || !save_hi)
+			abort();
+	}
+	s->fuzzed++;
+	memcpy(save_lo, x86_ptr(LO, LO_END - LO), LO_END - LO);
+	memcpy(save_hi, x86_ptr(HI, HI_END - HI), HI_END - HI);
+	struct cpu c0 = cpu;
+	uint64_t icount = x86_icount, mism = s->mismatches;
+	uint32_t seed = 0x9e3779b9u ^ (uint32_t)(u->addr * 2654435761u) ^ (uint32_t)(s->fuzzed * 40503u);
+	fuzzing = 1;
+	for (long i = 0; i < iters; i++) {
+		cpu = c0;
+		if (getenv("NANPA2_FUZZ_TRACE"))
+			fprintf(stderr, "fuzz %08x %s state %ld seed %08x\n", u->addr, u->name, i, seed);
+		f(&seed);
+		compare(u);
+		s->fuzz_runs++;
+		memcpy(x86_ptr(LO, LO_END - LO), save_lo, LO_END - LO);
+		memcpy(x86_ptr(HI, HI_END - HI), save_hi, HI_END - HI);
+	}
+	fuzzing = 0;
+	cpu = c0;
+	x86_icount = icount;
+	s->fuzz_mismatches += s->mismatches - mism;
+}
+
 int game_call(uint32_t addr)
 {
 	const struct game_unit *u = game_unit_find(addr);
@@ -322,10 +383,12 @@ int game_call(uint32_t addr)
 		x86_exec(X86_ORACLE_TAG | addr);
 		return 1;
 	}
-	if (diff_on && mode == MODE_OFF)
+	if (diff_on && mode == MODE_OFF) {
+		fuzz_unit(u);
 		compare(u);
-	else
+	} else {
 		u->run();
+	}
 	if (mode == MODE_OFF)
 		poison(u);
 	return 1;
@@ -346,9 +409,10 @@ int game_jump(uint32_t addr, uint32_t *next)
 			stats[u - game_units].native_runs++;
 		return 1;
 	}
-	if (diff_on && mode == MODE_OFF)
+	if (diff_on && mode == MODE_OFF) {
+		fuzz_unit(u);
 		*next = compare(u);
-	else
+	} else
 		*next = u->jump();
 	if (mode == MODE_OFF)
 		poison(u);
