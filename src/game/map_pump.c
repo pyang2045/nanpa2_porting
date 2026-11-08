@@ -768,7 +768,7 @@ uint32_t game_op_map(void)
 uint32_t game_op_map_done(void)
 {
 	vm_set_reg(VM_REG_S, cpu.r[EAX]);
-	CNT(1);
+	CNT(2); /* mov [S], ax; jmp 0x4060f9 */
 	X86_POLL(0x407416);
 	return VM_LOOP;
 }
