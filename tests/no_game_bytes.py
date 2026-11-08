@@ -72,7 +72,8 @@ def ramps(b):
 def index(secs):
     # 64-byte windows keyed by their first 8 bytes, then confirmed in full
     idx = {}
-    total = std = 0
+    total = 0
+    std = {}
     known = standard_tables()
     for name, b in secs:
         ramp = ramps(b)
@@ -81,7 +82,7 @@ def index(secs):
             if len(set(w)) < MIN_DISTINCT:
                 continue
             if w in known or all(ramp[o:o + WIN]):
-                std += 1
+                std[name] = std.get(name, 0) + 1
                 continue
             total += 1
             idx.setdefault(w[:8], []).append((name, o))
@@ -129,8 +130,9 @@ def main():
     secs = sections(d)
     by_name = dict(secs)
     idx, total, std = index(secs)
-    print('%s: %d runs of %d bytes in %s (%d more in standard tables and ramps, not checked)'
-          % (exe, total, WIN, ' '.join(n for n, _ in secs), std))
+    print('%s: %d runs of %d bytes in %s; in standard tables and ramps, not checked: %s'
+          % (exe, total, WIN, ' '.join(n for n, _ in secs),
+             ', '.join('%s %d' % kv for kv in sorted(std.items())) or 'none'))
 
     # positive control: a run of the code section planted in random bytes
     rnd = random.Random(1)

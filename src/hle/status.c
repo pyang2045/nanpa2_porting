@@ -444,8 +444,11 @@ void status_init(SDL_Window *win, double mips_setting)
 	last_frame_change = start_ticks;
 	scripted = dev_scripted();
 	status_main();
-	stage = "running";
+	/* phase first: the writer thread must not write the early file (no
+	 * "game" section) with stage "running" in between (smoke.py read
+	 * such a file once and stopped with KeyError 'game') */
 	SDL_AtomicSet(&phase, 1);
+	stage = "running";
 }
 
 void status_shutdown(void)
