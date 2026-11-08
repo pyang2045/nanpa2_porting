@@ -6,8 +6,8 @@
 #   tools/build_msys2.sh [--backend interp|recomp] [--exe PATH] [--game-dir DIR]
 #                        [--build-dir DIR] [--release | --debug] [--test] [--no-dist]
 #
-#   --backend B      passed on as -DNANPA2_BACKEND=B; as in tools/build.sh,
-#                    only recomp (or no --backend) needs --exe and capstone.
+#   --backend B      passed on as -DNANPA2_BACKEND=B (default interp); as in
+#                    tools/build.sh, only recomp needs --exe and capstone.
 #   --exe PATH       recomp: your nanpa2.exe (default: game/nanpa2.exe); the
 #                    game code is lifted from it at build time, read, never run.
 #   --game-dir DIR   game folder for the tests (default: the folder of the
@@ -28,13 +28,14 @@
 # Why MSYS2 and not MSVC: CMakeLists.txt passes GCC/Clang flags, and the
 # generated recomp.c (one very large function) has only been compiled with
 # Clang. MinGW-w64 GCC is the nearest compiler, and pacman has SDL2 and
-# capstone.
+# capstone (capstone for --backend recomp only).
 #
 # The program is built as nanpa2-port.exe, a GUI program (no console window;
 # set NANPA2_LOG_FILE to keep its log). BUILD_DIR/dist gets it with the DLLs
-# it needs from /mingw64/bin (SDL2.dll and the MinGW runtime). dist holds
-# the game code lifted from your nanpa2.exe: for this machine only, never
-# share it. It holds no game data: run it with --game PATH.
+# it needs from /mingw64/bin (SDL2.dll and the MinGW runtime). It holds no
+# game data: run it with --game PATH. An interp dist holds nothing of the
+# game; a recomp dist holds the game code lifted from your nanpa2.exe: for
+# this machine only, never share that one.
 set -eu
 
 here=$(cd "$(dirname "$0")/.." && pwd)
@@ -67,12 +68,8 @@ case $backend in
 '' | recomp | interp) ;;
 *) echo "build_msys2.sh: --backend is interp or recomp" >&2; exit 2 ;;
 esac
-recomp=1
-[ "$backend" = interp ] && recomp=0
-if [ -n "$backend" ] && ! grep -q NANPA2_BACKEND "$here/CMakeLists.txt"; then
-	echo "build_msys2.sh: --backend needs the NANPA2_BACKEND option in CMakeLists.txt (not there yet)" >&2
-	exit 2
-fi
+recomp=0
+[ "$backend" = recomp ] && recomp=1
 
 if [ "${MSYSTEM:-}" != MINGW64 ]; then
 	echo "build_msys2.sh: run this from the MSYS2 MINGW64 shell (MSYSTEM=${MSYSTEM:-unset})" >&2
@@ -110,11 +107,16 @@ if [ "$recomp" = 1 ]; then
 else
 	[ -n "$game" ] || game=$here/game
 fi
-[ -d "$game" ] || { echo "build_msys2.sh: game folder $game not found" >&2; exit 1; }
-game=$(cd "$game" && pwd)
+# interp builds need the game folder only for the tests
+if [ -d "$game" ]; then
+	game=$(cd "$game" && pwd)
+elif [ "$recomp" = 1 ] || [ "$test" = 1 ]; then
+	echo "build_msys2.sh: game folder $game not found" >&2
+	exit 1
+fi
 
-set -- -DCMAKE_BUILD_TYPE="$type" -DNANPA2_GAME_DIR="$game" -DNANPA2_PYTHON="$py"
-[ -z "$backend" ] || set -- "$@" -DNANPA2_BACKEND="$backend"
+set -- -DCMAKE_BUILD_TYPE="$type" -DNANPA2_PYTHON="$py" -DNANPA2_BACKEND="${backend:-interp}"
+[ ! -d "$game" ] || set -- "$@" -DNANPA2_GAME_DIR="$game"
 [ "$recomp" = 0 ] || set -- "$@" -DNANPA2_EXE="$exe"
 cmake -S "$here" -B "$dir" -G Ninja "$@"
 ninja -C "$dir"
@@ -142,14 +144,21 @@ while [ -n "$queue" ]; do
 	done
 	queue=$next
 done
+if [ "$recomp" = 1 ]; then
+	note="FOR THIS MACHINE ONLY, do not share or upload: nanpa2-port.exe holds the game
+code lifted from your nanpa2.exe. No game data is included."
+else
+	note="No game code or data is included: the port runs the game code of your own
+nanpa2.exe from the game folder (extract it and FLAG0..FLAG6 from data1.cab on
+the CD)."
+fi
 cat >"$out/README.txt" <<EOF
 同級生２ native port for Windows, built $(date -u +%Y-%m-%d) from $(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo 'a source tree').
-FOR THIS MACHINE ONLY, do not share or upload: nanpa2-port.exe holds the game
-code lifted from your nanpa2.exe. No game data is included.
+$note
 
 Run: nanpa2-port.exe --game C:\\path\\to\\your\\game\\folder
 Log: set NANPA2_LOG_FILE=C:\\path\\nanpa2.log (no console window opens).
 EOF
 echo "build_msys2.sh: $out:"
 ls "$out"
-echo "build_msys2.sh: for this machine only, never share or upload it"
+[ "$recomp" = 0 ] || echo "build_msys2.sh: recomp: for this machine only, never share or upload it"

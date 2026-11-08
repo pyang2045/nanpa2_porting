@@ -3,7 +3,7 @@
 
 usage: recomp.py EXE OUT.c [--hle LIST]
 
-The output defines `void x86_exec(uint32_t pc)`: one function holding every
+The output defines `void x86_exec_recomp(uint32_t pc)`: one function holding every
 basic block as a label, with x86 state in the global `cpu` (src/x86/x86.h) and
 the native stack in emulated memory. Direct jumps become gotos; returns and
 indirect jumps go through a switch on the target address, so the original's
@@ -17,6 +17,8 @@ pushed first, as on x86; hle_call pops it, runs, and leaves EAX.
 The generated file is a translation of the game's code: it is written into
 the build folder, never into the source tree, and never committed.
 """
+import os
+import re
 import struct
 import sys
 
@@ -25,36 +27,28 @@ from capstone import x86 as X
 
 CODE_START, CODE_END = 0x401000, 0x407800
 
-# Lifted functions replaced by hand-written code (src/hle/*.c). Calls to and
-# dispatches into these addresses go to hle_call().
-HLE_OVERRIDES = {
-    0x401e20: 'logo movie (MCI avivideo)',
-    0x401bf0: 'message pump',
-    0x4028c0: 'multimedia timer callback (x87 palette fade)',
-    0x402ad0: 'DirectSound init',
-    0x402c70: 'sound shutdown',
-    0x402f10: 'find WAV data chunk',
-    0x402f60: 'DirectSound buffer write',
-    0x4031d0: 'MP3 decode into buffer',
-    0x403220: 'music pause',
-    0x403250: 'music resume',
-    0x4032c0: 'music stop',
-    0x403440: 'voice stop',
-    0x4034a0: 'music stream pump',
-    0x4075f0: 'GP4/ANI decompressor (src/lzh.c)',
-    0x402cb0: 'play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)',
-    0x403360: 'play voice (SPEECH%s through DirectSound)',
-}
+# Lifted functions replaced by hand-written code (src/hle/*.c) and the timing
+# probes (x86_probe before these instructions), read from src/hle/overrides.h,
+# the list both backends share. Calls to and dispatches into an override go
+# to hle_call().
+def read_hooks(kind):
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'hle', 'overrides.h')
+    pat = re.compile(r'^HLE_%s\((0x[0-9a-fA-F]+),\s*"(.*)"\)\s*$' % kind)
+    out = {}
+    for line in open(path, encoding='utf-8'):
+        m = pat.match(line.strip())
+        if m:
+            out[int(m.group(1), 16)] = m.group(2)
+    return out
 
-# Game logic reimplemented in C (src/game, docs/reimpl.md). They are
-# overrides like the ones above, but their lifted bodies are kept as the
-# differential-test oracle: reachable only through the tagged entry
-# ORACLE_TAG | addr (x86_exec), never from game code.
-GAME_OVERRIDES = {
-    0x4037fc: 'script expression evaluator (src/game/expr.c)',
-    0x4039f7: 'script constant reader (src/game/expr.c)',
-    0x406455: 'script flag write (src/game/expr.c)',
-}
+
+HLE_OVERRIDES = read_hooks('OVERRIDE')
+
+# Game logic reimplemented in C (HLE_GAME_OVERRIDE, src/game,
+# docs/reimpl.md). They are overrides like the ones above, but their lifted
+# bodies are kept as the differential-test oracle: reachable only through
+# the tagged entry ORACLE_TAG | addr (x86_exec), never from game code.
+GAME_OVERRIDES = read_hooks('GAME_OVERRIDE')
 HLE_OVERRIDES.update(GAME_OVERRIDES)
 ORACLE_TAG = 0x40000000  # src/x86/x86.h X86_ORACLE_TAG
 
@@ -64,13 +58,7 @@ TEXT_TABLES = [0x40247c, 0x402508, 0x402550, 0x403521, 0x40368b, 0x40386d,
 # Code-pointer tables in .data (dwords that point into lifted code)
 DATA_TABLE_RANGES = [(0x435576, 0x4355fa), (0x435dfc, 0x435e60)]
 
-# Timing probes (x86_probe, logged with NANPA2_PROBE=1) before these
-# instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
-# two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
-# wait-for-click at 0x406acc; 0x40616e is the script VM's opcode fetch
-# (logged with NANPA2_VMTRACE=1); 0x4071bb is inside the script hit test
-# 0x4071a4 with edi = its rectangle table (NANPA2_HOTSPOTS=1).
-PROBES = {0x40616e, 0x401a50, 0x40738b, 0x4062ff, 0x40636d, 0x406acc, 0x4071bb}
+PROBES = set(read_hooks('PROBE'))
 
 # entry points only referenced as immediates: WndProc, the logo window
 # subclass proc
@@ -239,7 +227,8 @@ class Lifter:
 
     def check_oracles(self):
         # A direct jump into a reimplemented entry from outside its own body
-        # would become a goto past the override; refuse to build that.
+        # would become a goto past the override (the interpreter also keeps
+        # such jumps in the original); refuse to build that.
         self.oracle_body = {}
         for e in GAME_OVERRIDES:
             self.oracle_body[e] = self.body(e)
@@ -493,7 +482,7 @@ class Lifter:
         w('#include "x86/x86.h"')
         w('#include "hle/hle.h"')
         w('')
-        w('void x86_exec(uint32_t pc)')
+        w('void x86_exec_recomp(uint32_t pc)')
         w('{')
         w('dispatch:')
         w('\tif (pc == X86_RET_SENTINEL) return;')
@@ -532,7 +521,7 @@ class Lifter:
                 if prev_end is not None and a != prev_end:
                     w('\tx86_trap(0x%xu, "fell off block");' % prev_end)
                 w('L_%x:' % a)
-                w('\tX86_COUNT(%du);' % run_len[a])
+                w('\tX86_BLOCK(0x%xu, %du);' % (a, run_len[a]))
             try:
                 body = self.lift(insn)
             except Unsupported as e:
@@ -544,12 +533,6 @@ class Lifter:
             prev_end = a + insn.size
         w('}')
         w('')
-        # which call targets need hand-written code
-        w('const uint32_t x86_hle_targets[] = {')
-        for t in sorted(self.hle_targets | set(HLE_OVERRIDES)):
-            w('\t0x%xu,' % t)
-        w('\t0')
-        w('};')
         open(out_path, 'w').write('\n'.join(lines) + '\n')
 
 

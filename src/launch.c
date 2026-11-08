@@ -11,6 +11,7 @@
 
 #include "fsys.h"
 #include "platform/dialog.h"
+#include "x86/x86.h"
 
 #define PATH_CAP 1024
 
@@ -108,10 +109,20 @@ static const char *check(const char *dir, int need_exe)
 		return "no DATA folder with the pictures (DATA/01.GP4)";
 	fclose(f);
 	if (need_exe) {
+		/* the engine runs the game code of the player's own exe; it
+		 * is not on the CD as a plain file but inside the
+		 * InstallShield cabinet data1.cab (with FLAG0..FLAG6) */
 		f = fsys_open("nanpa2.exe");
 		if (!f)
-			return "no nanpa2.exe (extract it from data1.cab)";
+			return "no nanpa2.exe. It is inside data1.cab on the CD (an InstallShield "
+			       "cabinet): extract nanpa2.exe and FLAG0..FLAG6 from it into this folder, "
+			       "or copy them from an installed copy of the game";
+		uint8_t head[4096];
+		size_t n = fread(head, 1, sizeof head, f);
 		fclose(f);
+		if (!x86_exe_check(head, n))
+			return "nanpa2.exe is not the Taiwan release this engine runs "
+			       "(同級生２, built 2000-07-10)";
 	}
 	return NULL;
 }

@@ -533,3 +533,85 @@ code change.
   rerun (load).
 - Next (docs/reimpl.md order): VM helpers 0x4061d4, 0x40741b, 0x406dc4, 0x406395, 0x4068e1;
   then jump overrides for the opcode handlers.
+
+## 2026-11-08 (x86 interpreter backend: a binary with nothing of the game)
+
+- Goal: a distributable engine, as xsystem4 is: the player supplies the game files,
+  `nanpa2.exe` included, read at run time. Until now `tools/recomp.py` lifted the game code
+  (0x401000-0x407800) into `build/gen/recomp.c`, so the binary was a translation of it.
+- What was embedded: only the lifted code and the `x86_hle_targets` address list. The image
+  (.text/.rdata/.data) and the import table were already loaded at run time
+  (`x86_load_image`, `map_imports`); `hle_is_target` now derives the list from the code range
+  and the overrides, so nothing generated is left in an interp build.
+- 5af0016: `src/x86/interp.c` + `interp_core.h`, a hand-written interpreter over the existing
+  runtime (cpu, x86.h flag helpers, hle_call). It decodes from emulated memory with a decoded
+  instruction cache (one entry per code byte), and keeps the recompile's pacing exactly:
+  X86_POLL on taken direct backward branches into game code, one count per instruction plus
+  rep iterations, the pump 0x401bf0 ECX/EDX clobber (override). Coverage: every opcode form
+  the lifter handles (list in re-notes "Running the game code"); others stop with address and
+  bytes. `-DNANPA2_BACKEND=interp|recomp` (default interp); recomp builds also hold the
+  interpreter (`NANPA2_INTERP=1`) and the lockstep check (`NANPA2_LOCKSTEP=1`,
+  `src/x86/lockstep.c`): the interpreter shadows every recompiled block (X86_BLOCK) with
+  journalled writes; pc, registers, flags, icount, poll countdown and every byte written by
+  either side are compared at the next block, hle_call, x86_poll or return.
+- One override list: `src/hle/overrides.h` (X-macro), included by the interpreter and parsed
+  by recomp.py, also for the probes. 64d794d adds HLE_GAME_OVERRIDE and the oracle tag
+  (X86_ORACLE_TAG, master's NANPA2_DIFF) on both backends.
+- The exe is checked by PE TimeDateStamp 0x39697c6a and SizeOfImage 0xc1000 (launch.c folder
+  check and the loader); a missing one is reported as "inside data1.cab on the CD (an
+  InstallShield cabinet)". Extracting it ourselves: data1.cab is InstallShield 5 (`ISc(`,
+  0x01005100), deflate-compressed; an IS5 header parser plus a small inflate (none in the
+  tree yet) is about a day of work.
+- Lockstep results (headless, scratch saves), no divergence in any run:
+  explore seed 1 (60000 frames) 2.50 G instructions compared, seeds 2/3 (80000 frames,
+  turbo 4) 2.91 G / 3.08 G, seeds 5/6 (300000 frames, turbo 8, through 40.MES, 41.MES and
+  TOWN.MES with about 21000 frames of town) 11.59 G / 11.04 G, seed 7 after 64d794d (same
+  settings, 72 MES files incl. TOWN.MES) 10.91 G; the save40 route 3.8 G (45.8 G in all)
+  (it did not reach 40.MES: with the CD's FLAG6 the title leads to open.mes/name.mes, so
+  the route needs a game-made FLAG6); selftest and the ctest `lockstep` run. 410-1815 block
+  checks per explore run were dropped (the bot's x86_call of 0x4037fc from the 0x40616e
+  probe, mid-block). A planted bug (8-bit `test` computing flags at 32 bits) was caught at
+  the 4th block (0x4020fa).
+- Interpreter alone: explore seed 4 (300000 frames, turbo 8) reached 70 MES files incl.
+  39.MES, and seed 8 after 64d794d 71, no trap; selftest (pump ECX), smoke and wavcheck
+  pass. Those cover what lockstep
+  cannot: the interpreter's own HLE return path, polls, counting and probes.
+- Speed, NANPA2_CPU_MIPS=0, title screen, Release, Intel Mac: 150 M interpreted
+  instructions per second outside HLE calls (113 before always_inline on the hot helpers,
+  64d794d), 6x the 25 MIPS pacing; x86_icount rate 569 MIPS (HLE charges included); the
+  recompile 1617 MIPS by the same icount measure.
+- ctest `no_game_bytes` (interp builds, tests/no_game_bytes.py): every 64-byte run of the
+  exe's sections with at least 12 distinct byte values is looked for in the binary and every
+  file of the .app; a planted run of .text must be found first. Two kinds of runs are left
+  out as computed, not authored, and both were found shared before excluding them: the MP3
+  x^(4/3) table (ISO 11172-3; minimp3 g_pow43 matched .rdata+0xaf71..0xb0f5) and linear
+  ramps (SDL3 in the .app matched a 16-bit ramp at .data+0x76c46). Left out: .rdata 33004,
+  .data 5061, .text 0 of 171320 runs. Result: build/nanpa2 and build/同級生２.app (7 files),
+  0 matches.
+- 65e8d9c: status_init set stage "running" before phase, so the writer thread could write
+  the early file (no "game" section) with stage running; smoke.py read one under load and
+  failed with KeyError 'game' (2 of 6 smoke runs failed while four lockstep jobs ran; the
+  second showed the KeyError, the first was not captured).
+- Build scripts (af109bf): no --backend means interp, no exe or capstone checks, and the game
+  folder only for --test; the "never share" notes apply to recomp only. README Build
+  describes both backends (CLAUDE.md and bundle_macos.sh: see the merge below).
+
+## 2026-11-08 (merge: interpreter backend with reimplementation stage 1)
+
+- Merge of master (b08febf) into the interpreter branch. The game overrides 0x4037fc,
+  0x4039f7 and 0x406455 are `HLE_GAME_OVERRIDE` lines in `src/hle/overrides.h`; recomp.py
+  reads them with `read_hooks('GAME_OVERRIDE')` (its dict is gone), the interpreter includes
+  the same file. `game_call` stays first after the thunks in `hle_call`. x86.h rd*/wr* carry
+  both `X86_TRACE` (differential tests) and `X86_WT` (lockstep); the str_movs fast path is
+  skipped while tracing and logs its writes for lockstep. The backend switch (`x86_exec`,
+  `x86_use_interp`, `x86_backend_name`) moved from x86.c to interp.c, so `diff_replay`, which
+  links x86.c with its own `x86_exec`, still builds.
+- Docs: CLAUDE.md Layout describes interp as the default and recomp as development and
+  reference; docs/reimpl.md, src/game/game.h and units.c point at overrides.h. bundle_macos.sh
+  takes the backend from CMake and prints "for this machine only" for recomp apps only.
+- Results: ctest 9 of 9 in both builds (smoke skipped: screen not visible). NANPA2_DIFF=1 on
+  interp, explore seed 33, 60000 frames, turbo 8 (to s9.mes): 850,851 evaluator, 965
+  constant-reader and 5,655 flag-write calls, 0 mismatches. NANPA2_LOCKSTEP=1 on recomp with
+  the game overrides active, explore seed 9, 120000 frames, turbo 8 (to s31.mes): 2.15 G
+  instructions compared, 916 checks dropped (host call mid-block), no divergence.
+  no_game_bytes: build/nanpa2 and build/同級生２.app (7 files), 0 matches.

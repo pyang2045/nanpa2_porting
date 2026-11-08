@@ -190,10 +190,16 @@ static int run_game(const char *game, const char *exe, const char *font)
 		snprintf(exe_buf, sizeof exe_buf, "%s/nanpa2.exe", game);
 		exe = exe_buf;
 	}
-	if (!x86_load_image(exe)) {
-		fprintf(stderr, "cannot load %s\n", exe);
+	int loaded = x86_load_image(exe);
+	if (loaded <= 0) {
+		fprintf(stderr, loaded < 0 ? "%s is not the nanpa2.exe this engine runs (the Taiwan release "
+				       "built 2000-07-10)\n" : "cannot load %s\n", exe);
 		return 1;
 	}
+#ifdef NANPA2_HAVE_RECOMP
+	x86_lockstep_init();
+#endif
+	SDL_Log("CPU: %s", x86_backend_name());
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
@@ -211,7 +217,18 @@ static int run_game(const char *game, const char *exe, const char *font)
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
+	uint64_t t0 = SDL_GetPerformanceCounter();
 	x86_call(0x402090, 1, &hinstance);
+	/* raw speed with NANPA2_CPU_MIPS=0: everything the game executed,
+	 * HLE time included */
+	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
+	SDL_Log("CPU: %s, %llu instructions in %.1f s (%.1f MIPS)", x86_backend_name(),
+		(unsigned long long)x86_icount, secs, secs > 0 ? (double)x86_icount / secs / 1e6 : 0.0);
+	if (x86_interp_steps) {
+		double own = secs - x86_interp_hle_secs;
+		SDL_Log("CPU: %llu of them interpreted, %.1f s outside HLE calls (%.1f M per second there)",
+			(unsigned long long)x86_interp_steps, own, own > 0 ? (double)x86_interp_steps / own / 1e6 : 0.0);
+	}
 	return 0;
 }
 

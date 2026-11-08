@@ -5,7 +5,7 @@
 #include "game/expr.h"
 #include "x86/x86.h"
 
-/* Sorted by address. Keep in step with tools/recomp.py GAME_OVERRIDES. */
+/* Sorted by address. Keep in step with HLE_GAME_OVERRIDE in src/hle/overrides.h. */
 const struct game_unit game_units[] = {
 	{ 0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0 },
 	{ 0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0 },

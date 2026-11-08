@@ -8,6 +8,7 @@
 #include "game/game.h"
 #include "logo.h"
 #include "lzh.h"
+#include "x86/interp.h"
 
 #define MAX_IMPORTS 256
 
@@ -78,19 +79,17 @@ static int map_imports(void)
 
 int hle_init(const char *game_dir, const char *save_dir)
 {
+	x86_interp_init(); /* the override list, used by both backends */
 	crt_init(game_dir, save_dir);
 	win32_init();
 	return map_imports();
 }
 
+/* Everything outside the game code (thunks, the C runtime) and the
+ * overrides of overrides.h, the list both backends use. */
 int hle_is_target(uint32_t addr)
 {
-	if (addr >= THUNK_IMPORT && addr < THUNK_END)
-		return 1;
-	for (const uint32_t *t = x86_hle_targets; *t; t++)
-		if (*t == addr)
-			return 1;
-	return 0;
+	return x86_is_hle(addr);
 }
 
 /* ---- COM objects ----
@@ -258,6 +257,7 @@ static void override_call(uint32_t addr)
 
 void hle_call(uint32_t addr)
 {
+	X86_LOCKSTEP_POINT(LS_HLE, addr);
 	pop32(); /* return address: the caller continues there */
 	if (addr >= THUNK_COM && addr < THUNK_END) {
 		uint32_t iface = (addr - THUNK_COM) >> 8, method = ((addr - THUNK_COM) & 0xff) >> 2;
