@@ -203,8 +203,10 @@ static void poison(const struct game_unit *u)
 		return;
 	n++;
 	for (int r = 0; r < 8; r++)
-		if (u->scratch_regs & REG_BIT(r))
-			cpu.r[r] = 0xdead0000u ^ (n << 4) ^ (uint32_t)r;
+		if (u->scratch_regs & REG_BIT(r)) {
+			uint32_t keep = diff_live_bits(u, r);
+			cpu.r[r] = (cpu.r[r] & keep) | ((0xdead0000u ^ (n << 4) ^ (uint32_t)r) & ~keep);
+		}
 	if (!u->flags_out)
 		cpu.cf = cpu.zf = cpu.sf = cpu.of = cpu.pf = n & 1;
 }

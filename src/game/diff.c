@@ -92,7 +92,7 @@ int diff_check(const struct game_unit *u, const struct diff_record *rec, uint32_
 	if (u->jump && pc != rec->out_pc)
 		note(&w, " exit pc want %08x got %08x;", rec->out_pc, pc);
 	for (int r = 0; r < 8; r++)
-		if (!(u->scratch_regs & REG_BIT(r)) && cpu.r[r] != rec->out_r[r])
+		if ((cpu.r[r] ^ rec->out_r[r]) & diff_live_bits(u, r))
 			note(&w, " %s want %08x got %08x;", reg_names[r], rec->out_r[r], cpu.r[r]);
 	if (u->flags_out && (diff_flags(&cpu) & 0x8c5) != (rec->out_flags & 0x8c5))
 		note(&w, " flags want %03x got %03x;", rec->out_flags & 0x8c5, diff_flags(&cpu) & 0x8c5);

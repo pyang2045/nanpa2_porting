@@ -241,6 +241,7 @@ static void override_call(uint32_t addr)
 		unsigned char *out = lzh_decode(x86_ptr(src, cap), cap, &n);
 		if (!out)
 			x86_trap(addr, "corrupt GP4/ANI data");
+		X86_TRACE(dst, (uint32_t)n, 1); /* differential tests undo it */
 		memcpy(x86_ptr(dst, (uint32_t)n), out, n);
 		/* emulated CPU time of the native decoder: lifting it and counting
 		 * gave about 70 instructions per input byte + 1.2 per output byte

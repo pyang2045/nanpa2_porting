@@ -22,6 +22,9 @@
  * cases it leaves to the original handler, or NULL */
 #define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0 }
 
+/* a RESUME piece that calls native routines (file loads, 0x403624) */
+#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words }
+
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
  * at each function. */
@@ -48,10 +51,35 @@ const struct game_unit game_units[] = {
 	JUMP(0x40663e, "op_12_set_label", game_op_set_label, AT_LOOP),
 	JUMP(0x406658, "op_13_call_label", game_op_call_label, AT_LOOP),
 	RESUME(0x40666b, "op_13_call_label_done", game_op_call_label_done, AT_LOOP, 1),
+	JUMP(0x406671, "op_13ext_menu", game_op_menu, AT_LOOP),
+	RESUME(0x4066b8, "op_13ext_menu_round", game_op_menu_round, AFTER_BLOCK, 1),
+	RESUME_SYS(0x4066bd, "op_13ext_menu_pumped", game_op_menu_pumped, AFTER_BLOCK, 1),
+	RESUME(0x4066e6, "op_13ext_menu_framed", game_op_menu_framed, AFTER_BLOCK, 1),
+	RESUME(0x4066f6, "op_13ext_menu_tested0", game_op_menu_tested0, AFTER_BLOCK, 1),
+	RESUME(0x406704, "op_13ext_menu_handled0", game_op_menu_handled0, AFTER_BLOCK, 1),
+	RESUME(0x406714, "op_13ext_menu_waited0", game_op_menu_waited0, AFTER_BLOCK, 1),
+	RESUME(0x406728, "op_13ext_menu_tested1", game_op_menu_tested1, AFTER_BLOCK, 1),
+	RESUME(0x406736, "op_13ext_menu_handled1", game_op_menu_handled1, AFTER_BLOCK, 1),
+	RESUME(0x40674a, "op_13ext_menu_waited1", game_op_menu_waited1, AFTER_BLOCK, 1),
+	RESUME(0x406761, "op_13ext_menu_tested2", game_op_menu_tested2, AFTER_BLOCK, 1),
+	RESUME(0x40676f, "op_13ext_menu_handled2", game_op_menu_handled2, AFTER_BLOCK, 1),
+	RESUME(0x406783, "op_13ext_menu_waited2", game_op_menu_waited2, AFTER_BLOCK, 1),
+	RESUME(0x40679a, "op_13ext_menu_tested3", game_op_menu_tested3, AFTER_BLOCK, 1),
+	RESUME(0x4067a8, "op_13ext_menu_handled3", game_op_menu_handled3, AFTER_BLOCK, 1),
+	RESUME(0x4067bc, "op_13ext_menu_waited3", game_op_menu_waited3, AFTER_BLOCK, 1),
+	RESUME(0x4067d3, "op_13ext_menu_tested4", game_op_menu_tested4, AFTER_BLOCK, 1),
+	RESUME(0x4067e1, "op_13ext_menu_handled4", game_op_menu_handled4, AFTER_BLOCK, 1),
+	RESUME(0x4067f5, "op_13ext_menu_waited4", game_op_menu_waited4, AFTER_BLOCK, 1),
+	RESUME(0x406810, "op_13ext_menu_tested5", game_op_menu_tested5, AFTER_BLOCK, 1),
+	RESUME_SYS(0x406822, "op_13ext_menu_handled5", game_op_menu_handled5, AFTER_BLOCK, 1),
+	RESUME_SYS(0x40683b, "op_13ext_menu_waited5", game_op_menu_waited5, AFTER_BLOCK, 1),
 	JUMP_SYS(0x406842, "op_0414_menu_items", game_op_menu_items, NULL),
 	CALL(0x4068e1, "vm_menu_item", game_menu_item_regs, REG_BIT(EDX), 0),
 	JUMP_SYS(0x406916, "op_0415_cursor", game_op_cursor, NULL),
 	JUMP(0x4069be, "op_18_text_colour", game_op_text_colour, AT_LOOP),
+	JUMP(0x4069ce, "op_15_print_number", game_op_print_number, AT_LOOP),
+	RESUME(0x4069f7, "op_15_print_number_done", game_op_print_number_done, AT_LOOP, 1),
+	CALL(0x4069fd, "vm_format_number", game_format_number_regs, 0, 0),
 	JUMP(0x406a9a, "op_14_call_offset", game_op_call_offset, AT_LOOP),
 	RESUME(0x406aa7, "op_14_call_offset_done", game_op_call_offset_done, AT_LOOP, 1),
 	/* ECX (the frame count) goes into 0x4075c6 */
@@ -66,9 +94,15 @@ const struct game_unit game_units[] = {
 	CALL(0x406dc4, "vm_string_arg", game_string_arg_regs, 0, 0),
 	JUMP_SYS(0x406e11, "op_041d_picture", game_op_picture, NULL),
 	JUMP_SYS(0x406f06, "op_0416_palette", game_op_palette, game_native_palette),
+	JUMP_SYS(0x406f7c, "op_041e_jump_mes", game_op_jump_mes, NULL),
+	JUMP_SYS(0x406fcd, "op_041f_call_mes", game_op_call_mes, NULL),
+	/* ECX's upper half is the count's (`mov cx, 0x1e`) */
+	RESUME_SYS(0x40704a, "op_041f_call_mes_done", game_op_call_mes_done,
+		REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 4),
 	JUMP_SYS(0x407096, "op_1a_anim", game_op_anim, game_native_anim),
 	/* not enabled in overrides.h yet (no call seen under the diff) */
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
+	JUMP_SYS(0x4070d5, "op_0421_flag_file", game_op_flag_file, NULL),
 	JUMP(0x4071a4, "op_0423_hit_test", game_op_hit_test, AT_LOOP),
 	JUMP_SYS(0x407204, "op_19_misc", game_op_misc, game_native_misc),
 	JUMP(0x40739b, "op_0422_args_only", game_op_args_only, AT_LOOP),

@@ -140,6 +140,35 @@ uint32_t game_op_call_label_done(void);  /* 13 0x40666b */
 uint32_t game_op_call_offset(void);      /* 14 0x406a9a */
 uint32_t game_op_call_offset_done(void); /* 14 0x406aa7 */
 uint32_t game_op_delay(void);            /* 16 0x406aad */
+uint32_t game_op_print_number(void);      /* 15 0x4069ce */
+uint32_t game_op_print_number_done(void); /* 15 0x4069f7 */
+void game_format_number_regs(void);       /* 0x4069fd */
+uint32_t game_op_jump_mes(void);          /* 04 1e 0x406f7c */
+uint32_t game_op_call_mes(void);          /* 04 1f 0x406fcd */
+uint32_t game_op_call_mes_done(void);     /* 04 1f 0x40704a */
+uint32_t game_op_flag_file(void);         /* 04 21 0x4070d5 */
+uint32_t game_op_menu(void);              /* 04 13 0x406671 */
+uint32_t game_op_menu_round(void);        /* 04 13 0x4066b8 */
+uint32_t game_op_menu_pumped(void);       /* 04 13 0x4066bd */
+uint32_t game_op_menu_framed(void);       /* 04 13 0x4066e6 */
+uint32_t game_op_menu_tested0(void);  /* 04 13 0x4066f6 */
+uint32_t game_op_menu_handled0(void); /* 04 13 0x406704 */
+uint32_t game_op_menu_waited0(void);  /* 04 13 0x406714 */
+uint32_t game_op_menu_tested1(void);  /* 04 13 0x406728 */
+uint32_t game_op_menu_handled1(void); /* 04 13 0x406736 */
+uint32_t game_op_menu_waited1(void);  /* 04 13 0x40674a */
+uint32_t game_op_menu_tested2(void);  /* 04 13 0x406761 */
+uint32_t game_op_menu_handled2(void); /* 04 13 0x40676f */
+uint32_t game_op_menu_waited2(void);  /* 04 13 0x406783 */
+uint32_t game_op_menu_tested3(void);  /* 04 13 0x40679a */
+uint32_t game_op_menu_handled3(void); /* 04 13 0x4067a8 */
+uint32_t game_op_menu_waited3(void);  /* 04 13 0x4067bc */
+uint32_t game_op_menu_tested4(void);  /* 04 13 0x4067d3 */
+uint32_t game_op_menu_handled4(void); /* 04 13 0x4067e1 */
+uint32_t game_op_menu_waited4(void);  /* 04 13 0x4067f5 */
+uint32_t game_op_menu_tested5(void);  /* 04 13 0x406810 */
+uint32_t game_op_menu_handled5(void); /* 04 13 0x406822 */
+uint32_t game_op_menu_waited5(void);  /* 04 13 0x40683b */
 
 /* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
 uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */

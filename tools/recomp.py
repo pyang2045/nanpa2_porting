@@ -84,6 +84,16 @@ PROBES = set(read_hooks('PROBE'))
 EXTRA_ENTRIES = [0x401000, 0x4021c0, 0x401fd0]
 
 
+def is_esp_load(insn):
+    """`mov esp, [mem]` (the VM's stack resets, 0x40638d 0x406fc2): the next
+    instruction goes through dispatch, so a differential test's oracle stops
+    right after it, where the interpreter (which checks every instruction)
+    stops too (ESP above the unit's entry: x86_stop_at)."""
+    ops = insn.operands
+    return insn.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == X.X86_OP_REG \
+        and ops[0].reg == X.X86_REG_ESP and ops[1].type == X.X86_OP_MEM
+
+
 class PE:
     def __init__(self, path):
         d = open(path, 'rb').read()
@@ -191,6 +201,8 @@ class Lifter:
                         if op.imm in self.pe_code_starts():
                             work.append(op.imm)
                             self.labels.add(op.imm)
+                if is_esp_load(insn):
+                    self.labels.add(nxt)
                 if m == 'jmp':
                     if ops[0].type == X.X86_OP_IMM:
                         self.labels.add(ops[0].imm)
@@ -592,6 +604,8 @@ class Lifter:
             except Unsupported as e:
                 self.unsupported.setdefault(str(e), []).append(a)
                 body = 'x86_trap(0x%xu, "unsupported: %s");' % (a, insn.mnemonic)
+            if is_esp_load(insn):
+                body += ' pc = 0x%xu; goto dispatch;' % (a + insn.size)
             if a in PROBES:
                 body = 'x86_probe(0x%xu); ' % a + body
             w('\t%s /* %x: %s %s */' % (body, a, insn.mnemonic, insn.op_str))
