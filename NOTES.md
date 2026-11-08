@@ -826,3 +826,49 @@ code change.
   - the click handler path 0x40613f-0x40616c and ext 20 0x4070bc (never reached; left
     native by predicates, and the C traps if it gets there without them);
   - 0x403510 sub-op 4 (spins on the frame counter).
+
+## 2026-11-08 (reimplementation stage 5B: measurement, palette, screen routines, spin pieces)
+
+Part of stage 5B by this branch (file, input and startup are a separate entry).
+
+- e1fc722, 597b4e4: the measurement. `NANPA2_NATIVE_REPORT=1` (interpreter) counts the
+  instructions run in 0x401000-0x4077ac outside a differential oracle and prints them by
+  function at exit; the status file has `native_game_insns`. `tools/reimpl_status.py` now counts
+  as needed what the C calls through `game_ncall`/`ncall`/`blit`/`colour_rect` and the original
+  bodies behind `native` predicates. Stage 4's 50.4% is 36.4% on the same code (19 functions
+  that were counted as done still ran, plus the fallbacks).
+- 77ec0c5: the spin mechanism. The compare holds the timer off, so a C wait loop would hang
+  under NANPA2_DIFF. A wait loop is a jump unit returning its own address while it waits
+  (`SPIN`, `poll_self`); `game_jump` polls after the compare and the poison. 0x403510 (slot
+  control) is a jump unit entered by op 1a's call exit 0x4070b6; sub-op 4 goes on in 0x4035b5.
+- d4a18a5: palette tables, upload, fade start (`src/game/screen.c`), op 04 16 mode 3 waits in
+  the piece 0x406f41. Both fallbacks (1a sub-op 4, 04 16 3) are gone.
+- b3bb628, 7aa41a9: lock 0x401190, unlock 0x4012b0, cursor restore 0x4011f0 (units), cursor
+  draw 0x4012e0, show/hide/position 0x401c40/60/80, blits 0x401430, 0x4014f0, 0x401670, fill
+  0x4017b0, XOR 0x401870, picture load 0x406e20.
+- d7e64a7, 252c690: fixes the long runs found: 0x401e10 must put its result in EAX (op 19 2
+  stores it in S), the cursor position argument is at ESP + 4 (the write-back of y + 40 is
+  compared), and the screen lock leaves ECX = 5 * pitch when the screen is shifted.
+- Results (interp NANPA2_DIFF=1 NANPA2_DIFF_POISON=1, build 252c690):
+
+  | Run | Turbo | Frames | Reached | Mismatches / traps |
+  |---|---|---|---|---|
+  | interp seed 31 (new game) | 8 | 300000 | Prologue to S33 | 0 / 0 |
+  | interp seed 33 (new game) | 8 | 300000 | Prologue to S33 | 0 / 0 |
+  | interp seed 42 (st3/saves32) | 2 | 300000 | OPEN1 ... S61, misako | 0 / 0 |
+  | interp seed 43 (st3/saves32) | 2 | 300000 | main game: 40.MES, 41, TOWN at 67876, 42, 43, 35, quiz2, 36 | 0 / 0 |
+  | recomp seed 45 (st3/saves32) | 2 | 150000 | main game: 40.MES, 41, TOWN, 63 | 0 / 0 |
+  | recomp NANPA2_LOCKSTEP=1 seed 9 | 8 | 120000 | S24 | no divergence, 41.6 M instructions compared |
+
+  ctest 9/9 on both builds (smoke skipped). Sabotage (cursor white 7 -> 6): 20 mismatches in
+  a 20000-frame run, caught as op 04 15 writes. Pacing: insns/call of the units agree with the
+  native ones to the digits for lock/unlock/cursor restore, 0.1% for the rest.
+  Units never run: swap 0x401670 (op 04 1a) and 04 18 ran 154 times; swap never; click path and
+  ext 20 as before.
+- Native instructions, plain run seed 43 (saves32), 200000 frames, turbo 8, build 252c690: 50.45 M
+  of 79.6 G charged (0.06%), 49.9 M of them the cursor redraw of the window procedure's
+  WM_PAINT (0x402570 -> 0x4012e0, startup/input), then the window procedure 0.5 M, file load
+  0.03 M, startup 0.001 M. Before this branch: 97 M in 5000 frames, 70% in the two spin loops.
+- Not done: the dissolve wipe 0x401a50 (op 19 sub-op 4: reached twice in the seed 43 run, so it
+  matters; needs pieces with its frame at the native addresses), the click path
+  0x40613f-0x40616c, the map (04 26 sub-ops 5, 7, 12, 0x403a70; another agent).
