@@ -410,6 +410,14 @@ HLE_GAME_OVERRIDE(0x4021c0, "window procedure (src/game/startup.c)")
  * player 0x401e20, an HLE override, so nothing enters it */
 HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
 
+/* Stage 6: the dissolve wipe (src/game/wipe.c): op 19 sub-op 4 calls it as a
+ * call exit (return 0x40738b), it pumps messages in between (0x401b90) */
+HLE_GAME_JUMP(0x401a50, "dissolve wipe (src/game/wipe.c)")
+HLE_GAME_JUMP(0x401b90, "dissolve wipe: after the pump")
+HLE_GAME_JUMP(0x40738b, "op 19 4: after the wipe")
+HLE_GAME_CALL_EXIT(0x401b90, "dissolve wipe: pump messages (0x401bf0)")
+HLE_GAME_CALL_EXIT(0x40738b, "op 19 4: the dissolve wipe (0x401a50)")
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the

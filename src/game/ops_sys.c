@@ -95,35 +95,6 @@ static uint32_t push_rect(uint32_t eax)
 	return eax;
 }
 
-/* ---- the native-handler predicates (units.c) */
-
-/* Argument 0 is a single constant followed by the expression end 03:
- * *v = its value. Only 30-3f, `07 b` and `08 h l`; anything else counts
- * as not literal. Reads the script only (no time charged). */
-static int literal_arg0(uint32_t *v)
-{
-	uint32_t pc = cpu.r[ESI], b = vm_script_byte(pc);
-	if (b >= 0x30 && b <= 0x3f) {
-		*v = b - 0x30;
-		pc += 1;
-	} else if (b == 0x07) {
-		*v = vm_script_byte(pc + 1) >> 2;
-		pc += 2;
-	} else if (b == 0x08) {
-		*v = (vm_script_byte(pc + 1) >> 2) << 6 | vm_script_byte(pc + 2) >> 2;
-		pc += 3;
-	} else {
-		return 0;
-	}
-	return vm_script_byte(pc) == 0x03;
-}
-
-int game_native_misc(void) /* 19: sub-op 4 is the dissolve wipe */
-{
-	uint32_t v;
-	return !literal_arg0(&v) || v == 4 || v > 5;
-}
-
 /* ---- the handlers */
 
 /* 17 [c]: clear the text window (0x406b24) in colour c (c << 4 as the
@@ -506,7 +477,7 @@ uint32_t game_op_anim_done(void) /* 0x4070b6 */
  *      since the stopwatch, else whether a fade runs (0x401e10); other a:
  *      b = 0 start the stopwatch, 1 the fade length, 2 S = a - 1;
  *   3 y: swap 512 bytes of row y + 0x40 bytes between surfaces 0 and 1;
- *   4: dissolve wipe (the native handler's);
+ *   4: dissolve wipe (wipe.c: pieces 0x401a50 / 0x401b90, back at 0x40738b);
  *   5 a: S = a. */
 static uint32_t misc_restore(void)
 {
@@ -588,6 +559,17 @@ static uint32_t misc_row_swap(void)
 	return cpu.r[EAX];
 }
 
+/* 0x40738b: after the wipe: add esp, 8; the handler's tail */
+uint32_t game_op_wipe_done(void)
+{
+	cpu.r[ESP] += 8;
+	uint32_t esi = pop32();
+	vm_set_reg(VM_REG_S, cpu.r[EAX]);
+	cpu.r[ESI] = esi;
+	X86_COUNT(5); /* add esp, jmp, mov [S], pop esi, jmp 0x4060f9 */
+	return loop_at(0x407235);
+}
+
 uint32_t game_op_misc(void)
 {
 	uint32_t n = parse(), eax;
@@ -648,8 +630,15 @@ uint32_t game_op_misc(void)
 		eax = ax_(cpu.r[EAX], rd16(ARG(1)));
 		X86_COUNT(2);
 		break;
-	default: /* 4 and out of the table: game_native_misc */
-		x86_trap(0x40720f, "op 19: sub-op left to the native handler reached C");
+	case 4: /* the dissolve wipe: push esi (saved), 2, 0 and call 0x401a50 */
+		push32(esi);
+		push32(2);
+		push32(0);
+		push32(0x40738b);
+		X86_COUNT(3 + 1);
+		return 0x401a50;
+	default:
+		x86_trap(0x40720f, "op 19: sub-op out of the table");
 	}
 	vm_set_reg(VM_REG_S, eax);
 	cpu.r[EAX] = eax;

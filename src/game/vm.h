@@ -195,11 +195,12 @@ uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
 uint32_t game_op_anim(void);            /* 1a 0x407096 */
 uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
+uint32_t game_op_wipe_done(void);        /* 0x40738b */
+uint32_t game_wipe(void);                /* 0x401a50, src/game/wipe.c */
+uint32_t game_wipe_pumped(void);         /* 0x401b90 */
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
 uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
-/* the cases each leaves to the native handler (struct game_unit.native) */
-int game_native_misc(void);
 
 /* ---- src/game/loop.c: the VM loop, blocks, text, waits (stage 4) ---- */
 uint32_t game_vm_entry(void);           /* 0x4060d4 */
