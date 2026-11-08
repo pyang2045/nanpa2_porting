@@ -14,6 +14,13 @@
 #define CODE_LEN (CODE_END - CODE_START)
 #define NOREG 8
 
+/* the executor's hot helpers: inlined even where the compiler would not */
+#if defined(__GNUC__) || defined(__clang__)
+#define X86_HOT static inline __attribute__((always_inline))
+#else
+#define X86_HOT static inline
+#endif
+
 struct dec {
 	uint16_t op;    /* opcode byte, 0x100 + second byte for 0f xx */
 	uint8_t len;    /* 0 = not decoded yet */
@@ -30,7 +37,9 @@ struct dec {
 	uint32_t imm2;  /* second immediate: shld/shrd count */
 };
 
-/* per code byte: 1 = an override (HLE_OVERRIDE): entering it calls hle_call */
+/* per code byte: an override (src/hle/overrides.h), entering it calls
+ * hle_call; OVR_GAME ones keep their original body as the oracle */
+enum { OVR_NONE, OVR_HLE, OVR_GAME };
 extern uint8_t x86_interp_override[CODE_LEN];
 /* decoded instruction per code byte (len 0 = not decoded yet) */
 extern struct dec dec_cache[CODE_LEN];
@@ -69,7 +78,7 @@ static inline void reg_put(int r, int sz, uint32_t v)
 		set8h(r - 4, v);
 }
 
-static inline uint32_t dec_ea(const struct dec *d)
+X86_HOT uint32_t dec_ea(const struct dec *d)
 {
 	uint32_t a = (uint32_t)d->disp;
 	if (d->base != NOREG)
@@ -103,7 +112,7 @@ static inline int cond(uint32_t c)
 }
 
 /* group 1: add or adc sbb and sub xor cmp (k = 0..7) */
-static inline uint32_t alu(int k, uint32_t a, uint32_t b, int bits)
+X86_HOT uint32_t alu(int k, uint32_t a, uint32_t b, int bits)
 {
 	switch (k) {
 	case 0: return f_add(a, b, 0, bits);

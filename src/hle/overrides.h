@@ -7,12 +7,24 @@
  * hle_call(), which runs the replacement (src/hle/hle.c override_call or a
  * module it calls).
  *
- * Use as an X-macro: define HLE_OVERRIDE(addr, what) and/or
- * HLE_PROBE(addr, what), then include this file. No include guard.
+ * HLE_GAME_OVERRIDE: game logic reimplemented in C (src/game,
+ * docs/reimpl.md). An override like the others, but its original body is
+ * kept as the differential-test oracle: x86_exec(X86_ORACLE_TAG | addr)
+ * runs it, skipping the override for that entry (recomp: the lifted body;
+ * interpreter: the decoded body, where direct jumps back to the entry from
+ * inside it stay in the original as well). recomp.py reads these lines into
+ * GAME_OVERRIDES.
+ *
+ * Use as an X-macro: define HLE_OVERRIDE(addr, what), HLE_GAME_OVERRIDE
+ * and/or HLE_PROBE(addr, what), then include this file. No include guard.
  */
 #ifndef HLE_OVERRIDE
 #define HLE_OVERRIDE(addr, what)
 #define HLE_OVERRIDES_UNDEF_O
+#endif
+#ifndef HLE_GAME_OVERRIDE
+#define HLE_GAME_OVERRIDE(addr, what)
+#define HLE_OVERRIDES_UNDEF_G
 #endif
 #ifndef HLE_PROBE
 #define HLE_PROBE(addr, what)
@@ -36,6 +48,11 @@ HLE_OVERRIDE(0x4075f0, "GP4/ANI decompressor (src/lzh.c)")
 HLE_OVERRIDE(0x402cb0, "play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)")
 HLE_OVERRIDE(0x403360, "play voice (SPEECH%s through DirectSound)")
 
+/* Reimplemented game logic (none on this branch yet; master's
+ * GAME_OVERRIDES 0x4037fc, 0x4039f7, 0x406455 go here as
+ * HLE_GAME_OVERRIDE(0x4037fc, "script expression evaluator (src/game/expr.c)")
+ * when src/game is merged). */
+
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the
  * two text-character draws (0x4062ff ASCII, 0x40636d Big5), and the
@@ -54,6 +71,10 @@ HLE_PROBE(0x4071bb, "script hit test rectangle table")
 #ifdef HLE_OVERRIDES_UNDEF_O
 #undef HLE_OVERRIDE
 #undef HLE_OVERRIDES_UNDEF_O
+#endif
+#ifdef HLE_OVERRIDES_UNDEF_G
+#undef HLE_GAME_OVERRIDE
+#undef HLE_OVERRIDES_UNDEF_G
 #endif
 #ifdef HLE_OVERRIDES_UNDEF_P
 #undef HLE_PROBE

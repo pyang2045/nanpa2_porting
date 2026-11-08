@@ -34,6 +34,11 @@ extern uint8_t *x86_mem;
 #define CODE_END 0x00407800u
 /* Return address the host pushes before entering lifted code. */
 #define X86_RET_SENTINEL 0xfffffff0u
+/* x86_exec(X86_ORACLE_TAG | addr) runs the original of a function
+ * reimplemented in src/game (HLE_GAME_OVERRIDE in src/hle/overrides.h),
+ * skipping the override for that entry; on either backend. Used only by
+ * the differential test (NANPA2_DIFF). */
+#define X86_ORACLE_TAG 0x40000000u
 
 _Noreturn void x86_trap(uint32_t pc, const char *why);
 /* called by x86_trap after the register dump (dev logging), may be NULL */
@@ -537,6 +542,10 @@ void x86_exec_recomp(uint32_t pc);
 /* 1 when x86_exec runs the interpreter (always in interp builds; in recomp
  * builds with NANPA2_INTERP=1). */
 extern int x86_use_interp;
+/* instructions the interpreter decoded and ran (x86_icount also holds the
+ * time charged for HLE work and repeated string iterations) */
+extern uint64_t x86_interp_steps;
+extern double x86_interp_hle_secs; /* wall time in HLE calls it made */
 /* the backend's name for logs: "interp", "recomp" or "lockstep" */
 const char *x86_backend_name(void);
 

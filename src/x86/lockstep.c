@@ -189,6 +189,7 @@ static uint32_t sh_poll_at;
 #define MWR16(a, v) j_wr16((a), (v))
 #define MWR32(a, v) j_wr32((a), (v))
 #define COUNT(n) (sh_icount += (n))
+#define STEP() ((void)0)
 #define POLL(at) do { if (--sh_countdown <= 0) sh_poll_at = (at); } while (0)
 #define STR_MOVS(sz, rep) j_movs((sz), (rep))
 #define STR_STOS(sz, rep) j_stos((sz), (rep))
@@ -325,7 +326,7 @@ void x86_lockstep_block(uint32_t pc, uint32_t n)
 	sh_icount = x86_icount;
 	sh_countdown = x86_poll_countdown;
 	sh_poll_at = 0;
-	exp_pc = s_run(pc, n);
+	exp_pc = s_run(pc, n, pc); /* a block start is game code: an oracle entry too */
 	exp_cpu = cpu;
 	cpu = saved;
 	exp_icount = sh_icount;

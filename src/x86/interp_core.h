@@ -9,6 +9,8 @@
  *   SHADOW                 0 or 1
  *   MRD8/16/32(a), MWR8/16/32(a, v)   emulated memory
  *   COUNT(n)               instructions executed (x86_icount)
+ *   STEP()                 one instruction decoded and run (speed statistics)
+ *   HLE_CALL(pc)           hle_call (interpreter only)
  *   POLL(at)               a taken backward branch at `at` (X86_POLL)
  *   STR_MOVS/STOS/LODS/SCAS/CMPS(sz, rep)   string instructions
  *
@@ -19,27 +21,27 @@
  * repeated string iteration.
  */
 
-static inline void IFN(push32)(uint32_t v) { cpu.r[ESP] -= 4; MWR32(cpu.r[ESP], v); }
-static inline void IFN(push16)(uint32_t v) { cpu.r[ESP] -= 2; MWR16(cpu.r[ESP], v); }
-static inline uint32_t IFN(pop32)(void) { uint32_t v = MRD32(cpu.r[ESP]); cpu.r[ESP] += 4; return v; }
-static inline uint32_t IFN(pop16)(void) { uint32_t v = MRD16(cpu.r[ESP]); cpu.r[ESP] += 2; return v; }
+X86_HOT void IFN(push32)(uint32_t v) { cpu.r[ESP] -= 4; MWR32(cpu.r[ESP], v); }
+X86_HOT void IFN(push16)(uint32_t v) { cpu.r[ESP] -= 2; MWR16(cpu.r[ESP], v); }
+X86_HOT uint32_t IFN(pop32)(void) { uint32_t v = MRD32(cpu.r[ESP]); cpu.r[ESP] += 4; return v; }
+X86_HOT uint32_t IFN(pop16)(void) { uint32_t v = MRD16(cpu.r[ESP]); cpu.r[ESP] += 2; return v; }
 
-static inline uint32_t IFN(mrd)(uint32_t a, int sz)
+X86_HOT uint32_t IFN(mrd)(uint32_t a, int sz)
 {
 	return sz == 4 ? MRD32(a) : sz == 2 ? MRD16(a) : MRD8(a);
 }
 
-static inline void IFN(mwr)(uint32_t a, uint32_t v, int sz)
+X86_HOT void IFN(mwr)(uint32_t a, uint32_t v, int sz)
 {
 	if (sz == 4) MWR32(a, v); else if (sz == 2) MWR16(a, v); else MWR8(a, v);
 }
 
-static inline uint32_t IFN(rm_get)(const struct dec *d, int sz)
+X86_HOT uint32_t IFN(rm_get)(const struct dec *d, int sz)
 {
 	return d->modreg ? reg_get(d->rm, sz) : IFN(mrd)(dec_ea(d), sz);
 }
 
-static inline void IFN(rm_put)(const struct dec *d, int sz, uint32_t v)
+X86_HOT void IFN(rm_put)(const struct dec *d, int sz, uint32_t v)
 {
 	if (d->modreg)
 		reg_put(d->rm, sz, v);
@@ -49,8 +51,13 @@ static inline void IFN(rm_put)(const struct dec *d, int sz, uint32_t v)
 
 /* Run from pc. Interpreter: until a return to X86_RET_SENTINEL. Shadow:
  * `limit` instructions, or up to a transfer out of game code (an HLE
- * target or the sentinel). Returns the next pc. */
-static uint32_t IFN(run)(uint32_t pc, uint32_t limit)
+ * target or the sentinel). Returns the next pc. `native` is an address
+ * whose override is skipped when it is fetched next: the entry of an
+ * oracle run (X86_ORACLE_TAG), or a direct jump inside a reimplemented
+ * function's original body back to its entry (HLE_GAME_OVERRIDE; the
+ * recompile turns those into gotos, and recomp.py refuses direct jumps to
+ * the entry from anywhere else). */
+static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 {
 	(void)limit;
 #if SHADOW
@@ -60,18 +67,19 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit)
 		if (pc == X86_RET_SENTINEL)
 			return pc;
 		uint32_t off = pc - CODE_START;
-		if (off >= CODE_LEN || x86_interp_override[off]) {
+		if ((off >= CODE_LEN || x86_interp_override[off]) && pc != native) {
 #if SHADOW
 			return pc;
 #else
 			/* as the recompiled dispatch: hle_call pops the return
 			 * address and the caller continues there */
 			uint32_t ra = rd32(cpu.r[ESP]);
-			hle_call(pc);
+			HLE_CALL(pc);
 			pc = ra;
 			continue;
 #endif
 		}
+		native = 0;
 #if SHADOW
 		if (steps++ == limit)
 			return pc;
@@ -88,11 +96,15 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit)
 		int sz = d->osz, bits = sz * 8;
 		uint32_t a, t;
 		COUNT(1);
+		STEP();
 
 #define JUMP(target) do { \
 	uint32_t t_ = (target); \
-	if (t_ <= pc && !x86_is_hle(t_)) \
+	int game_ = t_ - CODE_START < CODE_LEN && x86_interp_override[t_ - CODE_START] == OVR_GAME; \
+	if (t_ <= pc && (game_ || !x86_is_hle(t_))) \
 		POLL(pc); \
+	if (game_) \
+		native = t_; \
 	pc = t_; \
 	goto next; \
 } while (0)

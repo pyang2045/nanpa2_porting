@@ -44,6 +44,14 @@ def read_hooks(kind):
 
 HLE_OVERRIDES = read_hooks('OVERRIDE')
 
+# Game logic reimplemented in C (HLE_GAME_OVERRIDE, src/game,
+# docs/reimpl.md). They are overrides like the ones above, but their lifted
+# bodies are kept as the differential-test oracle: reachable only through
+# the tagged entry ORACLE_TAG | addr (x86_exec), never from game code.
+GAME_OVERRIDES = read_hooks('GAME_OVERRIDE')
+HLE_OVERRIDES.update(GAME_OVERRIDES)
+ORACLE_TAG = 0x40000000  # src/x86/x86.h X86_ORACLE_TAG
+
 # Known jump tables in .text: base -> number of entries (computed if None)
 TEXT_TABLES = [0x40247c, 0x402508, 0x402550, 0x403521, 0x40368b, 0x40386d,
                0x40620b, 0x406262, 0x406922, 0x407216, 0x4072b7]
@@ -134,12 +142,14 @@ class Lifter:
                     work.append(v)
         # the CRT entry calls WinMain (0x402090); start there too
         work.append(0x402090)
+        # oracle bodies of the reimplemented functions
+        work += list(GAME_OVERRIDES)
         for w in work:
             self.labels.add(w)
         seen = set()
         while work:
             a = work.pop()
-            if a in seen or not in_code(a) or a in HLE_OVERRIDES:
+            if a in seen or not in_code(a) or (a in HLE_OVERRIDES and a not in GAME_OVERRIDES):
                 continue
             while True:
                 if a in seen:
@@ -187,7 +197,47 @@ class Lifter:
                 if m in ('ret', 'retf', 'int3', 'hlt'):
                     break
                 a = nxt
+        self.check_oracles()
         return seen
+
+    def body(self, entry):
+        """Instructions reachable from entry without following calls."""
+        out, work = set(), [entry]
+        while work:
+            a = work.pop()
+            if a in out or a not in self.insns:
+                continue
+            out.add(a)
+            insn = self.insns[a]
+            m, ops = insn.mnemonic, insn.operands
+            if m in ('ret', 'retf', 'int3', 'hlt'):
+                continue
+            if m == 'jmp':
+                if ops[0].type == X.X86_OP_IMM:
+                    work.append(ops[0].imm)
+                else:  # jump table: its targets were seeded from TEXT_TABLES
+                    mm = ops[0].mem if ops[0].type == X.X86_OP_MEM else None
+                    if mm is not None and mm.disp in self.tables:
+                        work += [self.pe.u32(mm.disp + 4 * i) for i in range(self.tables[mm.disp])]
+                continue
+            if (m.startswith('j') or m.startswith('loop')) and ops[0].type == X.X86_OP_IMM:
+                work.append(ops[0].imm)
+            work.append(a + insn.size)
+        return out
+
+    def check_oracles(self):
+        # A direct jump into a reimplemented entry from outside its own body
+        # would become a goto past the override (the interpreter also keeps
+        # such jumps in the original); refuse to build that.
+        self.oracle_body = {}
+        for e in GAME_OVERRIDES:
+            self.oracle_body[e] = self.body(e)
+        for a, insn in self.insns.items():
+            m, ops = insn.mnemonic, insn.operands
+            if (m == 'jmp' or m.startswith('j') or m.startswith('loop')) and ops \
+                    and ops[0].type == X.X86_OP_IMM and ops[0].imm in GAME_OVERRIDES \
+                    and a not in self.oracle_body[ops[0].imm]:
+                raise Unsupported('jump into reimplemented %x from %x' % (ops[0].imm, a))
 
     def table_ranges(self):
         r = set()
@@ -438,7 +488,10 @@ class Lifter:
         w('\tif (pc == X86_RET_SENTINEL) return;')
         w('\tswitch (pc) {')
         for a in addrs:
-            if a in self.labels:
+            if a in GAME_OVERRIDES:
+                # the lifted original, for the differential tests only
+                w('\tcase 0x%x: goto L_%x; /* oracle */' % (ORACLE_TAG | a, a))
+            elif a in self.labels:
                 w('\tcase 0x%x: goto L_%x;' % (a, a))
         w('\tdefault:')
         w('\t\tif (hle_is_target(pc)) {')

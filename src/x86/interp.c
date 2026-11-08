@@ -14,14 +14,23 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 uint8_t x86_interp_override[CODE_LEN];
 struct dec dec_cache[CODE_LEN];
+uint64_t x86_interp_steps;
 
 static const uint32_t overrides[] = {
 #define HLE_OVERRIDE(addr, what) addr,
 #include "hle/overrides.h"
 #undef HLE_OVERRIDE
+};
+
+static const uint32_t game_overrides[] = {
+#define HLE_GAME_OVERRIDE(addr, what) addr,
+#include "hle/overrides.h"
+#undef HLE_GAME_OVERRIDE
+	0
 };
 
 static const uint32_t probes[] = {
@@ -38,7 +47,10 @@ void x86_interp_init(void)
 	done = 1;
 	for (size_t i = 0; i < sizeof overrides / sizeof overrides[0]; i++)
 		if (overrides[i] - CODE_START < CODE_LEN)
-			x86_interp_override[overrides[i] - CODE_START] = 1;
+			x86_interp_override[overrides[i] - CODE_START] = OVR_HLE;
+	for (size_t i = 0; game_overrides[i]; i++)
+		if (game_overrides[i] - CODE_START < CODE_LEN)
+			x86_interp_override[game_overrides[i] - CODE_START] = OVR_GAME;
 }
 
 _Noreturn void x86_unimplemented(uint32_t pc)
@@ -196,6 +208,30 @@ const struct dec *x86_decode(uint32_t pc)
 
 /* ---------------------------------------------------------------- run */
 
+/* wall time in HLE calls from interpreted code (outermost only: an HLE call
+ * can run game code, which calls HLE again) */
+double x86_interp_hle_secs;
+static int hle_depth;
+
+static double now_secs(void)
+{
+	struct timespec ts;
+	timespec_get(&ts, TIME_UTC);
+	return (double)ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+
+static void timed_hle_call(uint32_t pc)
+{
+	if (hle_depth++) {
+		hle_call(pc);
+	} else {
+		double t0 = now_secs();
+		hle_call(pc);
+		x86_interp_hle_secs += now_secs() - t0;
+	}
+	hle_depth--;
+}
+
 #define IFN(name) i_##name
 #define SHADOW 0
 #define MRD8(a) rd8(a)
@@ -205,6 +241,8 @@ const struct dec *x86_decode(uint32_t pc)
 #define MWR16(a, v) wr16((a), (v))
 #define MWR32(a, v) wr32((a), (v))
 #define COUNT(n) X86_COUNT(n)
+#define STEP() (x86_interp_steps++)
+#define HLE_CALL(pc) timed_hle_call(pc)
 #define POLL(at) X86_POLL(at)
 #define STR_MOVS(sz, rep) str_movs((sz), (rep))
 #define STR_STOS(sz, rep) str_stos((sz), (rep))
@@ -216,5 +254,13 @@ const struct dec *x86_decode(uint32_t pc)
 void x86_interp(uint32_t pc)
 {
 	x86_interp_init();
-	i_run(pc, 0);
+	if (pc != X86_RET_SENTINEL && (pc & X86_ORACLE_TAG)) {
+		/* the original of a reimplemented function (NANPA2_DIFF) */
+		pc &= ~X86_ORACLE_TAG;
+		if (pc - CODE_START >= CODE_LEN || x86_interp_override[pc - CODE_START] != OVR_GAME)
+			x86_trap(pc, "oracle entry is not an HLE_GAME_OVERRIDE");
+		i_run(pc, 0, pc);
+		return;
+	}
+	i_run(pc, 0, 0);
 }

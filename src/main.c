@@ -224,6 +224,11 @@ static int run_game(const char *game, const char *exe, const char *font)
 	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
 	SDL_Log("CPU: %s, %llu instructions in %.1f s (%.1f MIPS)", x86_backend_name(),
 		(unsigned long long)x86_icount, secs, secs > 0 ? (double)x86_icount / secs / 1e6 : 0.0);
+	if (x86_interp_steps) {
+		double own = secs - x86_interp_hle_secs;
+		SDL_Log("CPU: %llu of them interpreted, %.1f s outside HLE calls (%.1f M per second there)",
+			(unsigned long long)x86_interp_steps, own, own > 0 ? (double)x86_interp_steps / own / 1e6 : 0.0);
+	}
 	return 0;
 }
 
