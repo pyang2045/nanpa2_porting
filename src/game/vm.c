@@ -16,10 +16,10 @@
 
 uint32_t vm_eval(uint32_t *pc)
 {
-	uint32_t start = *pc, tokens;
+	uint32_t start = *pc, insns;
 	int bare;
-	uint32_t v = script_eval(pc, &bare, &tokens);
-	X86_COUNT(22u * tokens);
+	uint32_t v = script_eval(pc, &bare, &insns);
+	X86_COUNT(insns);
 	if (bare >= 0) {
 		/* natively the value would be the token in AL over whatever EAX
 		 * held; no script needs that */
@@ -36,6 +36,7 @@ uint32_t vm_skip_block(uint32_t pc)
 	while (vm_script_byte(pc) != VM_BLOCK_OPEN)
 		pc++;
 	pc++;
+	uint32_t body = pc;
 	/* the native depth counter is AH: 8 bits, wrapping */
 	uint8_t depth = 1;
 	for (;;) {
@@ -45,7 +46,8 @@ uint32_t vm_skip_block(uint32_t pc)
 		else if (b == VM_BLOCK_END && --depth == 0)
 			break;
 	}
-	X86_COUNT(6 + 5 * (pc - start));
+	/* 4 instructions a byte up to the 01, about 6 a byte in the block */
+	X86_COUNT(4 + 4 * (body - start) + 6 * (pc - body));
 	return pc;
 }
 
@@ -149,10 +151,10 @@ void game_menu_item_regs(void)
 	a = (a & ~0xffu) | 1;
 	if (vm_script_byte(pc) == VM_IF) {
 		pc++;
-		uint32_t tokens;
+		uint32_t insns;
 		int bare;
-		uint32_t v = script_eval(&pc, &bare, &tokens);
-		X86_COUNT(22u * tokens);
+		uint32_t v = script_eval(&pc, &bare, &insns);
+		X86_COUNT(insns);
 		a = bare >= 0 ? (a & ~0xffu) | v : v;
 	}
 	cpu.r[EBX] = pc;
