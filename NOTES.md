@@ -898,6 +898,12 @@ code change.
   tiles. gcov of the route run with the fuzzing (before the cell-draw fuzzer): map.c 95.6%,
   map_draw.c 88.1%, map_move.c 96.3%, map_path.c 99.2%, map_sprite.c 82.4% of lines; the rest is
   the traps, those cases and the cell layers 2 and 3.
+- Quit in the town (the first native fallback of a called unit that can reach the pump:
+  0x40431b -> 0x404450 -> 0x40609c, WM_QUIT resets ESP inside the nested run): the route with
+  `quit` 10 s of game time after the town loads exits 0 with no trap on the interp build (quit at
+  +10000, +10300 and +10650 ms), the recomp build, and the interp build under the diff (185 map
+  frames compared, 0 mismatches).
+- ed79985: `NANPA2_DIFF_TRACE` is read once.
 - Sabotage (on 4e29bbf): `+ 2` for `+ 1` in the sprite tile number of 0x403bd2 gave 1,780
   mismatches in 1,780 calls (and 1 in 0x4073ee); reverted. The fuzzing is the other sabotage
   test: it caught the right-mover quirk.
