@@ -40,6 +40,93 @@
 /* Seed of the script random number generator (u16). */
 #define VM_RANDOM_SEED 0x4313c4u
 
+/* Set by 0x406395 next to '@': word 0 of the array (@[0]) holds the
+ * segment-0 offset of a work buffer, word 22 (@[22]) that of the menu item
+ * list that op 04 14 fills. */
+#define VM_ARRAY0_BUFFER 0x445396u
+#define VM_MENU_LIST_PTR 0x4452fau
+#define VM_MENU_LIST 0x445d90u
+/* Segment bases 1-3. */
+#define VM_SEGMENT1 0x4462beu
+#define VM_SEGMENT2 0x4562beu
+
+/* Argument list of the last opcode (0x40741b): a type byte per argument
+ * (VM_ARG_*; the parser clears the first 12) and a u16 value per argument
+ * (an expression's value, or the script offset of a string or block). */
+#define VM_ARG_TYPES 0x445cf6u
+#define VM_ARG_VALUES 0x445d06u
+#define VM_ARG_TYPES_CLEARED 12
+enum { VM_ARG_EXPR = 1, VM_ARG_STRING = 2, VM_ARG_BLOCK = 3 };
+
+/* Script offsets of labels (op 12 sets, op 13 calls): u16 each. */
+#define VM_LABELS 0x445dbcu
+/* Click handler labels (op 04 20): 0 left button, 1 right; u16 offsets. */
+#define VM_CLICK_HANDLERS 0x445ce2u
+/* Text colour (op 18): u16, low nibble foreground, next nibble background. */
+#define VM_TEXT_COLOUR 0x4452f4u
+/* Segment that op 0d stores into: u32, @[7] or 0 for register '@'. */
+#define VM_STORE_SEGMENT 0x44629au
+
+/* Register S ('S' = 0x53, index 0x13): results of ops 19, 04 23, 04 26 and
+ * menus. */
+#define VM_REG_S 0x13u
+
+/* Script bytes with a meaning of their own. */
+enum {
+	VM_BLOCK_END = 0x00,   /* end of a block (and of a menu list) */
+	VM_BLOCK_OPEN = 0x01,  /* start of a block */
+	VM_SEPARATOR = 0x02,   /* between list items and arguments; else-if */
+	VM_STRING = 0x06,      /* opens and closes a string */
+	VM_IF = 0x0f,          /* if (also a menu item's guard) */
+};
+
+/* The VM loop head 0x4060f9: where opcode handlers go on. */
+#define VM_LOOP 0x4060f9u
+
+static inline void vm_set_script_byte(uint32_t pc, uint32_t v)
+{
+	wr8(VM_SCRIPT + pc, v);
+}
+
+static inline uint32_t vm_arg(uint32_t i)
+{
+	return rd16(VM_ARG_VALUES + 2u * i);
+}
+
+/* ---- src/game/vm.c ---- */
+
+/* Evaluate an expression (script_eval), charging the native evaluator's
+ * time. A bare token where a value has to be is a script error: trap. */
+uint32_t vm_eval(uint32_t *pc);
+/* 0x4061d4: from pc, find the next 01 and return the offset just past its
+ * matching 00. */
+uint32_t vm_skip_block(uint32_t pc);
+/* 0x40741b: parse an argument list at *pc into VM_ARG_TYPES/VALUES and
+ * return the number of arguments. *eax gets the native EAX (the value of
+ * argument 0, see re-notes.md). */
+uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax);
+
+/* Register-level entry points (src/game/units.c). */
+void game_skip_block_regs(void);   /* 0x4061d4 */
+void game_vm_init_regs(void);      /* 0x406395 */
+void game_menu_item_regs(void);    /* 0x4068e1 */
+void game_string_arg_regs(void);   /* 0x406dc4 */
+void game_parse_args_regs(void);   /* 0x40741b */
+
+/* ---- src/game/ops.c: opcode handlers (jump units) ---- */
+uint32_t game_op_set_flags(void);       /* 0a 0x406491 */
+uint32_t game_op_set_flags_expr(void);  /* 0b 0x4064b5 */
+uint32_t game_op_set_reg(void);         /* 0c 0x4064d9 */
+uint32_t game_op_store_words(void);     /* 0d 0x4064f8 */
+uint32_t game_op_store_bytes(void);     /* 0e 0x406557 */
+uint32_t game_op_continue(void);        /* 04 11 0x406638 */
+uint32_t game_op_break(void);           /* 04 12 0x40663b */
+uint32_t game_op_set_label(void);       /* 12 0x40663e */
+uint32_t game_op_text_colour(void);     /* 18 0x4069be */
+uint32_t game_op_click_handler(void);   /* 04 20 0x4070bc */
+uint32_t game_op_hit_test(void);        /* 04 23 0x4071a4 */
+uint32_t game_op_args_only(void);       /* 04 22 0x40739b */
+
 static inline uint32_t vm_script_byte(uint32_t pc)
 {
 	return rd8(VM_SCRIPT + pc);

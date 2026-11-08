@@ -33,6 +33,15 @@ extern uint8_t *x86_mem;
  * for that entry"; it is used only by the differential test (NANPA2_DIFF). */
 #define X86_ORACLE_TAG 0x40000000u
 
+/* Stopping lifted code at an exit (the differential test of jump
+ * overrides, src/game/game.c): while x86_stop_esp is set, dispatch calls
+ * x86_stop_at(pc) and returns from x86_exec when it says so, which is when
+ * ESP rose above x86_stop_esp (a return out of the handler) or equals it at
+ * one of the x86_stop_exits (zero-terminated). x86_stop_pc is that pc. */
+extern uint32_t x86_stop_esp, x86_stop_pc;
+extern const uint32_t *x86_stop_exits;
+int x86_stop_at(uint32_t pc);
+
 _Noreturn void x86_trap(uint32_t pc, const char *why);
 /* called by x86_trap after the register dump (dev logging), may be NULL */
 extern void (*x86_trap_hook)(void);

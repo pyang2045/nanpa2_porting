@@ -41,12 +41,13 @@ void diff_record_from_trace(struct diff_record *rec, uint32_t unit, const struct
 	rec->in_flags = diff_flags(in);
 	memcpy(rec->out_r, out->r, sizeof rec->out_r);
 	rec->out_flags = diff_flags(out);
+	rec->out_pc = 0;
 	rec->n_in = rec->n_out = 0;
 	for (size_t i = 0; i < t->n; i++) {
 		const struct trace_byte *b = &t->b[i];
 		if (b->state & TRACE_READ_FIRST)
 			add(&rec->in, &rec->n_in, &rec->cap_in, b->addr, b->pre);
-		if ((b->state & TRACE_WRITTEN) && b->addr >= in->r[ESP])
+		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, in->r[ESP]))
 			add(&rec->out, &rec->n_out, &rec->cap_out, b->addr, b->post);
 	}
 }
@@ -82,12 +83,14 @@ static void note(struct why *w, const char *fmt, ...)
 		w->len += (size_t)k < w->cap - w->len ? (size_t)k : w->cap - w->len - 1;
 }
 
-int diff_check(const struct game_unit *u, const struct diff_record *rec,
+int diff_check(const struct game_unit *u, const struct diff_record *rec, uint32_t pc,
                const struct trace_set *t, char *why, size_t cap)
 {
 	struct why w = { why, cap, 0, 0 };
 	if (cap)
 		why[0] = 0;
+	if (u->jump && pc != rec->out_pc)
+		note(&w, " exit pc want %08x got %08x;", rec->out_pc, pc);
 	for (int r = 0; r < 8; r++)
 		if (!(u->scratch_regs & REG_BIT(r)) && cpu.r[r] != rec->out_r[r])
 			note(&w, " %s want %08x got %08x;", reg_names[r], rec->out_r[r], cpu.r[r]);
@@ -101,7 +104,7 @@ int diff_check(const struct game_unit *u, const struct diff_record *rec,
 	uint32_t esp = rec->in_r[ESP];
 	for (size_t i = 0; i < t->n; i++) {
 		const struct trace_byte *b = &t->b[i];
-		if ((b->state & TRACE_WRITTEN) && b->addr >= esp
+		if ((b->state & TRACE_WRITTEN) && diff_kept(b->addr, esp)
 		    && !find(rec->out, rec->n_out, b->addr) && b->post != b->pre)
 			note(&w, " [%08x] written %02x, original kept %02x;", b->addr, b->post, b->pre);
 		if ((b->state & TRACE_READ_FIRST) && !find(rec->in, rec->n_in, b->addr))
@@ -146,6 +149,7 @@ int diff_write(FILE *f, const struct diff_record *rec)
 	for (int i = 0; i < 8; i++)
 		ok = ok && put32(f, rec->out_r[i]);
 	ok = ok && put32(f, rec->out_flags);
+	ok = ok && put32(f, rec->out_pc);
 	return ok && put_bytes(f, rec->in, rec->n_in) && put_bytes(f, rec->out, rec->n_out);
 }
 
@@ -165,7 +169,7 @@ static int get_bytes(FILE *f, struct diff_byte **v, uint32_t *n, uint32_t *cap)
 	return 1;
 }
 
-int diff_read(FILE *f, struct diff_record *rec)
+int diff_read(FILE *f, struct diff_record *rec, int version)
 {
 	if (!get32(f, &rec->unit))
 		return 0;
@@ -176,6 +180,9 @@ int diff_read(FILE *f, struct diff_record *rec)
 	for (int i = 0; i < 8; i++)
 		ok = ok && get32(f, &rec->out_r[i]);
 	ok = ok && get32(f, &rec->out_flags);
+	rec->out_pc = 0;
+	if (version >= 2)
+		ok = ok && get32(f, &rec->out_pc);
 	ok = ok && get_bytes(f, &rec->in, &rec->n_in, &rec->cap_in);
 	ok = ok && get_bytes(f, &rec->out, &rec->n_out, &rec->cap_out);
 	return ok ? 1 : -1;

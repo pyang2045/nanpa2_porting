@@ -140,21 +140,62 @@ static void record(const struct game_unit *u, struct unit_stats *s, const struct
 		s->recorded++;
 }
 
-static void run_oracle(uint32_t addr)
+const uint32_t game_vm_exits[] = { 0x4060f9u, 0x40638du, 0 };
+
+/* NANPA2_DIFF_POISON=1: after every unit (compared or not) its scratch
+ * registers, and the flags if no caller reads them, get garbage, so a
+ * register wrongly taken as dead shows up as a divergence or a trap. */
+static int poison_on = -1;
+
+static void poison(const struct game_unit *u)
 {
-	push32(X86_RET_SENTINEL);
-	x86_exec(X86_ORACLE_TAG | addr);
+	static uint32_t n;
+	if (poison_on < 0) {
+		const char *e = getenv("NANPA2_DIFF_POISON");
+		poison_on = e && *e && strcmp(e, "0");
+		if (poison_on)
+			fprintf(stderr, "diff: poisoning the scratch registers of every unit\n");
+	}
+	if (!poison_on)
+		return;
+	n++;
+	for (int r = 0; r < 8; r++)
+		if (u->scratch_regs & REG_BIT(r))
+			cpu.r[r] = 0xdead0000u ^ (n << 4) ^ (uint32_t)r;
+	if (!u->flags_out)
+		cpu.cf = cpu.zf = cpu.sf = cpu.of = cpu.pf = n & 1;
 }
 
-static void compare(const struct game_unit *u)
+/* Run the lifted original of u from the current CPU: a called unit returns
+ * at the sentinel pushed as its return address; a jump unit is stopped at
+ * its exit (an exit pc at the entry ESP, or a return above it), and the
+ * result is that pc. */
+static uint32_t oracle(const struct game_unit *u)
+{
+	if (!u->jump) {
+		x86_exec(X86_ORACLE_TAG | u->addr); /* returns at the sentinel */
+		return 0;
+	}
+	x86_stop_esp = cpu.r[ESP];
+	x86_stop_exits = game_vm_exits;
+	x86_stop_pc = 0;
+	x86_exec(X86_ORACLE_TAG | u->addr);
+	if (x86_stop_esp)
+		x86_trap(u->addr, "diff: the oracle of a jump unit returned without an exit");
+	return x86_stop_pc;
+}
+
+static uint32_t compare(const struct game_unit *u)
 {
 	static struct trace_set orig, mine;
 	static struct diff_record rec;
 	struct unit_stats *s = &stats[u - game_units];
 	s->calls++;
 
-	/* the state on entry, as the original sees it (return address on top) */
-	push32(X86_RET_SENTINEL);
+	/* the state on entry, as the original sees it (for a called unit the
+	 * return address on top) */
+	if (!u->jump)
+		push32(X86_RET_SENTINEL);
 	struct cpu in = cpu;
 	int countdown = x86_poll_countdown;
 	x86_poll_countdown = INT_MAX; /* no timer ticks or presents in between */
@@ -162,7 +203,7 @@ static void compare(const struct game_unit *u)
 
 	trace_begin();
 	mode = MODE_ORACLE;
-	x86_exec(X86_ORACLE_TAG | u->addr); /* returns at the sentinel */
+	uint32_t want_pc = oracle(u);
 	mode = MODE_OFF;
 	trace_end();
 	struct cpu want = cpu;
@@ -170,6 +211,7 @@ static void compare(const struct game_unit *u)
 	trace_set_clear(&orig);
 	trace_collect(&orig);
 	diff_record_from_trace(&rec, u->addr, &in, &want, &orig);
+	rec.out_pc = want_pc;
 
 	/* undo the original's writes, run the reimplementation */
 	for (size_t i = 0; i < orig.n; i++)
@@ -178,15 +220,20 @@ static void compare(const struct game_unit *u)
 	cpu = in;
 	trace_begin();
 	mode = MODE_REIMPL;
-	pop32();
-	u->run();
+	uint32_t got_pc = 0;
+	if (u->jump) {
+		got_pc = u->jump();
+	} else {
+		pop32();
+		u->run();
+	}
 	mode = MODE_OFF;
 	trace_end();
 	trace_set_clear(&mine);
 	trace_collect(&mine);
 
 	char why[512];
-	if (diff_check(u, &rec, &mine, why, sizeof why)) {
+	if (diff_check(u, &rec, got_pc, &mine, why, sizeof why)) {
 		s->mismatches++;
 		if (s->mismatches <= 20)
 			fprintf(stderr, "diff MISMATCH %08x %s call %llu (esi %08x frame %u):%s\n", u->addr,
@@ -198,26 +245,54 @@ static void compare(const struct game_unit *u)
 		for (uint32_t i = 0; i < rec.n_out; i++)
 			wr8(rec.out[i].addr, rec.out[i].value);
 		cpu = want;
+		got_pc = want_pc;
 	}
 	s->oracle_insns += icount1 - icount0;
 	s->reimpl_insns += x86_icount - icount1;
 	x86_icount = icount1; /* charge the original's instruction count */
 	x86_poll_countdown = countdown;
 	record(u, s, &rec);
+	return got_pc;
 }
 
 int game_call(uint32_t addr)
 {
 	const struct game_unit *u = game_unit_find(addr);
-	if (!u)
+	if (!u || !u->run)
 		return 0;
 	if (diff_on < 0)
 		diff_init();
-	if (mode == MODE_ORACLE)
-		run_oracle(addr);
-	else if (diff_on && mode == MODE_OFF)
+	if (mode == MODE_ORACLE) {
+		push32(X86_RET_SENTINEL);
+		x86_exec(X86_ORACLE_TAG | addr);
+		return 1;
+	}
+	if (diff_on && mode == MODE_OFF)
 		compare(u);
 	else
 		u->run();
+	if (mode == MODE_OFF)
+		poison(u);
+	return 1;
+}
+
+int game_jump(uint32_t addr, uint32_t *next)
+{
+	const struct game_unit *u = game_unit_find(addr);
+	if (!u || !u->jump)
+		return 0;
+	if (diff_on < 0)
+		diff_init();
+	if (mode == MODE_ORACLE) {
+		/* inside an original: the lifted handler, inline */
+		*next = X86_ORACLE_TAG | addr;
+		return 1;
+	}
+	if (diff_on && mode == MODE_OFF)
+		*next = compare(u);
+	else
+		*next = u->jump();
+	if (mode == MODE_OFF)
+		poison(u);
 	return 1;
 }
