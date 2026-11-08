@@ -463,6 +463,73 @@ oracle and the C agree to 0.1 per piece in the diff report; the VM entry is 102 
 
 Results are in NOTES.md (2026-11-08, reimplementation stage 4).
 
+## Stage 5B: file, input, startup (src/game/file.c, startup.c)
+
+The file, window-procedure and start-up functions of the game code are C now. The
+screen, palette and picture-load part of stage 5B is in its own section above.
+
+**File access** (`file.c`). `game_file_open` 0x401000 (fopen "rb", then with the CD prefix),
+`game_file_load` 0x401050 (the name under `DATA\` unless it starts with DATA; a name ending
+in .GP4 or .ANI is read into a heap block and decompressed by the HLE 0x4075f0, any other
+file is read straight into the buffer; a missing file is skipped silently) and
+`game_file_save` 0x401160 ("wb", fwrite, fclose). They call the C runtime replacement by its
+native address through `game_ncall`, so the fread/fwrite writes are traced and the heap
+sequence (malloc/free of the image) is the original's. The stack locals sit where the native
+ones do, because the native code leaves `lea` results in ECX and EDX that the compared
+callers show (ECX = buf after a plain read, the path buffer after a retry). They are units
+(0x401000, 0x401050, 0x401160) for native callers; the C pieces call the functions directly:
+VM entry 0x4060d4, ops 04 1c/1d/1e/1f/21 and the picture load. Instruction charges equal the
+native count (VM entry 102 against 103, op 04 1c/1d/1e/1f/21 as before the change).
+
+**Window procedure** (`startup.c`, 0x4021c0, a called unit: the HLE message pump reaches it
+through `x86_call`). Mouse position (letterbox shift 40 rows, clamped to 0-399), the buttons
+and keys as input bits at 0x445d8f (arrows 1 2 4 8, Enter/Space 0x10, Esc/Insert 0x20, Ctrl
+0x40, End 0x80; F1 closes the window), the voice stop on a button down and on the key-up of
+OK/cancel, WM_ACTIVATEAPP (pause or resume the sound, the game clock 0x4ac4ec), WM_DESTROY,
+and DefWindowProc for the rest. The key and message tables of the original are
+`switch` statements on the Windows constants; nothing is copied from the exe. WM_PAINT 0x402570
+(after a pointer move with the cursor drawn) is the C `paint`: vertical-blank wait, cursor
+restore, cursor draw. Three things were needed to compare it: it reads its arguments only where the
+original does (the harness flags a read of any other byte), it leaves ECX as the original does
+on each path (ECX's upper half counts as live), and the host-visible calls, PostQuitMessage
+and DestroyWindow, are made once (`game_replaying()` is true during the second run of a
+comparison). The vertical-blank wait runs the host timer and may present a frame; it does
+nothing while the harness holds the timer off (`x86_poll_countdown` near INT_MAX), so a tick
+cannot land in only one of the two runs. Sabotage (MOUSE_X written +1): 414 of 688 calls
+mismatched. 0x401fd0, the logo's window procedure, is installed only by the logo player
+0x401e20 (an HLE), so it never runs; reimpl_status counts it as dead (`DEAD_ENTRIES`).
+
+**Start-up** (`startup.c`). WinMain 0x402090 is a jump unit entered by `x86_call`, split at
+its call of the script VM: the first piece registers the window class (the WNDCLASS is built
+on the emulated stack, the HLE reads the window procedure from it), creates the window,
+searches the CD (`game_cd_search` 0x402590: first CD-ROM drive whose SPEECH\A\A10930.WAV opens,
+else the folder), plays the logo (HLE 0x401e20), sets the display up
+(`game_display_init` 0x402620: DirectDraw, 640x480x8 full screen, the primary surface, its
+colour key and a black palette, three 640x400 off-screen surfaces, the 640x480 scratch
+surface, the three Big5 fonts, the 16 ms timer 0x4028c0, which is the HLE), shows the window
+and calls the VM as a call exit (return 0x4021a3). The second piece 0x4021a3 (`stack_words` 11)
+runs the shutdown (`game_shutdown` 0x402a20: kill the timer, delete the fonts, release the
+palette, surfaces and DirectDraw, sound exit, ShowCursor) and returns 1. Windows imports and
+COM methods are called as the native code calls them (`game_ncall` through the import table
+and the objects' vtables). The thunk 0x4077a0 is no longer called (the C goes to the import).
+
+These pieces run **uncompared** (`uncompared()` in game.c): window, DirectDraw, timer and
+palette creation and the exit change the host, and the harness would do them twice (and the
+heap allocations of the second would differ from the first). What checks them instead:
+- `NANPA2_HLETRACE=1` logs every call into the HLE layer (imports with their argument count,
+  COM methods, C runtime, HLE overrides; stack addresses as STK). The first 250 calls (the
+  whole start-up, then the first VM frames) of the original and of the C are identical except
+  for the lines of the units that replace native code (0x4021c0, 0x401050) and junk in the
+  unused argument slots of the voice stop;
+- every later run (the explore runs below) reaches the title, the Prologue and the main game
+  on the C start-up, so the surfaces, pitches, palette, fonts and timer it sets up work, and
+  the lockstep run covers the same path on both backends;
+- the native-instruction counter lists none of 0x402090, 0x4021a3, 0x402590, 0x402620,
+  0x402a20 and no file routine.
+
+**Not touched.** 0x40609c (the map's pump, module "input") is only called from map code and
+stays with the map module.
+
 ## Inventory
 
 State: `game` reimplemented in src/game (oracle kept), `hle` replaced by platform code,
@@ -472,9 +539,9 @@ by name).
 
 | Address | Bytes | Module | Purpose | Callers | Callees | State |
 |---|---|---|---|---|---|---|
-| 0x401000 | 70 | file | fopen "rb": path as given, then with CD prefix 0x431030 | 401050 402cb0 403360 | 412c90 412d13 |  |
-| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 ... |  |
-| 0x401160 | 47 | file | save(name, buf, size): fopen wb, fwrite, fclose | 4060d4 | 412d13 412d6e 412fb7 |  |
+| 0x401000 | 70 | file | fopen "rb": path as given, then with CD prefix 0x431030 | 401050 402cb0 403360 | 412c90 412d13 | game |
+| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 ... | game |
+| 0x401160 | 47 | file | save(name, buf, size): fopen wb, fwrite, fclose | 4060d4 | 412d13 412d6e 412fb7 | game |
 | 0x401190 | 84 | screen | Lock surface (hides cursor on primary), return pointer (+40 lines if 0x4ac068) | 4014f0 401870 401900 401a50 403d45 403e30 ... | 4011f0 |  |
 | 0x4011f0 | 184 | screen | cursor: restore saved 32x32 background at 0x4aac54/50 | 401190 401430 4014f0 401670 4017b0 401c60 ... |  |  |
 | 0x4012b0 | 41 | screen | Unlock surface; redraw cursor if primary and shown | 4014f0 401870 401900 401a50 403d45 403e30 ... |  |  |
@@ -494,13 +561,13 @@ by name).
 | 0x401d30 | 221 | screen | start palette fade: per-entry deltas, 0x4ac504 = 1 | 4060d4 |  |  |
 | 0x401e10 | 6 | screen | return fade-active flag 0x4ac504 | 4060d4 |  |  |
 | 0x401e20 | 431 | startup | play LOGO.AVI through MCI (src/hle/logo.c) | 402090 | 4077a0 412c90 DispatchMessageA GetMessageA SetWindowPos ShowCursor | hle |
-| 0x401fd0 | 179 | startup | window procedure during the logo movie |  | DefWindowProcA SetFocus mciSendStringA |  |
-| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA ... |  |
-| 0x4021c0 | 699 | input | main window procedure: keys/buttons -> 0x445d8f, mouse, activate |  | 402570 403220 403250 403440 DefWindowProcA DestroyWindow PostQuitMessage SetFocus |  |
-| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 |  |
-| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e |  |
-| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent |  |
-| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent |  |
+| 0x401fd0 | 179 | startup | window procedure during the logo movie |  | DefWindowProcA SetFocus mciSendStringA | dead |
+| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA ... | game |
+| 0x4021c0 | 699 | input | main window procedure: keys/buttons -> 0x445d8f, mouse, activate |  | 402570 403220 403250 403440 DefWindowProcA DestroyWindow PostQuitMessage SetFocus | game |
+| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 | game |
+| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e | game |
+| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent | game |
+| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent | game |
 | 0x402ad0 | 405 | sound | DirectSound init, primary buffer 22050 Hz 8-bit stereo | 402620 | 4077a6 MessageBoxA | hle |
 | 0x402c70 | 61 | sound | sound exit: stop voice/music, release DirectSound | 402a20 | 4032c0 403440 | hle |
 | 0x402cb0 | 346 | sound | play music n: MUSIC\%02d.MP3 else .WAV | 4060d4 | 401000 402e10 402ea0 402f10 402f60 403020 4030f0 4032c0 ... | hle |
@@ -612,7 +679,7 @@ by name).
 | 0x40767c | 61 | file | LZHUF tree rebuild at frequency 0x8000 | 4076b9 | 4076b9 | dead |
 | 0x4076b9 | 178 | file | LZHUF update (alt 0x4076cb) (alt 4076cb) | 40767c 40776b | 40767c | dead |
 | 0x40776b | 52 | file | LZHUF decode one symbol, update | 4075f0 | 4076b9 | dead |
-| 0x4077a0 | 6 | startup | thunk jmp [0x41b000] (DirectDrawCreate) | 401e20 402620 |  |  |
+| 0x4077a0 | 6 | startup | thunk jmp [0x41b000] (DirectDrawCreate) | 401e20 402620 |  | dead |
 | 0x4077a6 | 6 | startup | thunk jmp [0x41b008] (DirectSoundCreate) | 402ad0 |  | dead |
 
 ## Script opcodes (units for the jump-override stage)
