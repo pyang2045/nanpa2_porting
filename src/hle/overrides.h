@@ -2,7 +2,7 @@
  * The one list of native game functions replaced by hand-written code, and
  * of the timing probes. Both backends read it: the interpreter
  * (src/x86/interp.c) includes it, and tools/recomp.py parses the
- * HLE_OVERRIDE / HLE_PROBE lines (keep one entry per line, hex address
+ * HLE_OVERRIDE / HLE_GAME_OVERRIDE / HLE_PROBE lines (one entry per line, hex address
  * first). Calls to and dispatches into an override address go to
  * hle_call(), which runs the replacement (src/hle/hle.c override_call or a
  * module it calls).
@@ -48,10 +48,11 @@ HLE_OVERRIDE(0x4075f0, "GP4/ANI decompressor (src/lzh.c)")
 HLE_OVERRIDE(0x402cb0, "play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)")
 HLE_OVERRIDE(0x403360, "play voice (SPEECH%s through DirectSound)")
 
-/* Reimplemented game logic (none on this branch yet; master's
- * GAME_OVERRIDES 0x4037fc, 0x4039f7, 0x406455 go here as
- * HLE_GAME_OVERRIDE(0x4037fc, "script expression evaluator (src/game/expr.c)")
- * when src/game is merged). */
+/* Reimplemented game logic (src/game/expr.c; game_units in src/game/units.c
+ * holds the C side) */
+HLE_GAME_OVERRIDE(0x4037fc, "script expression evaluator (src/game/expr.c)")
+HLE_GAME_OVERRIDE(0x4039f7, "script constant reader (src/game/expr.c)")
+HLE_GAME_OVERRIDE(0x406455, "script flag write (src/game/expr.c)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the

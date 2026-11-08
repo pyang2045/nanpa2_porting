@@ -1,6 +1,6 @@
 #!/bin/sh
 # Assemble the macOS app bundle (CMake target nanpa2_app):
-#   bundle_macos.sh OUT.app BINARY Info.plist
+#   bundle_macos.sh OUT.app BINARY Info.plist [interp|recomp]
 #
 # Copies the binary and every dylib it needs outside /usr/lib and /System
 # (Homebrew's SDL2) into Contents/Frameworks, pointing the load commands at
@@ -12,14 +12,16 @@
 # signed ad hoc (install_name_tool breaks the signatures), and
 # LSMinimumSystemVersion is set to the highest minos of the files.
 #
-# The app is for this machine only: the binary holds the game code lifted
-# from your nanpa2.exe. No game data goes in; the game folder is found at run
-# time (src/launch.c).
+# No game data goes in; the game folder, nanpa2.exe included, is found at
+# run time (src/launch.c). An interp build (the default) holds nothing of the
+# game (ctest no_game_bytes); a recomp binary holds the game code lifted from
+# your nanpa2.exe, so a recomp app is for this machine only.
 set -eu
 
 app=$1
 bin=$2
 plist=$3
+backend=${4:-interp}
 contents="$app/Contents"
 fw="$contents/Frameworks"
 
@@ -113,4 +115,8 @@ for f in "$fw"/*.dylib; do
 	codesign --force --sign - "$f" 2>/dev/null
 done
 codesign --force --sign - "$app"
-echo "bundle: $app (macOS $minos or later; for this machine only, do not share)"
+if [ "$backend" = recomp ]; then
+	echo "bundle: $app (macOS $minos or later; recomp: for this machine only, do not share)"
+else
+	echo "bundle: $app (macOS $minos or later)"
+fi

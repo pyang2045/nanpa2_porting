@@ -101,33 +101,6 @@ int x86_load_image(const char *exe_path)
 	return 1;
 }
 
-#ifdef NANPA2_HAVE_RECOMP
-int x86_use_interp;
-#else
-int x86_use_interp = 1;
-#endif
-
-const char *x86_backend_name(void)
-{
-#ifdef NANPA2_HAVE_RECOMP
-	if (x86_lockstep_on)
-		return "lockstep";
-#endif
-	return x86_use_interp ? "interp" : "recomp";
-}
-
-void x86_exec(uint32_t pc)
-{
-#ifdef NANPA2_HAVE_RECOMP
-	if (!x86_use_interp) {
-		x86_exec_recomp(pc);
-		X86_LOCKSTEP_POINT(LS_RET, X86_RET_SENTINEL);
-		return;
-	}
-#endif
-	x86_interp(pc);
-}
-
 uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args)
 {
 	X86_LOCKSTEP_POINT(LS_NEST, addr);

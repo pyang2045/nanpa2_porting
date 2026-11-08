@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "game/game.h"
 #include "logo.h"
 #include "lzh.h"
 #include "x86/interp.h"
@@ -281,6 +282,8 @@ void hle_call(uint32_t addr)
 		snprintf(msg, sizeof msg, "import %s", i < nimports ? imports[i].name : "?");
 		x86_trap(addr, msg);
 	}
+	if (game_call(addr)) /* reimplemented game logic (src/game) */
+		return;
 	if (crt_call(addr))
 		return;
 	override_call(addr);

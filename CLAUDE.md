@@ -29,23 +29,36 @@ addresses.
 
 ## Layout
 
-The game runs as a **static recompile**: `tools/recomp.py` (capstone, in `tools/.venv`) lifts
-the x86 game code of `game/nanpa2.exe` to `build/gen/recomp.c` at build time (generated, never
-committed). Lifted code runs on an emulated 32-bit address space (`src/x86/`); calls to
-imports, COM methods, CRT functions and a few hand-replaced game functions go to `hle_call`.
+The game code of `nanpa2.exe` (0x401000-0x407800) runs on an emulated 32-bit address space
+(`src/x86/`); calls to imports, COM methods, CRT functions and the overridden game functions go
+to `hle_call`. Two backends (`-DNANPA2_BACKEND`): **interp** (default, the build to share) is
+the interpreter `src/x86/interp.c`, which decodes the player's `nanpa2.exe` from the game folder
+at run time, so the build needs neither the exe nor capstone and the binary holds nothing of
+the game (ctest `no_game_bytes`). **recomp** (development and reference, never share) has
+`tools/recomp.py` (capstone, in `tools/.venv`) lift `game/nanpa2.exe` to `build/gen/recomp.c`
+at build time (generated, never committed); it also holds the interpreter (`NANPA2_INTERP=1`)
+and the block-by-block comparison of the two (`NANPA2_LOCKSTEP=1`, `src/x86/lockstep.c`).
+`src/hle/overrides.h` is the one list of overrides, game overrides and probes for both.
 
-- `src/x86/`: CPU state, memory, flags, heap, `x86_call`, poll hook for backward jumps.
+- `src/x86/`: CPU state, memory, flags, heap, `x86_call`, poll hook for backward jumps,
+  `interp.c`/`interp_core.h` (interpreter), `lockstep.c` (recomp builds).
 - `src/hle/`: `hle.c` (import/COM thunks, overridden game functions by native address),
   `win32.c` (message queue, SDL events to WM_*, timer), `ddraw.c` (surfaces, Blt, palette),
   `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
   `crt.c` (MSVC CRT by address), `dev.c` (scripted input and screenshots).
+- `src/game/`: game logic reimplemented in C (`docs/reimpl.md`): units overriding native
+  functions (`HLE_GAME_OVERRIDE` in `src/hle/overrides.h`, originals kept as the oracle),
+  `vm.h` accessors for native globals, `expr.c` script expressions, `game.c`/`trace.c`/
+  `diff.c` the differential harness (`NANPA2_DIFF=1`, `NANPA2_DIFF_DIR`; replay
+  `build/diff_replay`). `tools/reimpl_status.py` prints the share replaced.
 - `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
   `launch.c` (game folder lookup and picker, remembered path, log file for Finder launches),
   `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`,
   `platform/dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
 - `tools/`: `recomp.py`, `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
   `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots), `bundle_macos.sh`
-  (target `nanpa2_app`: `build/同級生２.app` with SDL inside; local use only, never share it).
+  (target `nanpa2_app`: `build/同級生２.app` with SDL inside; a recomp app is local use only,
+  never share it).
 - `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
   minimp3, public domain).
 
@@ -94,5 +107,6 @@ $G/support/analyzeHeadless decomp/ghidra Nanpa2 -import game/nanpa2.exe -overwri
 About a quarter of the game functions are hand-written assembly with register arguments
 (`unaff_ESI`, `in_EAX` in the decompile); read those with
 `objdump -d --x86-asm-syntax=intel --start-address=0x... --stop-address=0x... game/nanpa2.exe`.
-Game code is 0x401000-0x412210; the MSVC runtime follows. Cite native addresses in code
+Game code is 0x401000-0x4077ac (142 functions, `docs/reimpl.md`); a statically linked MP3
+decoder library follows to 0x412c81, then the MSVC runtime from 0x412c90. Cite native addresses in code
 comments, commits and notes.

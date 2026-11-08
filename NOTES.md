@@ -482,6 +482,58 @@ code change.
   `--backend` fail with a message; `sh -n` passes on both (shellcheck not installed).
   Linux and Windows have not been built or run.
 
+## 2026-11-08 (reimplementation stage 1: inventory, differential harness, script expressions)
+
+- Decision: the game logic is reimplemented by hand in C, function by function, through
+  the override mechanism, until neither nanpa2.exe nor recomp.c is needed. Plan,
+  inventory and method are in `docs/reimpl.md`; `tools/reimpl_status.py` measures progress.
+- Inventory: the game code is 25,597 bytes in 142 functions, 0x401000-0x4077ac. CLAUDE.md's
+  0x412210 included a statically linked MP3 decoder library (0x4077b0-0x412c81, already
+  replaced by minimp3), and the MSVC runtime starts at 0x412c90. By module: map 63
+  functions / 9,764 bytes, vm 10 / 4,295 (the loop 0x4060d4 owns all opcode handlers),
+  screen 21 / 3,045, sound 16 / 2,511, startup 8 / 2,236, input 5 / 956, file 7 / 806,
+  anim 4 / 687, text 4 / 675, expr 4 / 622. Many map functions are handlers in .data
+  pointer tables 0x435576 (ext op 0x26 sub-ops, via 0x403a70) and 0x435dfc (cell draw,
+  sprite move kinds, flood-fill direction orders).
+- 83187f7: script expressions reimplemented (`src/game/expr.c`): evaluator 0x4037fc
+  (operators 0x4038ae-0x4039d1, flag read 0x4039d6), constant reader 0x4039f7 (tails
+  0x403a06/12/22/42), flag write 0x406455, on accessors for the VM globals
+  (`src/game/vm.h`). Exact semantics and register contracts are in re-notes.md. recomp.py
+  `GAME_OVERRIDES` keeps their lifted bodies as the oracle (`x86_exec(0x40000000 | addr)`).
+- Differential harness (83187f7): `NANPA2_DIFF=1` runs original and reimplementation from
+  the same state on every call (memory traced through rd*/wr*), then compares registers,
+  flags if used and every byte written above the entry ESP; the original's result is kept
+  on a mismatch. `NANPA2_DIFF_DIR` records calls, and `build/diff_replay` replays them
+  without SDL, HLE or lifted code. ctest `diffcapture` (40 s headless explore run with the
+  online diff) and `diffreplay` (skipped without records).
+- Results. Explore runs, 300000 frames each at NANPA2_TURBO=8:
+  - seed 31 (online diff): Prologue to OPEN1 at frame 264322, 3,745,731 evaluator calls;
+  - seed 33 (online diff): OPEN1 at 261034, 3,913,913 calls;
+  - seed 42 (online diff, from seed 32's diary save): main game, 37 MES files to
+    TOWN.MES, 3,636,403 calls;
+  - seed 32 (reimplementation only, no diff): Prologue to OPEN1 at 249593 and on to 33.MES.
+  None had a trap, watchdog warning or stall. That makes 11.3 M evaluator, 19,758
+  constant-reader and 55,929 flag-write calls compared, with 0 real mismatches. Seed 31
+  logged 3 mismatches, all a harness bug: the status writer thread reads 0x446292 and
+  0x4ac4ec (src/hle/status.c) while the trace was on. Since 83187f7 only the tracing thread
+  is traced. Replay of the 92,932 recorded calls: 0 mismatches. Every operator token
+  occurred; 0x2c and 0x2f only in the main game (50 and 10 times in seed 42). Sabotage
+  check: a wrapping 0x21 gave 2 mismatching records.
+- Pacing: replaced code charges native instruction estimates (22 per expression token).
+  Measured per call: 116-250 native against 129-255 estimated.
+- Share now replaced: 4,418 of 25,597 bytes (17.3%) and 27 of 142 functions (19.0%);
+  3,796 bytes are the older HLE overrides, 622 bytes (2.4%) are game logic.
+- re-notes.md: VM state table; register `@` is 0x40 (so S = register 0x13). Music ext op
+  0x24 (0x4073a5) was described backwards: first argument 0 plays MUSIC n, anything else
+  stops (0x4073aa `cmp eax, 0; je 0x4073b9`).
+- Follow-up commit: `2d`/`2f` with a non-constant operand use the byte itself, as
+  natively, instead of trapping (never met in the runs). The oracle-tag contract is
+  documented for other backends.
+- ctest: all 8 pass. One smoke failure during a run alongside two explore jobs passed on
+  rerun (load).
+- Next (docs/reimpl.md order): VM helpers 0x4061d4, 0x40741b, 0x406dc4, 0x406395, 0x4068e1;
+  then jump overrides for the opcode handlers.
+
 ## 2026-11-08 (x86 interpreter backend: a binary with nothing of the game)
 
 - Goal: a distributable engine, as xsystem4 is: the player supplies the game files,
@@ -491,7 +543,7 @@ code change.
   (.text/.rdata/.data) and the import table were already loaded at run time
   (`x86_load_image`, `map_imports`); `hle_is_target` now derives the list from the code range
   and the overrides, so nothing generated is left in an interp build.
-- 7484993: `src/x86/interp.c` + `interp_core.h`, a hand-written interpreter over the existing
+- 5af0016: `src/x86/interp.c` + `interp_core.h`, a hand-written interpreter over the existing
   runtime (cpu, x86.h flag helpers, hle_call). It decodes from emulated memory with a decoded
   instruction cache (one entry per code byte), and keeps the recompile's pacing exactly:
   X86_POLL on taken direct backward branches into game code, one count per instruction plus
@@ -503,7 +555,7 @@ code change.
   journalled writes; pc, registers, flags, icount, poll countdown and every byte written by
   either side are compared at the next block, hle_call, x86_poll or return.
 - One override list: `src/hle/overrides.h` (X-macro), included by the interpreter and parsed
-  by recomp.py, also for the probes. 3a2c9c5 adds HLE_GAME_OVERRIDE and the oracle tag
+  by recomp.py, also for the probes. 64d794d adds HLE_GAME_OVERRIDE and the oracle tag
   (X86_ORACLE_TAG, master's NANPA2_DIFF) on both backends.
 - The exe is checked by PE TimeDateStamp 0x39697c6a and SizeOfImage 0xc1000 (launch.c folder
   check and the loader); a missing one is reported as "inside data1.cab on the CD (an
@@ -513,7 +565,7 @@ code change.
 - Lockstep results (headless, scratch saves), no divergence in any run:
   explore seed 1 (60000 frames) 2.50 G instructions compared, seeds 2/3 (80000 frames,
   turbo 4) 2.91 G / 3.08 G, seeds 5/6 (300000 frames, turbo 8, through 40.MES, 41.MES and
-  TOWN.MES with about 21000 frames of town) 11.59 G / 11.04 G, seed 7 after 3a2c9c5 (same
+  TOWN.MES with about 21000 frames of town) 11.59 G / 11.04 G, seed 7 after 64d794d (same
   settings, 72 MES files incl. TOWN.MES) 10.91 G; the save40 route 3.8 G (45.8 G in all)
   (it did not reach 40.MES: with the CD's FLAG6 the title leads to open.mes/name.mes, so
   the route needs a game-made FLAG6); selftest and the ctest `lockstep` run. 410-1815 block
@@ -521,12 +573,12 @@ code change.
   probe, mid-block). A planted bug (8-bit `test` computing flags at 32 bits) was caught at
   the 4th block (0x4020fa).
 - Interpreter alone: explore seed 4 (300000 frames, turbo 8) reached 70 MES files incl.
-  39.MES, and seed 8 after 3a2c9c5 71, no trap; selftest (pump ECX), smoke and wavcheck
+  39.MES, and seed 8 after 64d794d 71, no trap; selftest (pump ECX), smoke and wavcheck
   pass. Those cover what lockstep
   cannot: the interpreter's own HLE return path, polls, counting and probes.
 - Speed, NANPA2_CPU_MIPS=0, title screen, Release, Intel Mac: 150 M interpreted
   instructions per second outside HLE calls (113 before always_inline on the hot helpers,
-  3a2c9c5), 6x the 25 MIPS pacing; x86_icount rate 569 MIPS (HLE charges included); the
+  64d794d), 6x the 25 MIPS pacing; x86_icount rate 569 MIPS (HLE charges included); the
   recompile 1617 MIPS by the same icount measure.
 - ctest `no_game_bytes` (interp builds, tests/no_game_bytes.py): every 64-byte run of the
   exe's sections with at least 12 distinct byte values is looked for in the binary and every
@@ -536,11 +588,30 @@ code change.
   ramps (SDL3 in the .app matched a 16-bit ramp at .data+0x76c46). Left out: .rdata 33004,
   .data 5061, .text 0 of 171320 runs. Result: build/nanpa2 and build/同級生２.app (7 files),
   0 matches.
-- c46afb5: status_init set stage "running" before phase, so the writer thread could write
+- 65e8d9c: status_init set stage "running" before phase, so the writer thread could write
   the early file (no "game" section) with stage running; smoke.py read one under load and
   failed with KeyError 'game' (2 of 6 smoke runs failed while four lockstep jobs ran; the
   second showed the KeyError, the first was not captured).
-- Build scripts (314e5fe): no --backend means interp, no exe or capstone checks, and the game
+- Build scripts (af109bf): no --backend means interp, no exe or capstone checks, and the game
   folder only for --test; the "never share" notes apply to recomp only. README Build
-  describes both backends. Not changed: CLAUDE.md's Layout still says the game runs as a
-  static recompile; `tools/bundle_macos.sh` still prints "for this machine only".
+  describes both backends (CLAUDE.md and bundle_macos.sh: see the merge below).
+
+## 2026-11-08 (merge: interpreter backend with reimplementation stage 1)
+
+- Merge of master (b08febf) into the interpreter branch. The game overrides 0x4037fc,
+  0x4039f7 and 0x406455 are `HLE_GAME_OVERRIDE` lines in `src/hle/overrides.h`; recomp.py
+  reads them with `read_hooks('GAME_OVERRIDE')` (its dict is gone), the interpreter includes
+  the same file. `game_call` stays first after the thunks in `hle_call`. x86.h rd*/wr* carry
+  both `X86_TRACE` (differential tests) and `X86_WT` (lockstep); the str_movs fast path is
+  skipped while tracing and logs its writes for lockstep. The backend switch (`x86_exec`,
+  `x86_use_interp`, `x86_backend_name`) moved from x86.c to interp.c, so `diff_replay`, which
+  links x86.c with its own `x86_exec`, still builds.
+- Docs: CLAUDE.md Layout describes interp as the default and recomp as development and
+  reference; docs/reimpl.md, src/game/game.h and units.c point at overrides.h. bundle_macos.sh
+  takes the backend from CMake and prints "for this machine only" for recomp apps only.
+- Results: ctest 9 of 9 in both builds (smoke skipped: screen not visible). NANPA2_DIFF=1 on
+  interp, explore seed 33, 60000 frames, turbo 8 (to s9.mes): 850,851 evaluator, 965
+  constant-reader and 5,655 flag-write calls, 0 mismatches. NANPA2_LOCKSTEP=1 on recomp with
+  the game overrides active, explore seed 9, 120000 frames, turbo 8 (to s31.mes): 2.15 G
+  instructions compared, 916 checks dropped (host call mid-block), no divergence.
+  no_game_bytes: build/nanpa2 and build/同級生２.app (7 files), 0 matches.
