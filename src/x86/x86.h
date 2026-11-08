@@ -568,6 +568,15 @@ extern int x86_use_interp;
 /* instructions the interpreter decoded and ran (x86_icount also holds the
  * time charged for HLE work and repeated string iterations) */
 extern uint64_t x86_interp_steps;
+/* Native game instructions (interpreter only): with NANPA2_NATIVE_REPORT
+ * set, every instruction run in 0x401000-0x4077ac outside a differential
+ * oracle (x86_native_hold) is counted per code byte. A finished engine
+ * runs none (docs/reimpl.md, Stage 5B). */
+extern uint64_t x86_native_total;
+extern int x86_native_hold;
+void x86_native_report(void); /* to stderr: by function, hottest first */
+/* "total N top fn:count ..." for the status file ("" when not counting) */
+void x86_native_summary(char *out, size_t cap);
 extern double x86_interp_hle_secs; /* wall time in HLE calls it made */
 /* the backend's name for logs: "interp", "recomp" or "lockstep" */
 const char *x86_backend_name(void);

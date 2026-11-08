@@ -252,7 +252,9 @@ static uint32_t compare(const struct game_unit *u)
 
 	trace_begin();
 	mode = MODE_ORACLE;
+	x86_native_hold = 1; /* the original run for the comparison is not the game's */
 	uint32_t want_pc = oracle(u);
+	x86_native_hold = 0;
 	mode = MODE_OFF;
 	trace_end();
 	struct cpu want = cpu;

@@ -19,6 +19,11 @@
 uint8_t x86_interp_override[CODE_LEN];
 struct dec dec_cache[CODE_LEN];
 uint64_t x86_interp_steps;
+uint64_t x86_native_total;
+int x86_native_hold;
+#define NATIVE_END 0x004077adu
+static uint32_t *native_hist; /* per code byte; NULL = not counting */
+static uint8_t *native_entry; /* call targets seen in native game code */
 
 static const uint32_t overrides[] = {
 #define HLE_OVERRIDE(addr, what) addr,
@@ -256,6 +261,76 @@ static uint32_t timed_hle_jump(uint32_t pc)
 	return next;
 }
 
+static inline void native_step(uint32_t pc, const struct dec *d)
+{
+	if (native_hist && pc - CODE_START < NATIVE_END - CODE_START && !x86_native_hold) {
+		native_hist[pc - CODE_START]++;
+		x86_native_total++;
+		if (d->op == 0xe8 && d->imm - CODE_START < NATIVE_END - CODE_START)
+			native_entry[d->imm - CODE_START] = 1;
+	}
+}
+
+/* functions are named by the nearest entry below: a call target seen, or
+ * a unit (reimplemented or not) of src/game/units.c */
+struct nfn { uint32_t addr; uint64_t n; };
+
+static int nfn_cmp(const void *a, const void *b)
+{
+	const struct nfn *x = a, *y = b;
+	return x->n < y->n ? 1 : x->n > y->n ? -1 : 0;
+}
+
+static int native_group(struct nfn *f, int cap)
+{
+	int n = 0;
+	uint32_t cur = 0;
+	for (uint32_t o = 0; o < NATIVE_END - CODE_START; o++) {
+		if (native_entry[o])
+			cur = CODE_START + o;
+		if (!native_hist[o])
+			continue;
+		if (!n || f[n - 1].addr != cur) {
+			if (n == cap)
+				break;
+			f[n].addr = cur;
+			f[n].n = 0;
+			n++;
+		}
+		f[n - 1].n += native_hist[o];
+	}
+	return n;
+}
+
+void x86_native_report(void)
+{
+	if (!native_hist)
+		return;
+	struct nfn f[256];
+	int n = native_group(f, 256);
+	qsort(f, (size_t)n, sizeof f[0], nfn_cmp);
+	fprintf(stderr, "native: %llu game instructions run natively (0x401000-0x4077ac), %d functions\n",
+	        (unsigned long long)x86_native_total, n);
+	for (int i = 0; i < n; i++)
+		fprintf(stderr, "native: %08x %llu\n", f[i].addr, (unsigned long long)f[i].n);
+}
+
+void x86_native_summary(char *out, size_t cap)
+{
+	out[0] = 0;
+	if (!native_hist)
+		return;
+	struct nfn f[256];
+	int n = native_group(f, 256);
+	qsort(f, (size_t)n, sizeof f[0], nfn_cmp);
+	size_t o = (size_t)snprintf(out, cap, "{\"total\": %llu, \"top\": {", (unsigned long long)x86_native_total);
+	for (int i = 0; i < n && i < 8 && o < cap; i++)
+		o += (size_t)snprintf(out + o, cap - o, "%s\"%08x\": %llu", i ? ", " : "", f[i].addr,
+		                      (unsigned long long)f[i].n);
+	if (o < cap)
+		snprintf(out + o, cap - o, "}}");
+}
+
 #define IFN(name) i_##name
 #define SHADOW 0
 #define MRD8(a) rd8(a)
@@ -265,7 +340,7 @@ static uint32_t timed_hle_jump(uint32_t pc)
 #define MWR16(a, v) wr16((a), (v))
 #define MWR32(a, v) wr32((a), (v))
 #define COUNT(n) X86_COUNT(n)
-#define STEP() (x86_interp_steps++)
+#define STEP() (x86_interp_steps++, native_step(pc, d))
 #define HLE_CALL(pc) timed_hle_call(pc)
 #define HLE_JUMP(pc) timed_hle_jump(pc)
 #define POLL(at) X86_POLL(at)
@@ -279,6 +354,24 @@ static uint32_t timed_hle_jump(uint32_t pc)
 void x86_interp(uint32_t pc)
 {
 	x86_interp_init();
+	if (!native_hist) {
+		static int checked;
+		const char *e = getenv("NANPA2_NATIVE_REPORT");
+		if (!checked++ && e && *e && *e != '0') {
+			native_hist = calloc(NATIVE_END - CODE_START, sizeof *native_hist);
+			native_entry = calloc(NATIVE_END - CODE_START, 1);
+			for (size_t i = 0; i < sizeof overrides / sizeof overrides[0]; i++)
+				if (overrides[i] - CODE_START < NATIVE_END - CODE_START)
+					native_entry[overrides[i] - CODE_START] = 1;
+			for (size_t i = 0; i < sizeof game_overrides / sizeof game_overrides[0]; i++)
+					if (game_overrides[i] - CODE_START < NATIVE_END - CODE_START)
+					native_entry[game_overrides[i] - CODE_START] = 1;
+			for (size_t i = 0; i < sizeof jump_overrides / sizeof jump_overrides[0]; i++)
+					if (jump_overrides[i] - CODE_START < NATIVE_END - CODE_START)
+					native_entry[jump_overrides[i] - CODE_START] = 1;
+			atexit(x86_native_report);
+		}
+	}
 	if (x86_is_oracle_pc(pc)) {
 		/* the original of a reimplemented function (NANPA2_DIFF) */
 		pc &= ~X86_ORACLE_TAG;
