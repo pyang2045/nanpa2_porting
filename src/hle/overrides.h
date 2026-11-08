@@ -258,6 +258,8 @@ HLE_GAME_JUMP(0x403510, "animation slot control (src/game/anim.c)")
 HLE_GAME_JUMP(0x4035b5, "animation slot wait loop (src/game/anim.c)")
 HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
 HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
+/* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
+HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
  * instructions: wipe 0x401a50 entry and its return in opcode 0x407386, the

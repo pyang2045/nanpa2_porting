@@ -122,12 +122,6 @@ int game_native_misc(void) /* 19: sub-op 4 is the dissolve wipe */
 	return !literal_arg0(&v) || v == 4 || v > 5;
 }
 
-int game_native_palette(void) /* 04 16: mode 3 fades and spins on the timer */
-{
-	uint32_t v;
-	return !literal_arg0(&v) || v == 3;
-}
-
 int game_native_map(void) /* 04 26: sub-ops 5, 7 and 12 pump messages */
 {
 	uint32_t v;
@@ -386,26 +380,47 @@ uint32_t game_op_cursor(void)
 
 /* 04 16 n [v]: the palette. 2: set it now (0x401ca0) from the picture's
  * palette, or with v from all entries = v (0x40754d); the tables are saved
- * before (0x40756c) and restored after (0x407599). 3 (fade and wait) is
- * left to the native handler; others do nothing. */
+ * before (0x40756c) and restored after (0x407599). 3: the same, but fade
+ * to it (0x401d30) and wait until the timer has finished the fade
+ * (game_palette_wait_piece, 0x406f41); others do nothing. */
 uint32_t game_op_palette(void)
 {
 	uint32_t a = parse();
-	X86_COUNT(2);
-	if (a == 3)
-		x86_trap(0x406f10, "op 04 16 3 is left to the native handler, but reached C");
-	if (a != 2)
+	X86_COUNT(a == 2 ? 2 : 4); /* the compares with 2 and 3 */
+	if (a != 2 && a != 3)
 		return loop_at(0x406f13);
-	ncall(0x40756c);
+	X86_COUNT(1); /* call 0x40756c */
+	game_palette_save();
 	X86_COUNT(2);
 	if (rd8(VM_ARG_TYPES + 1) == VM_ARG_EXPR) {
 		cpu.r[EAX] = ax_(cpu.r[EAX], rd16(ARG(1)));
-		X86_COUNT(1);
-		ncall(0x40754d);
+		X86_COUNT(2);
+		game_palette_fill(cpu.r[EAX]);
 	}
-	ncall(0x401ca0);
-	ncall(0x407599);
+	if (a == 3) {
+		wr32(FADE_STEPS, 1);
+		X86_COUNT(2);
+		game_fade_start();
+		return 0x406f41;
+	}
+	X86_COUNT(2);
+	game_palette_upload();
+	game_palette_restore();
 	return loop_at(0x406f77);
+}
+
+/* 0x406f41: while the fade runs the native code asks again (a backward
+ * jump: game_jump polls for the piece that returns itself); then it puts
+ * the tables back. */
+uint32_t game_palette_wait_piece(void)
+{
+	cpu.r[EAX] = game_fade_active();
+	X86_COUNT(3);
+	if (cpu.r[EAX])
+		return 0x406f41;
+	game_palette_restore();
+	X86_COUNT(1);
+	return loop_at(0x406f4f);
 }
 
 /* 04 1c name, off: load a file into segment @[7] at off (0x401050). */
