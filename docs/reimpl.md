@@ -250,8 +250,13 @@ Semantics are in `re-notes.md`, "Script VM helpers" and "Script opcodes". Called
 Jump units (`HLE_GAME_JUMP`), all leaving to 0x4060f9 with scratch EAX ECX EDX EBX EDI and
 the flags, except ext 11/12, which `ret` and have none: ops 0a 0x406491, 0b 0x4064b5, 0c
 0x4064d9, 0d 0x4064f8, 0e 0x406557, 12 0x40663e, 18 0x4069be, and ext 11 0x406638, 12
-0x40663b, 20 0x4070bc, 22 0x40739b, 23 0x4071a4. The hit test fires the probe 0x4071bb
-itself (edi = the rectangle table), so the exploration bot still sees the hotspots.
+0x40663b, 22 0x40739b, 23 0x4071a4. The hit test fires the probe 0x4071bb itself (edi = the
+rectangle table), so the exploration bot still sees the hotspots. Ext 20 0x4070bc is
+written (`game_op_click_handler`) but not enabled: no explore run has reached it yet.
+
+The entry checks for jump units (no calls, fallthrough or outside direct jumps into one)
+are made by recomp.py, which the default interp build does not run: build the recomp
+backend once after adding an `HLE_GAME_JUMP` or `HLE_GAME_OVERRIDE` line.
 
 The scratch sets come from `tools/liveness.py` and were checked with
 `NANPA2_DIFF_POISON=1` explore runs. Results are in NOTES.md (2026-11-08, reimplementation

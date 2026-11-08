@@ -33,6 +33,7 @@ const struct game_unit game_units[] = {
 	CALL(0x4068e1, "vm_menu_item", game_menu_item_regs, REG_BIT(EDX), 0),
 	JUMP(0x4069be, "op_18_text_colour", game_op_text_colour, AT_LOOP),
 	CALL(0x406dc4, "vm_string_arg", game_string_arg_regs, 0, 0),
+	/* not enabled in overrides.h yet (no call seen under the diff) */
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
 	JUMP(0x4071a4, "op_0423_hit_test", game_op_hit_test, AT_LOOP),
 	JUMP(0x40739b, "op_0422_args_only", game_op_args_only, AT_LOOP),

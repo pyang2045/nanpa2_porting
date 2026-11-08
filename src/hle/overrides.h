@@ -84,7 +84,8 @@ HLE_GAME_JUMP(0x406638, "op 04 11: continue")
 HLE_GAME_JUMP(0x40663b, "op 04 12: break")
 HLE_GAME_JUMP(0x40663e, "op 12: set label")
 HLE_GAME_JUMP(0x4069be, "op 18: text colour")
-HLE_GAME_JUMP(0x4070bc, "op 04 20: click handler")
+/* 0x4070bc (op 04 20, click handler): game_op_click_handler in ops.c is
+ * written but not enabled until an explore run reaches it under the diff. */
 HLE_GAME_JUMP(0x4071a4, "op 04 23: hit test")
 HLE_GAME_JUMP(0x40739b, "op 04 22: arguments only")
 

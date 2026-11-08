@@ -648,6 +648,9 @@ code change.
   check point, an oracle stop a return point. The C hit test fires probe 0x4071bb itself,
   so the exploration bot still gets the hotspot table.
 - fa0adfb: docs (reimpl.md, re-notes.md); reimpl_status.py counts the handlers.
+- Note: the entry checks for jump units (no calls, fallthrough or outside direct jumps)
+  are in recomp.py's check_oracles, which the default interp build does not run: build
+  the recomp backend once whenever an HLE_GAME_JUMP or HLE_GAME_OVERRIDE line is added.
 - Results, interp build, explore runs of 300000 frames at NANPA2_TURBO=8, all with the
   online diff except seed 32; none had a trap, watchdog warning, stall or mismatch:
   - seed 31: Prologue to OPEN1 and 40.MES (frame 267381), ends at S50.MES; records kept;
@@ -657,7 +660,8 @@ code change.
   Calls compared over seeds 31, 33 and 42: evaluator 2.45 M, block skip 1.78 M, op 0c 2.94 M,
   op 0d 713 k, argument parser 1.04 M, hit test 146 k, ext 12 174 k, op 12 71 k, op 18 47 k,
   menu item 32 k, op 0a 19.7 k, op 0b 26.4 k, string argument 3.5 k, ext 22 486, ext 11 54,
-  op 0e 29, VM init 8; 0 mismatches. Ext 20 (0x4070bc) was never reached. Replay of the
+  op 0e 29, VM init 8; 0 mismatches. Ext 20 (0x4070bc) was never reached, so its handler
+  (written in ops.c) is not enabled in overrides.h until a run covers it. Replay of the
   352,462 records of seeds 31 and 42: 0 mismatches.
 - Short checks: recomp build with the online diff (seed 31, 6000 frames) 0 mismatches;
   NANPA2_LOCKSTEP=1 with the diff (3000 frames) and without (seed 9, 120000 frames, to
@@ -667,6 +671,6 @@ code change.
 - Pacing: the estimated counts are close to the native ones per call (evaluator 326-572
   against 326-559, argument parser +25%, op 0d +40%, op 0e +90% on few calls); tuning is
   left for later.
-- reimpl_status: 5,292 of 25,597 bytes replaced (20.7%, was 17.3%), 33 of 142 functions;
-  game logic 1,496 bytes (5.8%, was 2.4%): 8 functions and 12 opcode handlers. vm module
-  874 of 4,295 bytes (20.3%).
+- reimpl_status: 5,267 of 25,597 bytes replaced (20.6%, was 17.3%), 33 of 142 functions;
+  game logic 1,471 bytes (5.7%, was 2.4%): 8 functions and 11 opcode handlers. vm module
+  849 of 4,295 bytes (19.8%).
