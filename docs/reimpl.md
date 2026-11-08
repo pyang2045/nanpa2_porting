@@ -710,37 +710,37 @@ by name).
 | Address | Bytes | Module | Purpose | Callers | Callees | State |
 |---|---|---|---|---|---|---|
 | 0x401000 | 70 | file | fopen "rb": path as given, then with CD prefix 0x431030 | 401050 402cb0 403360 | 412c90 412d13 | game |
-| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 ... | game |
+| 0x401050 | 258 | file | load whole file (DATA\ or FLAG*), decompress GP4/ANI via 0x4075f0 | 4060d4 406e20 | 401000 4075f0 412c90 412d26 412d6e 412deb 412f02 412f90 41a3d0 41a6a6 41a730 41a740 | game |
 | 0x401160 | 47 | file | save(name, buf, size): fopen wb, fwrite, fclose | 4060d4 | 412d13 412d6e 412fb7 | game |
-| 0x401190 | 84 | screen | Lock surface (hides cursor on primary), return pointer (+40 lines if 0x4ac068) | 4014f0 401870 401900 401a50 403d45 403e30 ... | 4011f0 |  |
-| 0x4011f0 | 184 | screen | cursor: restore saved 32x32 background at 0x4aac54/50 | 401190 401430 4014f0 401670 4017b0 401c60 ... |  |  |
-| 0x4012b0 | 41 | screen | Unlock surface; redraw cursor if primary and shown | 4014f0 401870 401900 401a50 403d45 403e30 ... |  |  |
-| 0x4012e0 | 330 | screen | cursor: save background, draw AND/XOR bitmap 0x4be900 | 401430 4014f0 401670 4017b0 401c40 |  |  |
-| 0x401430 | 178 | screen | Blt copy rect between surfaces 0x44629e[n] (40-line offset) | 403661 4060d4 | 4011f0 4012e0 |  |
-| 0x4014f0 | 380 | screen | masked copy rect, index 8 transparent | 403661 4060d4 | 401190 4011f0 4012b0 4012e0 |  |
-| 0x401670 | 306 | screen | swap two surface rects through scratch surface 0x4ab058 | 4060d4 | 4011f0 4012e0 |  |
-| 0x4017b0 | 186 | screen | colour-fill rect (Blt COLORFILL, colour = arg>>4) | 4060d4 406b24 | 4011f0 4012e0 |  |
-| 0x401870 | 130 | screen | XOR rect with colour index (arg>>4) | 4060d4 | 401190 4012b0 |  |
+| 0x401190 | 84 | screen | Lock surface (hides cursor on primary), return pointer (+40 lines if 0x4ac068) | 4014f0 401870 401900 401a50 403d45 403e30 4060d4 406e20 | 4011f0 | game |
+| 0x4011f0 | 184 | screen | cursor: restore saved 32x32 background at 0x4aac54/50 | 401190 401430 4014f0 401670 4017b0 401c60 402570 |  | game |
+| 0x4012b0 | 41 | screen | Unlock surface; redraw cursor if primary and shown | 4014f0 401870 401900 401a50 403d45 403e30 4060d4 406e20 |  | game |
+| 0x4012e0 | 330 | screen | cursor: save background, draw AND/XOR bitmap 0x4be900 | 401430 4014f0 401670 4017b0 401c40 |  | dead |
+| 0x401430 | 178 | screen | Blt copy rect between surfaces 0x44629e[n] (40-line offset) | 403661 4060d4 | 4011f0 4012e0 | dead |
+| 0x4014f0 | 380 | screen | masked copy rect, index 8 transparent | 403661 4060d4 | 401190 4011f0 4012b0 4012e0 | dead |
+| 0x401670 | 306 | screen | swap two surface rects through scratch surface 0x4ab058 | 4060d4 | 4011f0 4012e0 | dead |
+| 0x4017b0 | 186 | screen | colour-fill rect (Blt COLORFILL, colour = arg>>4) | 4060d4 406b24 | 4011f0 4012e0 | dead |
+| 0x401870 | 130 | screen | XOR rect with colour index (arg>>4) | 4060d4 | 401190 4012b0 | dead |
 | 0x401900 | 333 | text | draw one ASCII/Big5 character via GDI TextOutA | 4060d4 | 401190 4012b0 SelectObject SetBkColor SetBkMode SetTextColor TextOutA | game |
-| 0x401a50 | 402 | screen | dissolve wipe surface 2 -> 0, 2 frames per step | 4060d4 | 401190 4012b0 401bf0 |  |
+| 0x401a50 | 402 | screen | dissolve wipe surface 2 -> 0, 2 frames per step | 4060d4 | 401190 4012b0 401bf0 | game |
 | 0x401bf0 | 75 | input | message pump (PeekMessage/Dispatch), stream refill 0x4034a0; 0 = WM_QUIT | 401a50 404450 40609c 4060d4 4074d5 4075c6 | 4034a0 DispatchMessageA PeekMessageA TranslateMessage | hle |
-| 0x401c40 | 25 | screen | show game cursor (0x4ac510 = 1, draw 0x4012e0) | 4060d4 | 4012e0 |  |
-| 0x401c60 | 25 | screen | hide game cursor (restore 0x4011f0, 0x4ac510 = 0) | 4060d4 | 4011f0 |  |
-| 0x401c80 | 31 | input | SetCursorPos(x, y+40 if 0x4ac068) | 4060d4 | SetCursorPos |  |
-| 0x401ca0 | 138 | screen | build palette from 0x44530c/0x445eae, SetEntries | 403661 4060d4 |  |  |
-| 0x401d30 | 221 | screen | start palette fade: per-entry deltas, 0x4ac504 = 1 | 4060d4 |  |  |
-| 0x401e10 | 6 | screen | return fade-active flag 0x4ac504 | 4060d4 |  |  |
+| 0x401c40 | 25 | screen | show game cursor (0x4ac510 = 1, draw 0x4012e0) | 4060d4 | 4012e0 | dead |
+| 0x401c60 | 25 | screen | hide game cursor (restore 0x4011f0, 0x4ac510 = 0) | 4060d4 | 4011f0 | dead |
+| 0x401c80 | 31 | input | SetCursorPos(x, y+40 if 0x4ac068) | 4060d4 |  SetCursorPos | dead |
+| 0x401ca0 | 138 | screen | build palette from 0x44530c/0x445eae, SetEntries | 403661 4060d4 |  | dead |
+| 0x401d30 | 221 | screen | start palette fade: per-entry deltas, 0x4ac504 = 1 | 4060d4 |  | dead |
+| 0x401e10 | 6 | screen | return fade-active flag 0x4ac504 | 4060d4 |  | dead |
 | 0x401e20 | 431 | startup | play LOGO.AVI through MCI (src/hle/logo.c) | 402090 | 4077a0 412c90 DispatchMessageA GetMessageA SetWindowPos ShowCursor | hle |
-| 0x401fd0 | 179 | startup | window procedure during the logo movie |  | DefWindowProcA SetFocus mciSendStringA | dead |
-| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA ... | game |
+| 0x401fd0 | 179 | startup | window procedure during the logo movie |  |  DefWindowProcA SetFocus mciSendStringA | dead |
+| 0x402090 | 292 | startup | WinMain: window, CD search, logo, init, VM, shutdown |  | 401e20 402590 402620 402a20 4060d4 CreateWindowExA GetStockObject LoadCursorA LoadIconA MessageBoxA RegisterClassA ShowWindow UpdateWindow | game |
 | 0x4021c0 | 699 | input | main window procedure: keys/buttons -> 0x445d8f, mouse, activate |  | 402570 403220 403250 403440 DefWindowProcA DestroyWindow PostQuitMessage SetFocus | game |
-| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 | game |
-| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e | game |
-| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent | game |
-| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent | game |
+| 0x402570 | 25 | screen | WM_PAINT: WaitForVerticalBlank, redraw cursor | 4021c0 | 4011f0 | dead |
+| 0x402590 | 139 | startup | CD search for SPEECH\A\A10930.WAV, set prefix 0x431030 | 402090 | 412c90 412d13 412d6e | dead |
+| 0x402620 | 1010 | startup | DirectDraw, surfaces, fonts, DirectSound, 16 ms timer 0x4028c0 | 402090 | 402ad0 4077a0 413140 MessageBoxA PostMessageA ShowCursor timeSetEvent | dead |
+| 0x402a20 | 173 | startup | shutdown: kill timer, sound exit, release DirectDraw | 402090 | 402c70 ShowCursor timeKillEvent | dead |
 | 0x402ad0 | 405 | sound | DirectSound init, primary buffer 22050 Hz 8-bit stereo | 402620 | 4077a6 MessageBoxA | hle |
 | 0x402c70 | 61 | sound | sound exit: stop voice/music, release DirectSound | 402a20 | 4032c0 403440 | hle |
-| 0x402cb0 | 346 | sound | play music n: MUSIC\%02d.MP3 else .WAV | 4060d4 | 401000 402e10 402ea0 402f10 402f60 403020 4030f0 4032c0 ... | hle |
+| 0x402cb0 | 346 | sound | play music n: MUSIC\%02d.MP3 else .WAV | 4060d4 | 401000 402e10 402ea0 402f10 402f60 403020 4030f0 4032c0 412c90 412d6e 412deb 412f02 41a6a6 41a730 | hle |
 | 0x402e10 | 129 | sound | create MP3 decoder state 0x4be56c | 402cb0 | 407810 407a70 407fb0 408130 40a660 412c90 | dead |
 | 0x402ea0 | 112 | sound | set two position notifications on the stream buffer | 402cb0 |  | dead |
 | 0x402f10 | 68 | sound | find WAV "data" chunk after fmt | 402cb0 403020 403250 403360 |  | hle |
@@ -751,7 +751,7 @@ by name).
 | 0x403220 | 41 | sound | pause music on deactivate | 4021c0 |  | hle |
 | 0x403250 | 111 | sound | resume music after reactivate | 4021c0 | 402f10 402f60 | hle |
 | 0x4032c0 | 153 | sound | stop music, free decoder 0x409f40 | 402c70 402cb0 4060d4 | 409f40 412d26 | hle |
-| 0x403360 | 211 | sound | play voice SPEECH%s once | 4060d4 | 401000 402f10 402f60 403020 403440 412c90 412d6e 412deb ... | hle |
+| 0x403360 | 211 | sound | play voice SPEECH%s once | 4060d4 | 401000 402f10 402f60 403020 403440 412c90 412d6e 412deb 412f02 41a6a6 41a730 | hle |
 | 0x403440 | 90 | sound | stop voice buffer 0x4be564 | 4021c0 402c70 403360 | 412d26 | hle |
 | 0x4034a0 | 106 | sound | wait on stream events, refill played half | 401bf0 | 402f60 4031d0 MsgWaitForMultipleObjects | hle |
 | 0x403510 | 244 | anim | slot control (eax sub-op 0-7: start/run/stop/wait/offset/reset) | 4060d4 406dff | 403661 | game |
@@ -766,7 +766,7 @@ by name).
 | 0x403b28 | 170 | map | sub-op 2: fill view cell grid 0x4313c8 from tile layer | 4042e7 4051c2 |  | game |
 | 0x403bd2 | 371 | map | sub-op 3: overlay visible sprites' tiles into the cell grid | 4042e7 4051c2 |  | game |
 | 0x403d45 | 235 | map | sub-op 4: redraw cells changed since 0x433308 | 4042e7 4051c2 | 401190 4012b0 403eff | game |
-| 0x403e30 | 207 | map | sub-op 5: redraw every cell, then event check 0x405216 |  | 401190 4012b0 403eff 4040f0 405216 |  |
+| 0x403e30 | 207 | map | sub-op 5: redraw every cell, then event check 0x405216 |  | 401190 4012b0 403eff 4040f0 405216 | dead |
 | 0x403eff | 69 | map | draw one 16x16 cell: tile via 0x4355fa, 0x435dfc[layers] | 403d45 403e30 |  | game |
 | 0x403f44 | 107 | map | cell draw [0x435dfc 0]: tile only |  |  | dead |
 | 0x403faf | 60 | map | cell draw [0x435dfc 1]: tile + 1 sprite layer |  | 404132 4041f9 404281 | dead |
@@ -777,14 +777,14 @@ by name).
 | 0x4041f9 | 136 | map | overlay one sprite tile onto the work cell | 403faf 403feb 404056 |  | dead |
 | 0x404281 | 102 | map | write the composed work cell to the screen | 403faf 403feb 404056 |  | dead |
 | 0x4042e7 | 16 | map | sub-op 6: compose and draw (sub-ops 2, 3, 4) |  | 403b28 403bd2 403d45 | dead |
-| 0x4042f7 | 36 | map | sub-op 7: step all sprite scripts | 4051c2 | 40431b |  |
-| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 | game |
+| 0x4042f7 | 36 | map | sub-op 7: step all sprite scripts | 4051c2 | 40431b | dead |
+| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 | dead |
 | 0x404410 | 30 | map | count down move steps, dispatch 0x435e0c[kind-1] | 40431b |  | dead |
-| 0x40442e | 15 | map | move kind 1: up (0x404731), toggle frame |  | 404731 |  |
+| 0x40442e | 15 | map | move kind 1: up (0x404731), toggle frame |  | 404731 | dead |
 | 0x404435 | 7 | map | move kind 2: down (0x404937) |  | 404937 | dead |
 | 0x40443c | 7 | map | move kind 3: left (0x404a9a) |  | 404a9a | dead |
 | 0x404443 | 5 | map | move kind 4: right (0x404c9f) |  | 404c9f | dead |
-| 0x404450 | 615 | map | move kind 6: player control, mouse/keys, history ring 0x435dca |  | 401bf0 404731 404937 404a9a 404c9f 405597 405691 40609c |  |
+| 0x404450 | 615 | map | move kind 6: player control, mouse/keys, history ring 0x435dca |  | 401bf0 404731 404937 404a9a 404c9f 405597 405691 40609c | dead |
 | 0x4046b7 | 15 | map | move kind 8: left+up |  | 404731 404a9a | dead |
 | 0x4046c6 | 15 | map | move kind 9: right+up |  | 404731 404c9f | dead |
 | 0x4046d5 | 15 | map | move kind 10: left+down |  | 404937 404a9a | dead |
@@ -800,15 +800,15 @@ by name).
 | 0x40500e | 30 | map | sub-op 9: collision test for sprite n | 405216 | 404e25 | game |
 | 0x40502c | 231 | map | sub-op 10: place player/view at entry n, fill history |  |  | dead |
 | 0x405113 | 175 | map | sub-op 11: reset history to player, view from entry n |  |  | dead |
-| 0x4051c2 | 84 | map | sub-op 12: one map frame (falls into 0x405216) |  | 403b28 403bd2 403d45 4042f7 40609c |  |
-| 0x405216 | 400 | map | event check: sprite contact / area trigger | 403e30 | 404f8c 40500e 40609c |  |
+| 0x4051c2 | 84 | map | sub-op 12: one map frame (falls into 0x405216) |  | 403b28 403bd2 403d45 4042f7 40609c | dead |
+| 0x405216 | 400 | map | event check: sprite contact / area trigger | 403e30 | 404f8c 40500e 40609c | dead |
 | 0x4053a6 | 56 | map | sub-op 13: set sprite n's script |  |  | dead |
 | 0x4053de | 55 | map | sub-op 14: enable/disable sprite n (flag 0x80) |  |  | dead |
 | 0x405415 | 122 | map | sub-op 15: unpack run-length layer (0x4000 = run) |  |  | dead |
 | 0x40548f | 179 | map | sub-op 16: copy a rectangle of map cells |  |  | dead |
 | 0x405542 | 77 | map | sub-op 30: start pathfinding for sprite n |  | 405966 | dead |
 | 0x40558f | 8 | map | sub-op 32: cancel auto-walk (0x435573 = 0) |  |  | dead |
-| 0x405597 | 148 | map | right click: mouse to map cell, pathfind the player there | 404450 | 405966 40609c |  |
+| 0x405597 | 148 | map | right click: mouse to map cell, pathfind the player there | 404450 | 405966 40609c | dead |
 | 0x40562b | 102 | map | build walk grid from cell bit 0x80 (0xff wall, 0xfe free) | 405966 |  | dead |
 | 0x405691 | 725 | map | auto-walk step: go to the lower neighbour (8 directions) | 404450 4046f3 | 404731 404937 404a9a 404c9f | game |
 | 0x405966 | 359 | map | pathfinding setup: start/goal, walk grid, flood fill | 4046f3 405542 405597 | 40562b 405acd 405fb6 | game |
@@ -823,27 +823,27 @@ by name).
 | 0x405ed0 | 109 | map | flood-fill order case 6 |  | 405b07 | dead |
 | 0x405f24 | 73 | map | flood-fill order case 7 |  | 405b07 | dead |
 | 0x405fb6 | 230 | map | unreachable goal: mark approach cells for the sprite footprint | 405966 |  | dead |
-| 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 |  |
-| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... | game |
+| 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 | game |
+| 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 401870 401900 401a50 401bf0 401c40 401c60 401c80 401ca0 401d30 401e10 402cb0 4032c0 403360 403510 403624 4037fc 4039f7 403a70 4060d4 4061cd 4061d4 406395 4063ee 406455 4068e1 4069fd 406acc 406b24 406dc4 406dff 406e20 40741b 4074d5 40754d 40756c 407599 4075c6 | game |
 | 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 | game |
 | 0x4061d4 | 39 | vm | skip a 01 ... 00 block, counting nesting | 4060d4 40741b |  | game |
 | 0x406395 | 89 | vm | init register '@' and segment table 0x44533c | 4060d4 |  | game |
 | 0x4063ee | 103 | text | advance text cursor, wrap line/window (alt 0x406415 newline) (alt 406415) | 4060d4 |  | game |
 | 0x406455 | 60 | expr | write 4-bit flag n = ax (clamped to 15) | 4060d4 |  | game |
 | 0x4068e1 | 53 | vm | menu list: next item (guard 0f expr), al = -1/0/1 | 4060d4 | 4037fc | game |
-| 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd |  |
+| 0x4069fd | 157 | text | format a number as ASCII or Big5 digits into 0x445ce6 (alt 406a66) | 4060d4 4069fd | 4069fd | game |
 | 0x406acc | 57 | vm | wait for click/Enter (bit 0x10) press then release | 4060d4 | 4074d5 4075c6 | game |
 | 0x406b24 | 82 | text | clear text window (fill 0x4017b0), home cursor | 4060d4 | 4017b0 | game |
 | 0x406dc4 | 59 | vm | copy string argument into buffer edi | 4060d4 406e20 |  | game |
 | 0x406dff | 18 | anim | reset all animation slots (0x403510 sub-op 7) | 4060d4 406e20 | 403510 | game |
-| 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c |  |
+| 0x406e20 | 230 | screen | load GP4 to 0x4662be, set palette, copy to surface @[6] | 4060d4 | 401050 401190 4012b0 406dc4 406dff 40752c | dead |
 | 0x40741b | 136 | vm | parse argument list into 0x445d06 (types 0x445cf6), eax = arg 0 | 4060d4 | 4037fc 4061d4 4074a3 | game |
 | 0x4074a3 | 50 | vm | test whether the next byte starts an expression | 40741b |  | dead |
 | 0x4074d5 | 87 | input | pump, then test input bit al (0 ok, 1 cancel, 2-5 arrows) | 4060d4 406acc | 401bf0 | game |
 | 0x40752c | 33 | screen | copy a picture palette into 0x44530c / 0x445eae | 403661 406e20 |  | game |
-| 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  |  |
-| 0x40756c | 45 | screen | save palette tables to 0x44608e | 4060d4 |  |  |
-| 0x407599 | 45 | screen | restore palette tables from 0x44608e | 4060d4 |  |  |
+| 0x40754d | 31 | screen | fill palette tables with one value (fade target) | 4060d4 |  | dead |
+| 0x40756c | 45 | screen | save palette tables to 0x44608e | 4060d4 |  | dead |
+| 0x407599 | 45 | screen | restore palette tables from 0x44608e | 4060d4 |  | dead |
 | 0x4075c6 | 40 | vm | wait ecx/4+1 frames, pump and animate | 4060d4 406acc | 401bf0 403624 | game |
 | 0x4075f0 | 140 | file | GP4/ANI LZHUF decompressor (src/lzh.c) | 401050 | 40776b | hle |
 | 0x40767c | 61 | file | LZHUF tree rebuild at frequency 0x8000 | 4076b9 | 4076b9 | dead |
