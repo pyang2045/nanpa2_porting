@@ -42,12 +42,13 @@ extern uint8_t *x86_mem;
 
 /* Stopping lifted code at an exit (the differential test of jump
  * overrides, src/game/game.c): while x86_stop_esp is set, dispatch calls
- * x86_stop_at(pc) and returns from x86_exec when it says so, which is when
- * ESP rose above x86_stop_esp (a return out of the handler) or equals it at
- * one of the x86_stop_exits (zero-terminated). x86_stop_pc is that pc. */
+ * x86_stop_at(pc) and returns from x86_exec when it says so, which is
+ * never at the first check (the entry), and then when ESP rose above
+ * x86_stop_esp (a return out of the handler) or equals it at one of the
+ * x86_stop_exits (zero-terminated). x86_stop_pc is that pc. */
 extern uint32_t x86_stop_esp, x86_stop_pc;
 extern const uint32_t *x86_stop_exits;
-/* Also, from the second check on, any of x86_stop_units (zero-terminated:
+/* Also any of x86_stop_units (zero-terminated:
  * the jump units) at ESP == x86_stop_esp, and below it the call exits
  * x86_stop_calls (zero-terminated pairs {callee, return address}: pc is the
  * callee and the return address is on top of the stack). The caller

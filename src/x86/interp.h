@@ -37,6 +37,13 @@ struct dec {
 	uint32_t imm2;  /* second immediate: shld/shrd count */
 };
 
+/* the tagged entry of an original (X86_ORACLE_TAG | a game code address);
+ * HLE thunks outside the game code may have that bit set too */
+static inline int x86_is_oracle_pc(uint32_t pc)
+{
+	return (pc & X86_ORACLE_TAG) && (pc & ~X86_ORACLE_TAG) - CODE_START < CODE_LEN;
+}
+
 /* per code byte: an override (src/hle/overrides.h), entering it calls
  * hle_call; OVR_GAME ones keep their original body as the oracle. OVR_JUMP
  * (HLE_GAME_JUMP, an opcode handler): entering it by any jump goes on at

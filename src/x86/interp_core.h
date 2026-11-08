@@ -82,7 +82,7 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 				 * handler gives the next pc; inside an oracle it is
 				 * the tagged entry of the original, run here */
 				pc = HLE_JUMP(pc);
-				if (pc != X86_RET_SENTINEL && (pc & X86_ORACLE_TAG)) {
+				if (x86_is_oracle_pc(pc)) {
 					pc &= ~X86_ORACLE_TAG;
 					native = pc;
 				}
@@ -120,7 +120,7 @@ static uint32_t IFN(run)(uint32_t pc, uint32_t limit, uint32_t native)
 	int game_ = t_ - CODE_START < CODE_LEN && x86_interp_override[t_ - CODE_START] >= OVR_GAME; \
 	if (t_ <= pc && (game_ || !x86_is_hle(t_))) \
 		POLL(pc); \
-	if (game_) \
+	if (game_ && x86_interp_override[t_ - CODE_START] == OVR_GAME) \
 		native = t_; \
 	pc = t_; \
 	goto next; \
