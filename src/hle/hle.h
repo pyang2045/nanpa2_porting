@@ -55,6 +55,13 @@ void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam);
 int win32_pump(void);        /* native 0x401bf0: 0 on quit */
 void win32_run_timer(void);  /* run due 16 ms ticks (native timer thread) */
 int win32_timer_running(void); /* timeSetEvent seen, not killed */
+/* Cursor. The native game hides the system cursor (ShowCursor counter -1:
+ * 0x401e27, 0x40262a, 0x4028ab) and draws its own sprite from
+ * DATA/MOUSE.DAT; the host cursor is hidden only while the counter is
+ * negative and the pointer is over the game image of the focused window. */
+int win32_show_cursor(int show); /* native ShowCursor: the new count */
+void win32_cursor_update(void);  /* re-check after mouse/window/fit changes */
+void win32_cursor_state(int *count, int *shown, int *over_image);
 extern uint32_t win32_wndproc;
 
 /* crt.c: C runtime replacements by native address */

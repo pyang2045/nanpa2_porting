@@ -180,6 +180,7 @@ static void override_call(uint32_t addr)
 		cpu.r[EDX] = 0; /* also volatile across the stdcall APIs */
 		return;
 	case 0x401e20: /* LOGO.AVI through MCI (src/hle/logo.c) */
+		win32_show_cursor(0); /* 0x401e27, before anything else */
 		logo_play();
 		return;
 	case 0x402ad0: /* DirectSound init */

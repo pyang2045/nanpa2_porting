@@ -176,6 +176,20 @@ tables 0x40247c / 0x402508):
 F1 (0x4022dd) calls an import with `0x4ab05c`. Mouse position: `0x4452e2`/`0x4452e4`.
 0x40609c returns bl = bit0 (0x10) | bit1 (0x20), cx/dx = mouse x/y.
 
+### Cursor
+
+The system cursor is hidden for the whole game: ShowCursor (IAT 0x41b11c) is called at
+0x401e27 (0, first thing in the logo player 0x401e20, also when no movie plays, never
+undone), 0x40262a (1) and 0x4028ab (0) in the DirectDraw init 0x402620, and 0x402ac6 (1) at
+shutdown 0x402a20, so the display counter is -1 while the game runs. The window class
+(0x402090) gets `LoadCursorA(0, IDC_ARROW)` (0x4020cd); the window procedure has no
+WM_SETCURSOR, and there is no SetCursor or SetClassLong import. The game draws its own
+cursor: WM_MOUSEMOVE stores x at 0x4ac064 (0x4023bf), y at 0x4ac060 (0x4023d7); 0x4012e0 saves the
+32x32 area under it and draws an AND/XOR bitmap pair at 0x4be900 + 0x100 * [0x4ac514]
+(mask +0, image +0x80; clipped at x 0x260, y 0x1c0); 0x401c40 shows it (0x4ac510 = 1),
+0x401c60 hides it (restore 0x4011f0, 0x4ac510 = 0). The 16 ms timer 0x4028c0 flips
+0x4ac514 every 30 ticks (blink) and posts a WM_MOUSEMOVE to redraw.
+
 ## Pacing (what is timed by what)
 
 Everything visible is paced by the 16 ms multimedia timer (frame counter `0x446292`,

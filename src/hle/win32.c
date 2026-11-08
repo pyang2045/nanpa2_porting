@@ -28,7 +28,9 @@ static uint64_t timer_next; /* in 1/turbo ms */
 /* NANPA2_TURBO=N (testing): the 16 ms timer, which is the game's clock, and the
  * emulated CPU run N times faster than real time, so long scripted runs finish sooner */
 static int turbo = 1;
+/* the native ShowCursor display counter (0 at start; shown while >= 0) */
 static int cursor_count;
+static int cursor_shown = -1, cursor_over; /* host cursor state last set */
 
 enum {
 	F_ShowCursor = 1, F_DispatchMessageA, F_TranslateMessage, F_PeekMessageA, F_SetCursorPos,
@@ -147,6 +149,52 @@ static uint32_t sdl_to_vk(SDL_Keycode k)
 	return 0;
 }
 
+/* Native cursor use (USER32 IAT slot 0x41b11c, ShowCursor):
+ *   0x401e27 ShowCursor(0)  first thing in the logo player 0x401e20 (also
+ *                           when no movie plays), never undone: count -1
+ *   0x40262a ShowCursor(1)  start of DirectDraw init 0x402620: 0
+ *   0x4028ab ShowCursor(0)  end of 0x402620: -1 for the whole game
+ *   0x402ac6 ShowCursor(1)  shutdown 0x402a20: 0
+ * The window class (0x402090) has LoadCursorA(0, IDC_ARROW) at 0x4020cd;
+ * the window procedure 0x4021c0 has no WM_SETCURSOR, and there is no
+ * SetCursor or SetClassLong import. In the game the system cursor is thus
+ * hidden over the exclusive full-screen DirectDraw display, and the game
+ * draws its own cursor sprite (DATA/MOUSE.DAT, blinked by the timer
+ * 0x4028c0 through 0x4ac510/0x4ac514) at the WM_MOUSEMOVE position.
+ * The port hides the host cursor only over the game image: letterbox
+ * borders, the title bar, other windows and an unfocused window keep the
+ * host cursor. */
+void win32_cursor_update(void)
+{
+	SDL_Window *w = SDL_GetMouseFocus();
+	int over = 0;
+	if (w && (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS)) {
+		int wx, wy, sx, sy;
+		SDL_GetMouseState(&wx, &wy);
+		over = present_window_to_screen(wx, wy, &sx, &sy);
+	}
+	cursor_over = over;
+	int shown = cursor_count >= 0 || !over;
+	if (shown != cursor_shown) {
+		cursor_shown = shown;
+		SDL_ShowCursor(shown ? SDL_ENABLE : SDL_DISABLE);
+	}
+}
+
+int win32_show_cursor(int show)
+{
+	cursor_count += show ? 1 : -1;
+	win32_cursor_update();
+	return cursor_count;
+}
+
+void win32_cursor_state(int *count, int *shown, int *over_image)
+{
+	*count = cursor_count;
+	*shown = SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE;
+	*over_image = cursor_over;
+}
+
 static uint32_t mouse_lparam(int wx, int wy)
 {
 	int sx, sy;
@@ -180,7 +228,10 @@ static void collect_events(void)
 			return;
 		last = now;
 	}
+	int cursor_check = 0;
 	while (SDL_PollEvent(&ev)) {
+		if (ev.type == SDL_MOUSEMOTION || ev.type == SDL_WINDOWEVENT)
+			cursor_check = 1;
 		/* scripted runs: the real cursor, keys and focus changes on a shared
 		 * desktop would move the injected mouse or stop the timer
 		 * (WM_ACTIVATEAPP 0 clears 0x4ac4ec) */
@@ -207,8 +258,10 @@ static void collect_events(void)
 		case SDL_KEYUP: {
 			if (ev.type == SDL_KEYDOWN && ev.key.repeat)
 				break;
-			if (present_hotkey(&ev.key)) /* port hotkeys: CRT, fullscreen */
+			if (present_hotkey(&ev.key)) { /* port hotkeys: CRT, fullscreen */
+				cursor_check = 1; /* the image may have moved */
 				break;
+			}
 			uint32_t vk = sdl_to_vk(ev.key.keysym.sym);
 			if (vk)
 				win32_post_message(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
@@ -222,6 +275,8 @@ static void collect_events(void)
 			break;
 		}
 	}
+	if (cursor_check)
+		win32_cursor_update();
 }
 
 static int pop_message(struct msg *m)
@@ -380,6 +435,7 @@ int win32_pump(void)
 void win32_init(void)
 {
 	cursor_count = 0;
+	cursor_shown = -1;
 	const char *t = getenv("NANPA2_TURBO");
 	turbo = t && atoi(t) > 1 ? atoi(t) : 1;
 }
@@ -389,9 +445,7 @@ int win32_call_import(int id)
 	uint32_t r = 0;
 	switch (id) {
 	case F_ShowCursor:
-		cursor_count += hle_arg(0) ? 1 : -1;
-		SDL_ShowCursor(cursor_count >= 0 ? SDL_ENABLE : SDL_DISABLE);
-		r = (uint32_t)cursor_count;
+		r = (uint32_t)win32_show_cursor(hle_arg(0) != 0);
 		break;
 	case F_SetCursorPos: {
 		/* screen coordinates of the 640x480 display */

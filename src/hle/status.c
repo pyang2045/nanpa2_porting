@@ -72,6 +72,7 @@ static struct snap {
 	uint32_t flags;
 	int w, h, x, y;
 	int focus;
+	int cursor_count, cursor_shown, cursor_over; /* win32_cursor_state */
 	struct present_stats ps;
 } snap;
 
@@ -295,6 +296,7 @@ static void write_status(void)
 		"  \"window\": {\"count\": %d, \"os_windows\": %d, \"id\": %u, \"flags\": %u, \"shown\": %d, "
 		"\"hidden\": %d, \"size\": [%d, %d], \"pos\": [%d, %d], \"drawable\": [%d, %d], \"focus\": %d, "
 		"\"occluded\": %d},\n"
+		"  \"cursor\": {\"count\": %d, \"host_shown\": %d, \"over_image\": %d},\n"
 		"  \"present\": {\"renderer\": \"%s\", \"frames_in\": %lu, \"presented\": %lu, "
 		"\"skipped\": {\"occluded\": %lu, \"no_drawable\": %lu, \"size0\": %lu}, "
 		"\"last_wait_ms\": %.1f, \"worst_wait_ms\": %.1f, \"since_present_ms\": %d, "
@@ -309,7 +311,8 @@ static void write_status(void)
 		locked, asleep, ps->app_hidden, s.windows, ps->os_windows,
 		window ? SDL_GetWindowID(window) : 0, s.flags, !!(s.flags & SDL_WINDOW_SHOWN),
 		!!(s.flags & SDL_WINDOW_HIDDEN), s.w, s.h, s.x, s.y, ps->drawable_w, ps->drawable_h, s.focus,
-		ps->occluded, present_name(), ps->frames_in, ps->presented, ps->skip_occluded, ps->skip_drawable,
+		ps->occluded, s.cursor_count, s.cursor_shown, s.cursor_over, present_name(), ps->frames_in,
+		ps->presented, ps->skip_occluded, ps->skip_drawable,
 		ps->skip_size, ps->last_wait_ms, ps->worst_wait_ms,
 		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black,
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
@@ -383,6 +386,7 @@ void status_main(void)
 		s.focus = (s.flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 	}
 	present_stats(&s.ps);
+	win32_cursor_state(&s.cursor_count, &s.cursor_shown, &s.cursor_over);
 	SDL_LockMutex(lock);
 	snap = s;
 	SDL_UnlockMutex(lock);
