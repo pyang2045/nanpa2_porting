@@ -613,3 +613,36 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
   body. Interpreter: the override check is skipped for the first fetch of addr, and again
   after any direct jump (jmp, jcc, loop) to addr, which recomp.py allows only from inside
   that body (check_oracles); calls and indirect transfers to addr still reach the override.
+
+## Palette and fades (0x401ca0, 0x401d30, 0x40752c-0x407599)
+
+- Colour tables: 0x44530c u16[16] (interface colours, 0x0GRB, one nibble per channel) and
+  0x445eae u16[240] (picture colours, 5:5:5, red bits 10-14). 0x401ca0 builds
+  PALETTEENTRY[256] at 0x4ac07c from them: base entry red = w & 0xf0, green = (w >> 4) & 0xf0,
+  blue = (w & 0xf) << 4; picture entry red = (w >> 7) & 0xf8, green = (w >> 2) & 0xf8, blue =
+  (w & 0x1f) << 3; then IDirectDrawPalette::SetEntries(0, 0, 256, entries) on the object at
+  0x4ac4f4.
+- 0x40756c / 0x407599 copy both tables to / from 0x44608e (unless @[9] bit 4, 0x4452e0 & 0x10),
+  0x40754d fills both with AX.
+- Fade (0x401d30): i32[256][3] at 0x4ab060 = (target channel from the tables) - (displayed
+  entry), the displayed entries copied to 0x4aac58 and 0x4ac504 = 1. The timer callback
+  (HLE, native 0x4028c0) steps 16 times every 0x44628e ticks and clears 0x4ac504. Op 04 16 3
+  = save tables, [fill], steps = 1, fade, wait for 0x4ac504, restore tables.
+
+## Surfaces and cursor (0x401190-0x401c80, 0x401430-0x401900)
+
+- Surface objects at 0x44629e (u32[], 0 = screen), pitches at 0x4462ae. Lock descriptor
+  0x4ac480 (lpSurface 0x4ac4a4). 0x4ac068 set: the screen is drawn 40 lines down (rectangles
+  and positions on surface 0, and the Lock pointer, +40 lines).
+- Game cursor: shown flag 0x4ac510, position x 0x4ac064 / y 0x4ac060, frame 0x4ac514 (blinks),
+  saved position 0x4aac54 / 0x4aac50, saved pixels 0x4abc60 (32 rows of 32 bytes), shape
+  0x4be900 + frame * 256: u32 row words, plane 1 (white) then plane 2 at +0x80 (black where
+  the bit is clear), bit 31 = leftmost. Every routine that locks or Blt's the screen takes it
+  off (0x4011f0) and puts it back (0x4012e0).
+- Copy 0x401430 / masked 0x4014f0 / swap 0x401670 (cdecl dx, dy, sx, sy, w, h, surfaces =
+  src << 8 | dst): BltFast; masked on the screen uses the colour key (flags 0x11), otherwise
+  by hand with colour 8 transparent; swap goes through the scratch surface 0x4ab058. Fill
+  0x4017b0 (x, y, w, h, colour << 4, surface): Blt COLORFILL. XOR 0x401870: dwords, width
+  rounded up to 4.
+- Picture 0x406e20: header u16 x / 8, y, w / 8, h at 0x4662be (copied to 0x44538a-0x445390),
+  palette block at +8 (0x40752c unless @[9] bit 0), pixels at +0x208.

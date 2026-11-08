@@ -144,7 +144,8 @@ void game_fade_start(void)
 uint32_t game_fade_active(void)
 {
 	X86_COUNT(2);
-	return rd32(PAL_FADING);
+	cpu.r[EAX] = rd32(PAL_FADING);
+	return cpu.r[EAX];
 }
 
 /*
@@ -362,11 +363,11 @@ void game_cursor_setpos(void)
 	uint32_t sp = cpu.r[ESP];
 	X86_COUNT(3);
 	if (rd32(SCREEN_SHIFT)) {
-		wr32(sp + 8, rd32(sp + 8) + SHIFT_LINES);
+		wr32(sp + 4, rd32(sp + 4) + SHIFT_LINES);
 		X86_COUNT(1);
 	}
-	cpu.r[EAX] = rd32(sp + 8);
-	cpu.r[ECX] = rd32(sp + 4);
+	cpu.r[EAX] = rd32(sp + 4);
+	cpu.r[ECX] = rd32(sp);
 	push32(cpu.r[EAX]);
 	push32(cpu.r[ECX]);
 	X86_COUNT(5);
