@@ -213,14 +213,12 @@ static void fuzz_plan_walk(uint32_t *s)
 	cpu.r[EDX] = (cpu.r[EDX] & 0xffff0000u) | gy;
 }
 
-static void fuzz_sprite_step(uint32_t *s)
+/* a movement state for sprite sp: script, position in it, kind, count, the
+ * walk to a destination. Never kind 6 (the player is sprite 0 and is
+ * set up by the chain fuzzers). */
+static void fuzz_sprite_script(uint32_t *s, const struct world *wp, uint32_t sp)
 {
-	struct world w = world();
-	if (!w.n)
-		return;
-	fuzz_sprites(s, &w);
-	fuzz_view(s, &w);
-	uint32_t sp = pick_sprite(s, &w);
+	struct world w = *wp;
 	uint32_t p = SEG1 + sp;
 	uint32_t donor = SEG1 + pick_sprite(s, &w);
 	wr8(p + S_FLAGS, rd8(p + S_FLAGS) | (chance(s, 85) ? SPRITE_ACTIVE : 0));
@@ -239,12 +237,6 @@ static void fuzz_sprite_step(uint32_t *s)
 	wr8(0x435e61u, below(s, 2));
 	cpu.r[ESI] = sp;
 	cpu.r[EDI] = w.sel;
-	for (int tries = 0; tries < 8 && game_native_sprite_step(); tries++) {
-		/* kind 6 is native: take another script position or kind */
-		wr8(p + S_SCRIPT_PC, below(s, 6));
-		wr8(p + S_COUNT, 1);
-		wr8(p + S_KIND, kinds[below(s, sizeof kinds)]);
-	}
 }
 
 /* ---- the 04 26 handler: an argument list for a sub-op that needs no
@@ -266,9 +258,20 @@ static uint32_t put_value(uint32_t pc, uint32_t v)
 	return pc;
 }
 
+/* 04 20 button, offset (0x4070bc: no shipped script runs it; the arguments
+ * are written over the script at the handler's ESI) */
+static void fuzz_click_handler(uint32_t *s)
+{
+	uint32_t pc = cpu.r[ESI];
+	pc = put_value(pc, below(s, 2));
+	vm_set_script_byte(pc++, 0x02);
+	pc = put_value(pc, below(s, 0x1000));
+	vm_set_script_byte(pc, 0x00);
+}
+
 static void fuzz_op_map(uint32_t *s)
 {
-	static const uint8_t ops[] = { 0, 1, 10, 11, 13, 14, 15, 16, 30, 32 };
+	static const uint8_t ops[] = { 0, 1, 10, 11, 13, 14, 15, 16, 30, 32, 7 };
 	struct world w = world();
 	if (!w.n || w.mw < 6 || w.mh < 6)
 		return;
@@ -277,6 +280,11 @@ static void fuzz_op_map(uint32_t *s)
 	fuzz_sprites(s, &w);
 	fuzz_walls(s, &w, below(s, w.mw), below(s, w.mh), 15);
 	pc = put_value(pc, op);
+	if (op == 7) { /* the sprite loop: a movement state for each sprite */
+		fuzz_view(s, &w);
+		for (uint32_t k = 0; k < w.n; k++)
+			fuzz_sprite_script(s, &w, w.sprites + 16 * k);
+	}
 	uint32_t args[6] = { 0, 0, 0, 0, 0, 0 };
 	uint32_t nargs = 0;
 	switch (op) {
@@ -374,6 +382,167 @@ static void fuzz_cell_draw(uint32_t *s)
 		wr16(cell + 2 + 2 * i, i < layers ? 1 + below(s, 60) : 0);
 }
 
+
+/* ---- the pump chain (stage 6): a state at each pump site, as the native
+ * stack has it there. The frames are those of sub-op 12 after its sprites
+ * (the event check and the frame's pumps) or of sub-op 7 inside the sprite
+ * loop with the player at the head (the player's sites); the oracle ends at
+ * the handler's tail 0x40740f. */
+
+#define TAIL_RA 0x40740fu
+
+static void put_pushal(uint32_t *s, uint32_t esi, uint32_t edi)
+{
+	push32(rnd(s));
+	push32(rnd(s) & 0xffff);
+	push32(rnd(s) & 0xffff);
+	push32(rnd(s));
+	push32(rnd(s));
+	push32(rnd(s));
+	push32(esi);
+	push32(edi);
+}
+
+/* the mouse near the player's place on the screen half the time */
+static void fuzz_mouse(uint32_t *s, const struct world *w, uint32_t pl)
+{
+	uint32_t sp = SEG1 + pl;
+	uint32_t px = ((rd16(sp + S_X) + rd16(w->m + M_SCREEN_X) - rd16(w->m + M_VIEW_X)) << 4) & 0xffff;
+	uint32_t py = (((rd16(sp + S_Y) - rd16(w->m + M_VIEW_Y)) << 4) + rd16(w->m + M_SCREEN_Y)) & 0xffff;
+	uint32_t cx = below(s, 0x2a0), dx = below(s, 0x1a0);
+	if (chance(s, 70)) {
+		cx = (px + below(s, 0xa0) - 0x40) & 0xffff;
+		dx = (py + below(s, 0x90) - 0x40) & 0xffff;
+	}
+	if (chance(s, 10))
+		cx = 0xf8 + below(s, 0x90), dx = 0x120 + below(s, 0x20); /* the screen's button box */
+	cpu.r[ECX] = (rnd(s) & 0xffff0000u) | cx;
+	cpu.r[EDX] = (rnd(s) & 0xffff0000u) | dx;
+	/* BL = left | right << 1, BH = right << 1 */
+	uint32_t l = chance(s, 50), r = chance(s, 30);
+	cpu.r[EBX] = (l | (uint32_t)(r << 1)) | ((uint32_t)(r << 1) << 8);
+}
+
+static int fuzz_chain_base(uint32_t *s, struct world *w)
+{
+	*w = world();
+	if (w->n < 2 || w->mw < 6 || w->mh < 6)
+		return 0;
+	fuzz_sprites(s, w);
+	fuzz_view(s, w);
+	wr16(w->m + M_SCREEN_X, below(s, 5));
+	wr16(w->m + M_SCREEN_Y, below(s, 5) * 8);
+	for (uint32_t k = 1; k < w->n; k++)
+		fuzz_sprite_script(s, w, w->sprites + 16 * k);
+	uint32_t pl = w->sprites;
+	fuzz_walls(s, w, rd16(SEG1 + pl + S_X), rd16(SEG1 + pl + S_Y), 25);
+	fuzz_grid(s, w, rd16(SEG1 + pl + S_X), rd16(SEG1 + pl + S_Y));
+	wr8(SEG1 + pl + S_FLAGS, rd8(SEG1 + pl + S_FLAGS) | SPRITE_ACTIVE);
+	wr8(MAP_AUTOWALK, chance(s, 20) ? 0xff : 0);
+	wr8(MAP_MOVED, chance(s, 50) ? 0xff : 0);
+	wr8(0x435572u, chance(s, 50) ? 0xff : 0);
+	wr8(0x445ce0u, chance(s, 70));
+	wr8(0x445d8fu, (uint8_t)(chance(s, 60) ? rnd(s) & 0x0f : 0) | (chance(s, 20) ? 0x10 : 0) |
+	               (chance(s, 20) ? 0x20 : 0));
+	for (uint32_t i = 0; i < 5 * HISTORY_LEN; i++)
+		wr8(HISTORY + i, below(s, 256));
+	wr16(MAP_LAST_SPRITE, below(s, 4));
+	wr16(MAP_LAST_CLICK, chance(s, 50) ? 0xffff : below(s, 100));
+	wr16(MAP_LAST_AREA, chance(s, 50) ? 0xffff : below(s, 100));
+	/* a free stack below the game's own */
+	cpu.r[ESP] = (cpu.r[ESP] - 0x2000) & ~3u;
+	return 1;
+}
+
+/* the handler's frames: its pushed ESI, the return addresses of the call of
+ * 0x403a70 and of its table call */
+static void put_handler_frames(uint32_t *s)
+{
+	push32(rnd(s) & 0xffff);
+	push32(TAIL_RA);
+	push32(0x403a86);
+}
+
+/* sub-op 7 inside the sprite loop, the player at the head of the table */
+static void put_player_frames(uint32_t *s, const struct world *w)
+{
+	uint32_t pl = w->sprites, sp = SEG1 + pl;
+	put_handler_frames(s);
+	push32(pl);
+	push32(0x404314);
+	push32(0x40440f);
+	push32(rd8(sp + S_FRAME));
+	push32(rd16(sp + S_X));
+	push32(rd16(sp + S_Y));
+	cpu.r[ESI] = pl;
+	cpu.r[EDI] = w->sel;
+}
+
+static void fuzz_site_player(uint32_t *s, int pushal_on_top)
+{
+	struct world w;
+	if (!fuzz_chain_base(s, &w))
+		return;
+	put_player_frames(s, &w);
+	uint32_t pl = w.sprites;
+	if (pushal_on_top)
+		put_pushal(s, pl, w.sel);
+	cpu.r[EAX] = chance(s, 95) ? 1 : 0; /* the HLE pump's result, the keyboard path */
+	fuzz_mouse(s, &w, pl);
+	cpu.r[EBP] = rnd(s);
+}
+
+static void fuzz_site_40448b(uint32_t *s) { fuzz_site_player(s, 1); }
+static void fuzz_site_4044a9(uint32_t *s) { fuzz_site_player(s, 0); }
+static void fuzz_site_4044b7(uint32_t *s) { fuzz_site_player(s, 0); }
+static void fuzz_site_4045eb(uint32_t *s)
+{
+	fuzz_site_player(s, 1);
+	cpu.r[EAX] = chance(s, 95) ? 1 : 0;
+}
+
+/* the right click: the pushal of 0x405597, its caller's return address, the
+ * pushal of 0x40447c, then the player's */
+static void fuzz_site_40559d(uint32_t *s)
+{
+	struct world w;
+	if (!fuzz_chain_base(s, &w))
+		return;
+	put_player_frames(s, &w);
+	put_pushal(s, w.sprites, w.sel);
+	push32(0x404495);
+	put_pushal(s, w.sprites, w.sel);
+	fuzz_mouse(s, &w, w.sprites);
+	cpu.r[EBP] = rnd(s);
+}
+
+/* the sub-op's own frames (sub-op 12 after its sprites) and a saved EAX */
+static void fuzz_site_event(uint32_t *s)
+{
+	struct world w;
+	if (!fuzz_chain_base(s, &w))
+		return;
+	put_handler_frames(s);
+	push32(rnd(s));
+	cpu.r[ESI] = w.sprites;
+	cpu.r[EDI] = w.sel;
+	cpu.r[EAX] = rnd(s);
+	cpu.r[EBP] = rnd(s);
+	fuzz_mouse(s, &w, w.sprites);
+	/* the event check wants a contact now and then: sprite 0 on sprite 1 */
+	if (chance(s, 40)) {
+		wr16(SEG1 + w.sprites + 16 + S_X, rd16(SEG1 + w.sprites + S_X));
+		wr16(SEG1 + w.sprites + 16 + S_Y, rd16(SEG1 + w.sprites + S_Y));
+	}
+	wr16(MAP_ARGS, 0);
+}
+
+static void fuzz_site_4051e3(uint32_t *s) { fuzz_site_event(s); }
+static void fuzz_site_40520f(uint32_t *s) { fuzz_site_event(s); }
+static void fuzz_site_405233(uint32_t *s) { fuzz_site_event(s); }
+static void fuzz_site_405273(uint32_t *s) { fuzz_site_event(s); }
+static void fuzz_site_40539f(uint32_t *s) { fuzz_site_event(s); }
+
 /* the fuzz function of a unit, or NULL */
 void (*game_map_fuzz_for(uint32_t addr))(uint32_t *)
 {
@@ -388,10 +557,20 @@ void (*game_map_fuzz_for(uint32_t addr))(uint32_t *)
 		return fuzz_walk_step;
 	case 0x405966:
 		return fuzz_plan_walk;
-	case 0x40431b:
-		return fuzz_sprite_step;
 	case 0x4073ee:
 		return fuzz_op_map;
+	case 0x4070bc:
+		return fuzz_click_handler;
+	case 0x40448b: return fuzz_site_40448b;
+	case 0x4044a9: return fuzz_site_4044a9;
+	case 0x4044b7: return fuzz_site_4044b7;
+	case 0x4045eb: return fuzz_site_4045eb;
+	case 0x4051e3: return fuzz_site_4051e3;
+	case 0x40520f: return fuzz_site_40520f;
+	case 0x405233: return fuzz_site_405233;
+	case 0x405273: return fuzz_site_405273;
+	case 0x40539f: return fuzz_site_40539f;
+	case 0x40559d: return fuzz_site_40559d;
 	case 0x403eff:
 		return fuzz_cell_draw;
 	default:

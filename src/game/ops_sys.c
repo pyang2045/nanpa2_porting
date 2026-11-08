@@ -124,14 +124,6 @@ int game_native_misc(void) /* 19: sub-op 4 is the dissolve wipe */
 	return !literal_arg0(&v) || v == 4 || v > 5;
 }
 
-int game_native_map(void) /* 04 26: sub-ops 5, 7 and 12 pump messages */
-{
-	uint32_t v;
-	if (!literal_arg0(&v))
-		return 1;
-	return !game_map_op_in_c(v);
-}
-
 /* ---- the handlers */
 
 /* 17 [c]: clear the text window (0x406b24) in colour c (c << 4 as the
@@ -503,31 +495,6 @@ uint32_t game_op_anim_done(void) /* 0x4070b6 */
 	cpu.r[ESI] = pop32();
 	X86_COUNT(1);
 	return loop_at(0x4070b7);
-}
-
-/* 04 26 n, args...: map sub-op n through 0x403a70 (ESI = the argument
- * values; EAX = n), S = AX after it. Sub-ops 4 and 5 first reset the
- * animation slots (0x406dff). 5, 7 and 12 are the native handler's. */
-uint32_t game_op_map(void)
-{
-	uint32_t a = parse(), esi;
-	if (!game_map_op_in_c(a))
-		x86_trap(0x40740a, "op 04 26: sub-op left to the native handler reached C");
-	X86_COUNT(2);
-	if (a == 5 || a == 4) {
-		push32(a);
-		game_anim_reset();
-		cpu.r[EAX] = pop32();
-		X86_COUNT(2);
-	}
-	esi = cpu.r[ESI];
-	cpu.r[ESI] = VM_ARG_VALUES;
-	X86_COUNT(2);
-	game_map_dispatch(); /* the call of 0x403a70 */
-	cpu.r[ESI] = esi;
-	vm_set_reg(VM_REG_S, cpu.r[EAX]);
-	X86_COUNT(2);
-	return loop_at(0x407416);
 }
 
 /* 19 n, a, b: sub-ops, the result in S.

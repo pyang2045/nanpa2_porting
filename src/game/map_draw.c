@@ -7,7 +7,8 @@
  * (0x433308) is what was drawn last. A frame is: fill the cells from the
  * tile layer (sub-op 2), overlay the visible sprites' pattern tiles (sub-op
  * 3), then draw the cells that differ from the shadow (sub-op 4); sub-op 6
- * is those three in a row, sub-op 5 (native, pumps messages) draws all.
+ * is those three in a row, sub-op 5 draws all and then runs the event check
+ * (map_pump.c: it pumps messages).
  *
  * Tiles are 16 x 16 blocks of 4-bit pixels (one byte each) in the tile
  * sheet and the sprite sheet, which are DirectDraw surfaces locked for the
@@ -461,6 +462,61 @@ next:
 	}
 	cpu.r[EBP] = ebp_save;
 	loop_end_regs(vw * vh, dst_row);
+	X86_COUNT(1);
+	unlock_all();
+	X86_COUNT(1);
+}
+
+/* ---- sub-op 5: every cell */
+
+/* 0x403e30 up to its call of the event check 0x405216: lock the three
+ * surfaces, copy each cell record over its shadow, clear bit 3 of its 16 x 16
+ * screen pixels (0x4040f0) and draw it (0x403eff). EBP holds the row step
+ * (pushed first, and until game_map_redraw_all_end) and the registers are
+ * the ones the native loops leave. */
+void game_map_redraw_all_begin(void)
+{
+	lock_all();
+	uint32_t m = map_base();
+	uint32_t pitch = rd32(PITCHES);
+	uint32_t y = rd16(m + M_SCREEN_Y), x = rd16(m + M_SCREEN_X);
+	uint32_t row_step = pitch << 4;
+	uint32_t dst_row = (x << 4) + y * pitch;
+	uint32_t vh = rd16(m + M_VIEW_H), vw = rd16(m + M_VIEW_W);
+	uint32_t cell = CELLS, shadow = SHADOW;
+	push32(cpu.r[EBP]);
+	cpu.r[EBP] = row_step;
+	X86_COUNT(12); /* push ebp ... movzx ecx */
+	for (uint32_t r = 0; r < vh; r++) {
+		uint32_t dst = dst_row;
+		X86_COUNT(3);
+		for (uint32_t c = 0; c < vw; c++) {
+			wr32(shadow, rd32(cell));
+			wr32(shadow + 4, rd32(cell + 4));
+			cpu.r[EDX] = dst;
+			X86_COUNT(4 + 1);
+			game_map_cell_clear_bit3();
+			cpu.r[EDI] = shadow;
+			X86_COUNT(1);
+			game_map_cell_draw();
+			cell += 8;
+			shadow += 8;
+			dst += 0x10;
+			X86_COUNT(4);
+			X86_POLL(0x403ec6);
+		}
+		dst_row = dst_row + row_step;
+		X86_COUNT(4);
+		X86_POLL(0x403ecc);
+	}
+	loop_end_regs(vw * vh, dst_row);
+}
+
+/* 0x403ed3: after the event check, restore EBP and unlock; the ret is the
+ * caller's */
+void game_map_redraw_all_end(void)
+{
+	cpu.r[EBP] = pop32();
 	X86_COUNT(1);
 	unlock_all();
 	X86_COUNT(1);

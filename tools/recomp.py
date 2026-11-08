@@ -66,6 +66,7 @@ JUMP_EXITS = (0x4060f9, 0x40638d)  # VM loop head, VM end (src/hle/overrides.h)
 # goes through dispatch, where the differential test stops the oracle; the
 # call is the end of the body (its fallthrough is the next unit's).
 CALL_EXITS = read_hooks('GAME_CALL_EXIT')
+GAME_DEAD = read_hooks('GAME_DEAD')  # replaced native code that nothing enters (its body is an oracle's code)
 HLE_OVERRIDES.update(GAME_OVERRIDES)
 HLE_OVERRIDES.update(GAME_JUMP_OVERRIDES)
 ORACLE_TAG = 0x40000000  # src/x86/x86.h X86_ORACLE_TAG
@@ -293,11 +294,16 @@ class Lifter:
         # (0x4060d4 into 0x4060f9) go through dispatch (lift, emit), where
         # the override takes them; a call exit's return also comes back
         # through dispatch (ret).
+        # the pump chain (stage 6) calls the pump from native functions that
+        # are C now (HLE_GAME_DEAD): their bodies run only inside an oracle
+        dead_body = set()
+        for e in GAME_DEAD:
+            dead_body |= self.body(e)
         for ra in CALL_EXITS:
             c = self.insns.get(ra - 5)
             if c is None or c.mnemonic != 'call' or c.operands[0].type != X.X86_OP_IMM:
                 raise Unsupported('call exit %x does not follow a direct call' % ra)
-            if ra - 5 not in self.jump_body:
+            if ra - 5 not in self.jump_body and ra - 5 not in dead_body:
                 raise Unsupported('call exit %x is not in an opcode handler' % ra)
 
     def table_ranges(self):

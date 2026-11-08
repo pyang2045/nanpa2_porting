@@ -17,40 +17,40 @@
  * with AL, so EAX is live there too. */
 #define AFTER_BLOCK (REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
 
-#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0, 0, 0 }
-#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0, 0, 0 }
+#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0, 0, 0, 0, 0, NULL }
+#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0, 0, 0, 0, 0, NULL }
 /* the rest of a handler after a call exit, with `words` pushed before it */
-#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words, 0, 0 }
+#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words, 0, 0, 0, 0, NULL }
 /* a handler that calls native routines (src/game/ops_sys.c); native: the
  * cases it leaves to the original handler, or NULL */
-#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0, 0, 0 }
+#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0, 0, 0, 0, 0, NULL }
 
 /* a called unit whose result is AL (the rest of EAX is scratch) */
-#define CALL_AL(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 0, 0, 0xff, 0 }
+#define CALL_AL(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 0, 0, 0xff, 0, 0, 0, NULL }
 
 /* Stage 5B: the same with the scratch registers given (a handler that
  * ends at a call exit leaves the callee's arguments in registers) */
-#define JUMP_SYS_R(addr, name, fn, native, scratch) { addr, name, NULL, fn, scratch, 0, native, 1, 0, 0, 0 }
+#define JUMP_SYS_R(addr, name, fn, native, scratch) { addr, name, NULL, fn, scratch, 0, native, 1, 0, 0, 0, 0, 0, NULL }
 
 /* a RESUME piece that calls native routines (file loads, 0x403624) */
-#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words, 0, 0 }
+#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words, 0, 0, 0, 0, NULL }
 
 /* Stage 4 (src/game/loop.c, text.c, anim.c). Called units that call
  * native routines, or with cases left to the original (native) */
-#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0, 0, 0 }
-#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0, 0, 0 }
+#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0, 0, 0, 0, 0, NULL }
+#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0, 0, 0, 0, 0, NULL }
 /* a piece of the VM loop or of a wait: the words pushed before it, whether
  * a caller reads the flags it leaves (it ends with a `ret`), whether it
  * calls native routines (text drawing, the animation blits), the cases
  * left to the native code */
 #define PIECE(addr, name, fn, scratch, words, flags, sys, native) \
-	{ addr, name, NULL, fn, scratch, flags, native, sys, words, 0, 0 }
+	{ addr, name, NULL, fn, scratch, flags, native, sys, words, 0, 0, 0, 0, NULL }
 
 /* Stage 5B: a wait loop that is a piece returning itself while it waits.
  * game_jump polls for each such return (the native backward jump does), so
  * timer ticks land between iterations, also under NANPA2_DIFF */
 #define SPIN(addr, name, fn, scratch) \
-	{ addr, name, NULL, fn, scratch, 0, NULL, 1, 0, 0, 1 }
+	{ addr, name, NULL, fn, scratch, 0, NULL, 1, 0, 0, 1, 0, 0, NULL }
 
 /* Stage 5B startup/input/file: file access. They scratch the C runtime's
  * cdecl registers; EBX, ESI, EDI, EBP are kept */
@@ -64,6 +64,15 @@
 
 /* the movers (src/game/map_move.c): AL is the result, ECX, EDX, EBX are scratch */
 #define MAP_MOVER_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX))
+
+/* Stage 6: where the 04 26 chain leaves for the handler's tail 0x40740f only
+ * AX is live (S); the pieces leave at a pump with every register live */
+#define MAP_TAIL_SCRATCH (REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | \
+	REG_BIT(ESI) | REG_BIT(EDI))
+/* a piece of the chain at a pump site: its oracle ends at the handler's tail,
+ * wherever in the chain it was entered */
+#define CHAIN(addr, name, fn) \
+	{ addr, name, NULL, fn, 0, 0, NULL, 1, 0, 0xffff, 0, 0x40740f, MAP_TAIL_SCRATCH, game_chain_words }
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -98,8 +107,10 @@ const struct game_unit game_units[] = {
 		REG_BIT(EAX) | REG_BIT(ESI) | REG_BIT(EDI)),
 	CALL(0x403eff, "map_cell_draw", game_map_cell_draw, 0, 0),
 	CALL(0x4040f0, "map_cell_clear_bit3", game_map_cell_clear_bit3, 0, 0),
-	CALL_NATIVE(0x40431b, "map_sprite_step", game_map_sprite_step, MAP_MOVER_SCRATCH,
-		game_native_sprite_step),
+	CHAIN(0x40448b, "map_player_pumped_a", game_pl_pumped_a),
+	CHAIN(0x4044a9, "map_player_pumped_b", game_pl_pumped_b),
+	CHAIN(0x4044b7, "map_player_click", game_pl_click),
+	CHAIN(0x4045eb, "map_player_keys", game_pl_keys),
 	CALL_AL(0x404731, "map_move_up", game_map_move_up, MAP_MOVER_SCRATCH),
 	CALL_AL(0x404937, "map_move_down", game_map_move_down, MAP_MOVER_SCRATCH),
 	CALL_AL(0x404a9a, "map_move_left", game_map_move_left, MAP_MOVER_SCRATCH),
@@ -107,15 +118,27 @@ const struct game_unit game_units[] = {
 	CALL(0x404f8c, "map_area_trigger", game_map_area_trigger,
 		REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
 	CALL(0x40500e, "map_collision", game_map_collision, REG_BIT(ESI) | REG_BIT(EDI), 0),
+	CHAIN(0x4051e3, "map_frame_pumped", game_s12_pumped_a),
+	CHAIN(0x40520f, "map_frame_released", game_s12_released),
+	CHAIN(0x405233, "map_event_pumped_a", game_ev_pumped_a),
+	CHAIN(0x405273, "map_event_pumped_b", game_ev_pumped_b),
+	CHAIN(0x40539f, "map_event_released", game_ev_released),
+	CHAIN(0x40559d, "map_rclick_pumped", game_rc_pumped),
 	CALL(0x405691, "map_walk_step", game_map_walk_step,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX), 0),
 	CALL(0x405966, "map_plan_walk", game_map_plan_walk,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 0),
+	/* Stage 6: the map's pump (0x40609c: pushad and the pump; 0x4060a2: its result) */
+	{ 0x40609c, "map_pump", NULL, game_pump, 0, 0, NULL, 1, 0, 0, 0, 0, 0, NULL },
+	{ 0x4060a2, "map_pump_done", NULL, game_pump_done, 0, 0, NULL, 1, 9, 0, 0, 0, 0, NULL },
 	PIECE(0x4060d4, "vm_entry", game_vm_entry, AT_LOOP, -1, 0, 1, NULL),
 	PIECE(0x4060f9, "vm_loop", game_vm_loop, 0, 0, 0, 0, NULL),
 	PIECE(0x4060fe, "vm_pumped", game_vm_pumped, AT_FETCH, 0, 0, 1, NULL),
-	PIECE(0x406124, "vm_click_tested0", game_vm_click_tested0, AT_FETCH, 0, 0, 1, game_native_click0),
-	PIECE(0x406134, "vm_click_tested1", game_vm_click_tested1, AT_FETCH, 0, 0, 1, game_native_click1),
+	PIECE(0x406124, "vm_click_tested0", game_vm_click_tested0, AT_FETCH, 0, 0, 1, NULL),
+	PIECE(0x406134, "vm_click_tested1", game_vm_click_tested1, AT_FETCH, 0, 0, 1, NULL),
+	PIECE(0x40614a, "vm_click_up0", game_vm_click_up0, REG_BIT(EBX), 0, 0, 1, NULL),
+	PIECE(0x406153, "vm_click_up1", game_vm_click_up1, REG_BIT(EBX), 0, 0, 1, NULL),
+	PIECE(0x406164, "vm_click_done", game_vm_click_done, AT_LOOP, 1, 0, 0, NULL),
 	PIECE(0x4061c2, "vm_block_done", game_vm_block_done, AT_LOOP, 1, 0, 0, NULL),
 	PIECE(0x4061cd, "vm_run_block", game_vm_run_block, AT_LOOP, 0, 0, 0, NULL),
 	PIECE(0x4061d3, "vm_block_return", game_vm_block_return, AFTER_BLOCK, 0, 0, 0, NULL),
@@ -202,7 +225,6 @@ const struct game_unit game_units[] = {
 		REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 4),
 	JUMP_SYS_R(0x407096, "op_1a_anim", game_op_anim, NULL, REG_BIT(EDI)),
 	RESUME(0x4070b6, "op_1a_anim_done", game_op_anim_done, AT_LOOP, 1),
-	/* not enabled in overrides.h yet (no call seen under the diff) */
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
 	JUMP_SYS(0x4070d5, "op_0421_flag_file", game_op_flag_file, NULL),
 	JUMP(0x4071a4, "op_0423_hit_test", game_op_hit_test, AT_LOOP),
@@ -210,7 +232,11 @@ const struct game_unit game_units[] = {
 	JUMP(0x40739b, "op_0422_args_only", game_op_args_only, AT_LOOP),
 	JUMP_SYS(0x4073a5, "op_0424_music", game_op_music, NULL),
 	JUMP_SYS(0x4073cd, "op_0425_voice", game_op_voice, NULL),
-	JUMP_SYS(0x4073ee, "op_0426_map", game_op_map, game_native_map),
+	/* Stage 6 (src/game/map_pump.c): the handler runs the chain down to the first
+	 * pump, the pump sites' return addresses are the pieces. At the handler's tail
+	 * only AX (S) is live; at a pump every register is. */
+	{ 0x4073ee, "op_0426_map", NULL, game_op_map, 0, 0, NULL, 1, -1, 0xffff, 0, 0x40740f, MAP_TAIL_SCRATCH, NULL },
+	RESUME(0x40740f, "op_0426_map_done", game_op_map_done, AT_LOOP, 1),
 	CALL(0x40741b, "vm_parse_args", game_parse_args_regs, REG_BIT(EDX), 0),
 	PIECE(0x4074d5, "input_test", game_input_test, 0, 0, 0, 0, NULL),
 	PIECE(0x4074db, "input_tested", game_input_tested, 0, 1, 1, 0, NULL),

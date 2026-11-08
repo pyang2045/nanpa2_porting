@@ -22,10 +22,10 @@
  * Bytes 03, 05, 07, 08 and 0x20-0x7f end the VM too.
  *
  * Pieces read and write the CPU as the native code there does. The click
- * handler path (a button down with its handler set: wait for the release,
- * then run the handler's block) is left to the native code
- * (game_native_click*), as ext op 20 that sets the handlers is: no run has
- * reached it.
+ * handler path (a button down with its handler set: wait for both buttons
+ * to be released, then run the handler's block) is pieces too (stage 6). Ext
+ * op 20 sets the handlers and no shipped script uses it, so the path is
+ * reached only with the dev hook NANPA2_CLICKTEST (src/hle/dev.c).
  */
 #include "game/file.h"
 #include "game/vm.h"
@@ -121,15 +121,13 @@ uint32_t game_vm_pumped(void)
 	return call_exit(INPUT_TEST, 0x406124);
 }
 
-/* the click handler path: button k down (ZF clear) with handler k set */
-int game_native_click0(void)
+/* 0x406143: a button is down with its handler set (EDI): wait until the
+ * left, then the right button are up (0x4074d5 tests each: ZF set = up) */
+static uint32_t click_wait(void)
 {
-	return !cpu.zf && rd16(VM_CLICK_HANDLERS) != 0;
-}
-
-int game_native_click1(void)
-{
-	return !cpu.zf && rd16(VM_CLICK_HANDLERS + 2) != 0;
+	set8l(EAX, 0);
+	X86_COUNT(1);
+	return call_exit(INPUT_TEST, 0x40614a);
 }
 
 /* 0x406124, after testing the left button (ZF set: up): down, with no
@@ -140,11 +138,11 @@ uint32_t game_vm_click_tested0(void)
 	cpu.r[EDI] = rd16(VM_CLICK_HANDLERS);
 	X86_COUNT(2);
 	if (!cpu.zf) {
-		if (cpu.r[EDI])
-			x86_trap(0x40613f, "click handler path reached C (game_native_click0)");
-		f_logic(cpu.r[EDI], 32); /* or edi, edi: 0 here */
+		f_logic(cpu.r[EDI], 32); /* or edi, edi */
 		X86_COUNT(2);
-		return fetch();
+		if (!cpu.r[EDI])
+			return fetch();
+		return click_wait();
 	}
 	set8l(EAX, 1);
 	X86_COUNT(1);
@@ -157,14 +155,54 @@ uint32_t game_vm_click_tested1(void)
 	cpu.r[EDI] = rd16(VM_CLICK_HANDLERS + 2);
 	X86_COUNT(2);
 	if (!cpu.zf) {
-		if (cpu.r[EDI])
-			x86_trap(0x40613f, "click handler path reached C (game_native_click1)");
 		f_logic(cpu.r[EDI], 32);
 		X86_COUNT(2);
-		return fetch();
+		if (!cpu.r[EDI])
+			return fetch();
+		return click_wait();
 	}
 	X86_COUNT(1);
 	return fetch();
+}
+
+/* 0x40614a, after testing the left button again: still down, ask again;
+ * up, test the right one */
+uint32_t game_vm_click_up0(void)
+{
+	X86_COUNT(1);
+	if (!cpu.zf) {
+		X86_POLL(0x40614a);
+		return click_wait();
+	}
+	set8l(EAX, 1);
+	X86_COUNT(1);
+	return call_exit(INPUT_TEST, 0x406153);
+}
+
+/* 0x406153, after the right button: down, back to the left; both up, run
+ * the handler's block (ESI saved, the busy flag set) */
+uint32_t game_vm_click_up1(void)
+{
+	X86_COUNT(1);
+	if (!cpu.zf) {
+		X86_POLL(0x406153);
+		return click_wait();
+	}
+	push32(cpu.r[ESI]);
+	wr8(CLICK_BUSY, 0xff);
+	cpu.r[ESI] = cpu.r[EDI];
+	X86_COUNT(3);
+	return call_exit(RUN_BLOCK, 0x406164);
+}
+
+/* 0x406164: the handler's block is done */
+uint32_t game_vm_click_done(void)
+{
+	wr8(CLICK_BUSY, 0);
+	cpu.r[ESI] = pop32();
+	X86_COUNT(2);
+	X86_POLL(0x40616c);
+	return VM_LOOP;
 }
 
 /* ---- fetch and dispatch */

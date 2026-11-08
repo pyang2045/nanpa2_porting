@@ -70,6 +70,7 @@ set(GAME_SOURCES
   src/game/map_move.c
   src/game/map_path.c
   src/game/map_sprite.c
+  src/game/map_pump.c
   src/game/map_fuzz.c
   src/game/screen.c
   src/game/units.c
@@ -242,6 +243,12 @@ set_tests_properties(diffcapture PROPERTIES TIMEOUT 240
 add_test(NAME diffreplay COMMAND diff_replay "${DIFF_DIR}" "${DIFF_DIR}/ctest")
 set_tests_properties(diffreplay PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
   FIXTURES_REQUIRED diff_records)
+
+# Start-up (about 10 s, headless): the HLE call trace of the C start-up equals
+# that of the original WinMain and shutdown run as an oracle (tests/start_trace.py).
+add_test(NAME start_trace COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/start_trace.py"
+  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/start-trace")
+set_tests_properties(start_trace PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
 # WAV loader: decoded duration equals header length / byte rate for mono,
 # stereo, 11 kHz and files with extra chunks before data.
