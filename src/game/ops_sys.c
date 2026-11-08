@@ -122,12 +122,6 @@ int game_native_misc(void) /* 19: sub-op 4 is the dissolve wipe */
 	return !literal_arg0(&v) || v == 4 || v > 5;
 }
 
-int game_native_anim(void) /* 1a: sub-op 4 runs a slot to its end */
-{
-	uint32_t v;
-	return !literal_arg0(&v) || v == 4 || v > 7;
-}
-
 int game_native_palette(void) /* 04 16: mode 3 fades and spins on the timer */
 {
 	uint32_t v;
@@ -472,19 +466,24 @@ uint32_t game_op_voice(void)
 }
 
 /* 1a n, slot, a, b: animation slot control 0x403510 (EAX sub-op, EBX
- * slot, ECX, EDX). Sub-op 4 (run to the end) is the native handler's. */
+ * slot, ECX, EDX), a call exit (0x4070b1, return 0x4070b6): the control
+ * is the jump unit game_anim_control_piece, which for sub-op 4 goes on in
+ * the wait loop 0x4035b5 until the slot has stopped. */
 uint32_t game_op_anim(void)
 {
-	uint32_t a = parse();
-	if (a == 4 || a > 7)
-		x86_trap(0x4070b1, "op 1a: sub-op left to the native handler reached C");
-	uint32_t esi = cpu.r[ESI];
+	parse();
+	push32(cpu.r[ESI]);
 	cpu.r[EBX] = rd16(ARG(1));
 	cpu.r[ECX] = rd16(ARG(2));
 	cpu.r[EDX] = rd16(ARG(3));
+	push32(0x4070b6);
 	X86_COUNT(5);
-	game_anim_control_regs();
-	cpu.r[ESI] = esi;
+	return 0x403510;
+}
+
+uint32_t game_op_anim_done(void) /* 0x4070b6 */
+{
+	cpu.r[ESI] = pop32();
 	X86_COUNT(1);
 	return loop_at(0x4070b7);
 }

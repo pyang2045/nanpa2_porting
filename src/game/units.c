@@ -14,27 +14,37 @@
  * with AL, so EAX is live there too. */
 #define AFTER_BLOCK (REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI))
 
-#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0 }
-#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0 }
+#define CALL(addr, name, fn, scratch, flags) { addr, name, fn, NULL, scratch, flags, NULL, 0, 0, 0 }
+#define JUMP(addr, name, fn, scratch) { addr, name, NULL, fn, scratch, 0, NULL, 0, 0, 0 }
 /* the rest of a handler after a call exit, with `words` pushed before it */
-#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words }
+#define RESUME(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 0, words, 0 }
 /* a handler that calls native routines (src/game/ops_sys.c); native: the
  * cases it leaves to the original handler, or NULL */
-#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0 }
+#define JUMP_SYS(addr, name, fn, native) { addr, name, NULL, fn, AT_LOOP, 0, native, 1, 0, 0 }
+
+/* Stage 5B: the same with the scratch registers given (a handler that
+ * ends at a call exit leaves the callee's arguments in registers) */
+#define JUMP_SYS_R(addr, name, fn, native, scratch) { addr, name, NULL, fn, scratch, 0, native, 1, 0, 0 }
 
 /* a RESUME piece that calls native routines (file loads, 0x403624) */
-#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words }
+#define RESUME_SYS(addr, name, fn, scratch, words) { addr, name, NULL, fn, scratch, 0, NULL, 1, words, 0 }
 
 /* Stage 4 (src/game/loop.c, text.c, anim.c). Called units that call
  * native routines, or with cases left to the original (native) */
-#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0 }
-#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0 }
+#define CALL_SYS(addr, name, fn, scratch) { addr, name, fn, NULL, scratch, 0, NULL, 1, 0, 0 }
+#define CALL_NATIVE(addr, name, fn, scratch, native) { addr, name, fn, NULL, scratch, 0, native, 0, 0, 0 }
 /* a piece of the VM loop or of a wait: the words pushed before it, whether
  * a caller reads the flags it leaves (it ends with a `ret`), whether it
  * calls native routines (text drawing, the animation blits), the cases
  * left to the native code */
 #define PIECE(addr, name, fn, scratch, words, flags, sys, native) \
-	{ addr, name, NULL, fn, scratch, flags, native, sys, words }
+	{ addr, name, NULL, fn, scratch, flags, native, sys, words, 0 }
+
+/* Stage 5B: a wait loop that is a piece returning itself while it waits.
+ * game_jump polls for each such return (the native backward jump does), so
+ * timer ticks land between iterations, also under NANPA2_DIFF */
+#define SPIN(addr, name, fn, scratch) \
+	{ addr, name, NULL, fn, scratch, 0, NULL, 1, 0, 1 }
 
 /* Where the fetch dispatches to: handlers (EDX reaches the native map
  * code of 04 26, EAX is the opcode index), the end of a block (`ret` with
@@ -48,7 +58,8 @@
 const struct game_unit game_units[] = {
 	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
 		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
-	CALL_NATIVE(0x403510, "anim_control", game_anim_control_regs, 0, game_native_anim_control),
+	PIECE(0x403510, "anim_control", game_anim_control_piece, 0, 0, 0, 1, NULL),
+	SPIN(0x4035b5, "anim_wait", game_anim_wait_piece, 0),
 	CALL_SYS(0x403624, "anim_step", game_anim_step, 0),
 	CALL_SYS(0x403661, "anim_run_slot", game_anim_run_slot, 0),
 	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
@@ -141,7 +152,8 @@ const struct game_unit game_units[] = {
 	/* ECX's upper half is the count's (`mov cx, 0x1e`) */
 	RESUME_SYS(0x40704a, "op_041f_call_mes_done", game_op_call_mes_done,
 		REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 4),
-	JUMP_SYS(0x407096, "op_1a_anim", game_op_anim, game_native_anim),
+	JUMP_SYS_R(0x407096, "op_1a_anim", game_op_anim, NULL, REG_BIT(EDI)),
+	RESUME(0x4070b6, "op_1a_anim_done", game_op_anim_done, AT_LOOP, 1),
 	/* not enabled in overrides.h yet (no call seen under the diff) */
 	JUMP(0x4070bc, "op_0420_click_handler", game_op_click_handler, AT_LOOP),
 	JUMP_SYS(0x4070d5, "op_0421_flag_file", game_op_flag_file, NULL),

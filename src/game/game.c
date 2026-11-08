@@ -352,5 +352,7 @@ int game_jump(uint32_t addr, uint32_t *next)
 		*next = u->jump();
 	if (mode == MODE_OFF)
 		poison(u);
+	if (u->poll_self && *next == addr && mode == MODE_OFF)
+		X86_POLL(addr);
 	return 1;
 }

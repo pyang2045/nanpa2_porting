@@ -193,13 +193,13 @@ uint32_t game_op_load_file(void);       /* 04 1c 0x406d8b */
 uint32_t game_op_picture(void);         /* 04 1d 0x406e11 */
 uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
 uint32_t game_op_anim(void);            /* 1a 0x407096 */
+uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
 uint32_t game_op_map(void);             /* 04 26 0x4073ee */
 /* the cases each leaves to the native handler (struct game_unit.native) */
 int game_native_misc(void);
-int game_native_anim(void);
 int game_native_palette(void);
 int game_native_map(void);
 
@@ -238,7 +238,8 @@ void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
 void game_anim_step(void);              /* 0x403624 */
 void game_anim_run_slot(void);          /* 0x403661, ESI = slot offset */
 void game_anim_control_regs(void);      /* 0x403510, EAX sub-op, EBX slot */
-int game_native_anim_control(void);
+uint32_t game_anim_control_piece(void); /* 0x403510 as a jump unit (any sub-op) */
+uint32_t game_anim_wait_piece(void);    /* 0x4035b5: sub-op 4's wait loop */
 void game_anim_reset(void);             /* 0x406dff */
 void game_palette_copy(uint32_t src);   /* 0x40752c */
 void game_palette_copy_regs(void);

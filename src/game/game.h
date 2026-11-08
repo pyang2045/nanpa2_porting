@@ -40,6 +40,10 @@ struct game_unit {
 	 * words the handler pushed before that call, still on the stack (the
 	 * handler's own level, where its oracle ends, is that far up) */
 	int stack_words;
+	/* a piece of a wait loop that returns its own address while it waits:
+	 * game_jump polls the timer (X86_POLL) for each such return, after the
+	 * comparison, because the compare holds the timer off */
+	int poll_self;
 };
 
 extern const struct game_unit game_units[];
