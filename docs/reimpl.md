@@ -90,7 +90,7 @@ from script opcodes, then the subsystems the opcodes drive, from small and pure 
 6. **screen.** Blits 0x401430/0x4014f0/0x401670/0x4017b0/0x401870 and the surface lock
    0x401190/0x4012b0 (through `ddraw.c`), the cursor sprite, palette 0x401ca0/0x40752c/
    0x40754d-0x407599, fades 0x401d30, the wipe 0x401a50, picture load 0x406e20.
-7. **map.** The largest module: cell grid and drawing (0x403b28-0x404281), sprite scripts
+7. **map, mostly done** ("Stage 5A"; the chain that pumps messages is left). The largest module: cell grid and drawing (0x403b28-0x404281), sprite scripts
    and movement (0x4042f7-0x404e25), events (0x404f8c-0x405216), pathfinding
    (0x405597-0x405fb6, with the recursive flood fill 0x405b07 and its eight direction-order
    cases). Mostly pure computation on emulated memory, so it suits the harness well.
@@ -412,6 +412,93 @@ oracle and the C agree to 0.1 per piece in the diff report; the VM entry is 102 
 
 Results are in NOTES.md (2026-11-08, reimplementation stage 4).
 
+## Stage 5A: the town map (src/game/map.c, map_draw.c, map_move.c, map_path.c, map_sprite.c)
+
+The map module (63 functions, 9,764 bytes) is the town: the 04 26 sub-ops, the cell grid
+and its drawing, the sprites and their movement, the walk planner. Semantics and data layout:
+re-notes.md "Town map". The module is C except one chain, which pumps messages.
+
+**What is C.**
+
+| File | Native | Does |
+|---|---|---|
+| map.c | 0x403a70 (the C handler's own dispatcher), sub-ops 0, 1, 10, 11, 13, 14, 15, 16, 32 (0x403a87, 0x403ae9, 0x40502c, 0x405113, 0x4053a6, 0x4053de, 0x405415, 0x40548f, 0x40558f), 0x404f8c, 0x40500e, 0x404e25 | init, sprite scripts, entry points, layer unpack and copy, area trigger, collision |
+| map_draw.c | 0x403b28, 0x403bd2, 0x403d45, 0x4042e7 (sub-ops 2, 3, 4, 6), 0x403eff and its four cell routines 0x403f44-0x404056, 0x404132, 0x4041f9, 0x404281, 0x4040f0 | cell grid, sprite tiles, drawing |
+| map_move.c | 0x404731, 0x404937, 0x404a9a, 0x404c9f, 0x404e06 | the movers |
+| map_path.c | 0x405966, 0x405691, 0x405542 (sub-op 30), 0x40562b, 0x405acd, 0x405b07 and its eight order cases, 0x405fb6 | walking |
+| map_sprite.c | 0x40431b, 0x404410 and the kind stubs 0x40442e-0x4046f3 except kind 6 | sprite scripts |
+
+**How it plugs in.** The 04 26 handler (`game_op_map` in ops_sys.c, a jump unit since Stage 3) no
+longer calls 0x403a70 natively: it runs `game_map_dispatch`, the C version (copy the arguments,
+switch on the sub-op), and `game_map_op_in_c` is the one list of the sub-ops that are C. Its
+`native` predicate sends every other sub-op (5, 7, 12) to the whole original handler, which
+calls the native 0x403a70 as before. So 0x403a70 is not a unit, and the sub-ops that only the
+handler reaches (0, 1, 10, 11, 13-16, 30, 32, 6) are plain C functions: the handler's own
+comparison covers them (the result S = AX, every byte they write). A function with a native
+caller left (the pumping chain below) is a unit: 0x403b28, 0x403bd2, 0x403d45 (called by
+0x4051c2), 0x403eff and 0x4040f0 (by 0x403e30), 0x404f8c and 0x40500e (by 0x405216), the movers
+(by 0x404450 and the kind stubs), 0x405691 and 0x405966 (by 0x404450, 0x4046f3 and 0x405597),
+0x40431b (by 0x4042f7). Helpers below them (the cell routines, the flood fill, 0x404e25) are
+`static` C; their native bodies are listed as `HLE_GAME_DEAD` in overrides.h so that
+`tools/reimpl_status.py` counts them (it takes them as barriers of the live walk), and the
+lifted bodies stay as the oracles' code.
+
+**What is left native, and why.** Seven functions, 1,505 bytes, plus 0x403a70 and 0x404410
+which the native fallback still runs: 0x4042f7 (sub-op 7: loop over the sprites), 0x404450 (kind
+6, the player: mouse and keys; 615 bytes), 0x4051c2 (sub-op 12: one frame), 0x405216 (event
+check), 0x405597 (right click), 0x403e30 (sub-op 5: redraw all, then the event check), and the
+alternate entry 0x404448 of 0x40442e. All of them reach the message pump (0x40609c, which calls
+0x401bf0): a WM_QUIT there resets ESP to the VM's top frame (`mov esp, [0x445cdc]`) and the
+function never returns. A called unit cannot contain that: under the diff the pump would run
+twice (once in the original, once in the C, and each takes a message), and without the diff a
+native fallback runs nested in a host frame that the reset abandons. The way the VM loop got
+round it (Stage 4) is to split the code at each pump into jump units joined by call exits, which
+works for opcode handlers (entered by `jmp`, no return address) and would mean doing the same
+to this whole chain from the handler down: about eleven pump sites (0x404486, 0x4044a4,
+0x4044b2, 0x4045e6 in 0x404450; 0x4051de, 0x40520a in 0x4051c2; 0x40522e, 0x40526e, 0x405399
+in 0x405216; 0x405598 in 0x405597) with their stack and register state between the pieces.
+That is the next step of this module. The sprite step 0x40431b is a unit whose `native`
+predicate (`game_native_sprite_step`) looks ahead in the sprite's script, without writing, to
+see whether the step will be the player's (kind 6, or a script byte 0x6n); only then the
+original runs, and it runs nested like the other predicate-left cases.
+
+**Harness changes.**
+
+- `struct game_unit.eax_live` (game.h, diff.h): bits of EAX that are compared although EAX is
+  scratch. The movers' result is AL, and liveness (conservatively) says every register is live
+  after them because of the `pushad`/`popad` and the stack-resetting pump around their native
+  callers; AL is what callers read, and the poisoned runs check the rest. `CALL_AL` in units.c.
+- `NANPA2_DIFF_TRACE=1` prints each compared call as it starts (`diffcall ADDR NAME esi`): when
+  a compare hangs, the last line is the unit.
+- `NANPA2_FUZZ=N` (with `NANPA2_FUZZ_CALLS`, default 30, `NANPA2_FUZZ_TRACE=1` to print each
+  state's seed and `NANPA2_FUZZ_DUMP=1` to print the sprites, the view record and the walls
+  around the mover of each state that mismatches;
+  `src/game/map_fuzz.c`, driver `fuzz_unit` in game.c): a diff run compares each of the first
+  calls of a map unit N more times from random states (sprites, walls around them, the view's
+  limits, the walk grid, or the arguments of a 04 26 op written over the script), with the
+  data and stack memory and the CPU put back after each, so the game goes on with its real
+  state. An explore run walks one town, so most branches of the movers, the planner and the
+  sprite scripts never run in it (a `gcov` build of a route run executed 58% of map.c, 88% of
+  map_draw.c, 63% of map_move.c, 86% of map_path.c and 21% of map_sprite.c). The fuzzing found
+  one bug the runs could not: the native right mover's edge test adds the sprite's height,
+  not its width (0x404cb8, 0x4048d7), which no explore run puts at the map's right edge.
+- `tools/liveness.py`: `LIVENESS_ROOTS=hex,hex` adds roots, for code whose caller is C now.
+- `HLE_GAME_DEAD` (overrides.h, `tools/reimpl_status.py`), above.
+- Native pacing and register contracts as in the earlier stages: a unit's scratch registers come
+  from `tools/liveness.py` (with the roots above) and the poisoned runs; the sub-ops leave AX
+  as the native code does, since S is the dispatcher's AX.
+
+**Pacing.** Each function charges the native instruction count of its path, counted from the
+disassembly (loops by iteration, the three-way cell composition by layer count, the movers by
+which tail they take); the diff report's insns per call, native against C, agree to within
+the figures in NOTES.md for the runs.
+
+**Test route.** The map is only reached late in the game, so the ctest `diffcapture` run never
+sees it. `NANPA2_INPUT` with `sync` events makes a repeatable route (the title menu, a diary
+save at 40.MES, 40.MES's right-click menu to 41.MES, its menu to the town, then holds of the
+left button toward points and right clicks on the map); the exploration bot reaches the
+town on some seeds. NOTES.md has both and the numbers.
+
 ## Inventory
 
 State: `game` reimplemented in src/game (oracle kept), `hle` replaced by platform code,
@@ -472,69 +559,69 @@ by name).
 | 0x4037fc | 410 | expr | evaluate RPN expression up to 0x03 | 4060d4 4068e1 40741b | 4039d6 4039f7 | game |
 | 0x4039d6 | 33 | expr | read 4-bit flag n from 0x444e98 | 4037fc |  | dead |
 | 0x4039f7 | 119 | expr | read constant operand (30-3f, 07 b, 08 h l, 09 h m l) (alt 403a06 403a12 403a22 403a42) | 4037fc 4060d4 |  | game |
-| 0x403a70 | 23 | map | ext op 0x26 dispatcher: args to 0x43555e, call 0x435576[op] | 4060d4 |  |  |
-| 0x403a87 | 98 | map | sub-op 0: init map, walk grid base 0x435574, reset events |  |  |  |
-| 0x403ae9 | 63 | map | sub-op 1: ? writes 0xc1/0xc3 into sprite script 0 |  |  |  |
-| 0x403b28 | 170 | map | sub-op 2: fill view cell grid 0x4313c8 from tile layer | 4042e7 4051c2 |  |  |
-| 0x403bd2 | 371 | map | sub-op 3: overlay visible sprites' tiles into the cell grid | 4042e7 4051c2 |  |  |
-| 0x403d45 | 235 | map | sub-op 4: redraw cells changed since 0x433308 | 4042e7 4051c2 | 401190 4012b0 403eff |  |
+| 0x403a70 | 23 | map | ext op 0x26 dispatcher: args to 0x43555e, call 0x435576[op] | 4060d4 |  | dead |
+| 0x403a87 | 98 | map | sub-op 0: init map, walk grid base 0x435574, reset events |  |  | dead |
+| 0x403ae9 | 63 | map | sub-op 1: ? writes 0xc1/0xc3 into sprite script 0 |  |  | dead |
+| 0x403b28 | 170 | map | sub-op 2: fill view cell grid 0x4313c8 from tile layer | 4042e7 4051c2 |  | game |
+| 0x403bd2 | 371 | map | sub-op 3: overlay visible sprites' tiles into the cell grid | 4042e7 4051c2 |  | game |
+| 0x403d45 | 235 | map | sub-op 4: redraw cells changed since 0x433308 | 4042e7 4051c2 | 401190 4012b0 403eff | game |
 | 0x403e30 | 207 | map | sub-op 5: redraw every cell, then event check 0x405216 |  | 401190 4012b0 403eff 4040f0 405216 |  |
-| 0x403eff | 69 | map | draw one 16x16 cell: tile via 0x4355fa, 0x435dfc[layers] | 403d45 403e30 |  |  |
-| 0x403f44 | 107 | map | cell draw [0x435dfc 0]: tile only |  |  |  |
-| 0x403faf | 60 | map | cell draw [0x435dfc 1]: tile + 1 sprite layer |  | 404132 4041f9 404281 |  |
-| 0x403feb | 107 | map | cell draw [0x435dfc 2]: tile + 2 sprite layers |  | 404132 4041f9 404281 |  |
-| 0x404056 | 154 | map | cell draw [0x435dfc 3]: tile + 3 sprite layers |  | 404132 4041f9 404281 |  |
-| 0x4040f0 | 66 | map | clear bit 3 of a 16x16 screen cell | 403e30 |  |  |
-| 0x404132 | 199 | map | load tile into work cell 0x435248 plus mask planes | 403faf 403feb 404056 |  |  |
-| 0x4041f9 | 136 | map | overlay one sprite tile onto the work cell | 403faf 403feb 404056 |  |  |
-| 0x404281 | 102 | map | write the composed work cell to the screen | 403faf 403feb 404056 |  |  |
-| 0x4042e7 | 16 | map | sub-op 6: compose and draw (sub-ops 2, 3, 4) |  | 403b28 403bd2 403d45 |  |
+| 0x403eff | 69 | map | draw one 16x16 cell: tile via 0x4355fa, 0x435dfc[layers] | 403d45 403e30 |  | game |
+| 0x403f44 | 107 | map | cell draw [0x435dfc 0]: tile only |  |  | dead |
+| 0x403faf | 60 | map | cell draw [0x435dfc 1]: tile + 1 sprite layer |  | 404132 4041f9 404281 | dead |
+| 0x403feb | 107 | map | cell draw [0x435dfc 2]: tile + 2 sprite layers |  | 404132 4041f9 404281 | dead |
+| 0x404056 | 154 | map | cell draw [0x435dfc 3]: tile + 3 sprite layers |  | 404132 4041f9 404281 | dead |
+| 0x4040f0 | 66 | map | clear bit 3 of a 16x16 screen cell | 403e30 |  | game |
+| 0x404132 | 199 | map | load tile into work cell 0x435248 plus mask planes | 403faf 403feb 404056 |  | dead |
+| 0x4041f9 | 136 | map | overlay one sprite tile onto the work cell | 403faf 403feb 404056 |  | dead |
+| 0x404281 | 102 | map | write the composed work cell to the screen | 403faf 403feb 404056 |  | dead |
+| 0x4042e7 | 16 | map | sub-op 6: compose and draw (sub-ops 2, 3, 4) |  | 403b28 403bd2 403d45 | dead |
 | 0x4042f7 | 36 | map | sub-op 7: step all sprite scripts | 4051c2 | 40431b |  |
-| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 |  |
-| 0x404410 | 30 | map | count down move steps, dispatch 0x435e0c[kind-1] | 40431b |  |  |
+| 0x40431b | 245 | map | step one sprite script (move kind/count) | 4042f7 | 404410 | game |
+| 0x404410 | 30 | map | count down move steps, dispatch 0x435e0c[kind-1] | 40431b |  | dead |
 | 0x40442e | 15 | map | move kind 1: up (0x404731), toggle frame |  | 404731 |  |
-| 0x404435 | 7 | map | move kind 2: down (0x404937) |  | 404937 |  |
-| 0x40443c | 7 | map | move kind 3: left (0x404a9a) |  | 404a9a |  |
-| 0x404443 | 5 | map | move kind 4: right (0x404c9f) |  | 404c9f |  |
+| 0x404435 | 7 | map | move kind 2: down (0x404937) |  | 404937 | dead |
+| 0x40443c | 7 | map | move kind 3: left (0x404a9a) |  | 404a9a | dead |
+| 0x404443 | 5 | map | move kind 4: right (0x404c9f) |  | 404c9f | dead |
 | 0x404450 | 615 | map | move kind 6: player control, mouse/keys, history ring 0x435dca |  | 401bf0 404731 404937 404a9a 404c9f 405597 405691 40609c |  |
-| 0x4046b7 | 15 | map | move kind 8: left+up |  | 404731 404a9a |  |
-| 0x4046c6 | 15 | map | move kind 9: right+up |  | 404731 404c9f |  |
-| 0x4046d5 | 15 | map | move kind 10: left+down |  | 404937 404a9a |  |
-| 0x4046e4 | 15 | map | move kind 11: right+down |  | 404937 404c9f |  |
-| 0x4046f3 | 54 | map | move kind 13: walk to target (0x405966 / 0x405691) |  | 405691 405966 |  |
-| 0x404731 | 727 | map | move sprite up: walls, sliding, camera scroll | 40442e 404450 4046b7 4046c6 405691 | 404e06 404e25 |  |
-| 0x404937 | 355 | map | move sprite down | 404435 404450 4046d5 4046e4 405691 | 404e06 404e25 |  |
-| 0x404a9a | 428 | map | move sprite left | 40443c 404450 4046b7 4046d5 405691 | 404e06 404e25 |  |
-| 0x404c9f | 239 | map | move sprite right | 404443 404450 4046c6 4046e4 405691 | 404e06 404e25 |  |
-| 0x404e06 | 31 | map | map cell address from (bx = x, cx = y) | 404731 404937 404a9a 404c9f |  |  |
-| 0x404e25 | 359 | map | sprite-sprite collision ahead; ax = sprite index or -1 | 404731 404937 404a9a 404c9f 40500e |  |  |
-| 0x404f8c | 130 | map | sub-op 8: area trigger under sprite n | 405216 |  |  |
-| 0x40500e | 30 | map | sub-op 9: collision test for sprite n | 405216 | 404e25 |  |
-| 0x40502c | 231 | map | sub-op 10: place player/view at entry n, fill history |  |  |  |
-| 0x405113 | 175 | map | sub-op 11: reset history to player, view from entry n |  |  |  |
+| 0x4046b7 | 15 | map | move kind 8: left+up |  | 404731 404a9a | dead |
+| 0x4046c6 | 15 | map | move kind 9: right+up |  | 404731 404c9f | dead |
+| 0x4046d5 | 15 | map | move kind 10: left+down |  | 404937 404a9a | dead |
+| 0x4046e4 | 15 | map | move kind 11: right+down |  | 404937 404c9f | dead |
+| 0x4046f3 | 54 | map | move kind 13: walk to target (0x405966 / 0x405691) |  | 405691 405966 | dead |
+| 0x404731 | 727 | map | move sprite up: walls, sliding, camera scroll | 40442e 404450 4046b7 4046c6 405691 | 404e06 404e25 | game |
+| 0x404937 | 355 | map | move sprite down | 404435 404450 4046d5 4046e4 405691 | 404e06 404e25 | game |
+| 0x404a9a | 428 | map | move sprite left | 40443c 404450 4046b7 4046d5 405691 | 404e06 404e25 | game |
+| 0x404c9f | 239 | map | move sprite right | 404443 404450 4046c6 4046e4 405691 | 404e06 404e25 | game |
+| 0x404e06 | 31 | map | map cell address from (bx = x, cx = y) | 404731 404937 404a9a 404c9f |  | dead |
+| 0x404e25 | 359 | map | sprite-sprite collision ahead; ax = sprite index or -1 | 404731 404937 404a9a 404c9f 40500e |  | dead |
+| 0x404f8c | 130 | map | sub-op 8: area trigger under sprite n | 405216 |  | game |
+| 0x40500e | 30 | map | sub-op 9: collision test for sprite n | 405216 | 404e25 | game |
+| 0x40502c | 231 | map | sub-op 10: place player/view at entry n, fill history |  |  | dead |
+| 0x405113 | 175 | map | sub-op 11: reset history to player, view from entry n |  |  | dead |
 | 0x4051c2 | 84 | map | sub-op 12: one map frame (falls into 0x405216) |  | 403b28 403bd2 403d45 4042f7 40609c |  |
 | 0x405216 | 400 | map | event check: sprite contact / area trigger | 403e30 | 404f8c 40500e 40609c |  |
-| 0x4053a6 | 56 | map | sub-op 13: set sprite n's script |  |  |  |
-| 0x4053de | 55 | map | sub-op 14: enable/disable sprite n (flag 0x80) |  |  |  |
-| 0x405415 | 122 | map | sub-op 15: unpack run-length layer (0x4000 = run) |  |  |  |
-| 0x40548f | 179 | map | sub-op 16: copy a rectangle of map cells |  |  |  |
-| 0x405542 | 77 | map | sub-op 30: start pathfinding for sprite n |  | 405966 |  |
-| 0x40558f | 8 | map | sub-op 32: cancel auto-walk (0x435573 = 0) |  |  |  |
+| 0x4053a6 | 56 | map | sub-op 13: set sprite n's script |  |  | dead |
+| 0x4053de | 55 | map | sub-op 14: enable/disable sprite n (flag 0x80) |  |  | dead |
+| 0x405415 | 122 | map | sub-op 15: unpack run-length layer (0x4000 = run) |  |  | dead |
+| 0x40548f | 179 | map | sub-op 16: copy a rectangle of map cells |  |  | dead |
+| 0x405542 | 77 | map | sub-op 30: start pathfinding for sprite n |  | 405966 | dead |
+| 0x40558f | 8 | map | sub-op 32: cancel auto-walk (0x435573 = 0) |  |  | dead |
 | 0x405597 | 148 | map | right click: mouse to map cell, pathfind the player there | 404450 | 405966 40609c |  |
-| 0x40562b | 102 | map | build walk grid from cell bit 0x80 (0xff wall, 0xfe free) | 405966 |  |  |
-| 0x405691 | 725 | map | auto-walk step: go to the lower neighbour (8 directions) | 404450 4046f3 | 404731 404937 404a9a 404c9f |  |
-| 0x405966 | 359 | map | pathfinding setup: start/goal, walk grid, flood fill | 4046f3 405542 405597 | 40562b 405acd 405fb6 |  |
-| 0x405acd | 58 | map | start the recursive flood fill 0x405b07 from the goal | 405966 | 405b07 |  |
-| 0x405b07 | 397 | map | recursive flood fill with direction-order mask | 405acd 405c72 405ce8 405d3a 405d8c 405e05 ... |  |  |
-| 0x405c72 | 137 | map | flood-fill order case 0 (0x435e40[0]) |  | 405b07 |  |
-| 0x405ce8 | 118 | map | flood-fill order case 1 |  | 405b07 |  |
-| 0x405d3a | 82 | map | flood-fill order case 2 |  | 405b07 |  |
-| 0x405d8c | 77 | map | flood-fill order case 3 |  | 405b07 |  |
-| 0x405e05 | 123 | map | flood-fill order case 4 |  | 405b07 |  |
-| 0x405e5a | 83 | map | flood-fill order case 5 |  | 405b07 |  |
-| 0x405ed0 | 109 | map | flood-fill order case 6 |  | 405b07 |  |
-| 0x405f24 | 73 | map | flood-fill order case 7 |  | 405b07 |  |
-| 0x405fb6 | 230 | map | unreachable goal: mark approach cells for the sprite footprint | 405966 |  |  |
+| 0x40562b | 102 | map | build walk grid from cell bit 0x80 (0xff wall, 0xfe free) | 405966 |  | dead |
+| 0x405691 | 725 | map | auto-walk step: go to the lower neighbour (8 directions) | 404450 4046f3 | 404731 404937 404a9a 404c9f | game |
+| 0x405966 | 359 | map | pathfinding setup: start/goal, walk grid, flood fill | 4046f3 405542 405597 | 40562b 405acd 405fb6 | game |
+| 0x405acd | 58 | map | start the recursive flood fill 0x405b07 from the goal | 405966 | 405b07 | dead |
+| 0x405b07 | 397 | map | recursive flood fill with direction-order mask | 405acd 405c72 405ce8 405d3a 405d8c 405e05 405e5a 405ed0 405f24 |  | dead |
+| 0x405c72 | 137 | map | flood-fill order case 0 (0x435e40[0]) |  | 405b07 | dead |
+| 0x405ce8 | 118 | map | flood-fill order case 1 |  | 405b07 | dead |
+| 0x405d3a | 82 | map | flood-fill order case 2 |  | 405b07 | dead |
+| 0x405d8c | 77 | map | flood-fill order case 3 |  | 405b07 | dead |
+| 0x405e05 | 123 | map | flood-fill order case 4 |  | 405b07 | dead |
+| 0x405e5a | 83 | map | flood-fill order case 5 |  | 405b07 | dead |
+| 0x405ed0 | 109 | map | flood-fill order case 6 |  | 405b07 | dead |
+| 0x405f24 | 73 | map | flood-fill order case 7 |  | 405b07 | dead |
+| 0x405fb6 | 230 | map | unreachable goal: mark approach cells for the sprite footprint | 405966 |  | dead |
 | 0x40609c | 64 | input | pump (WM_QUIT resets esp 0x445cdc); bl = buttons, cx/dx = mouse | 404450 4051c2 405216 405597 | 401bf0 |  |
 | 0x4060d4 | 3765 | vm | VM: load start.mes, fetch loop 0x4060f9, all opcode handlers (alt 4060f9) | 402090 4060d4 4061cd | 401050 401160 401190 4012b0 401430 4014f0 401670 4017b0 ... | game |
 | 0x4061cd | 7 | vm | run a nested block (skip 01, recursive 0x4060f9) | 4060d4 | 4060d4 | game |
