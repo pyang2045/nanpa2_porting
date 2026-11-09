@@ -336,7 +336,7 @@ int dev_save_selftest(void)
 	for (uint32_t i = 0; i < 0xc00; i++)
 		src[i] = (uint8_t)((i * 7 + 3) & 0xff);
 	game_file_save(name, src, 0xc00);
-	game_file_load(name, dst);
+	game_file_load(name, dst, 0xc00);
 	int ok = !memcmp(src, dst, 0xc00);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
 	return ok ? 0 : 1;

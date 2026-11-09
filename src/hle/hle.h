@@ -74,10 +74,6 @@ void win32_cursor_update(void);  /* re-check after mouse/window/fit changes */
 void win32_cursor_state(int *count, int *shown, int *over_image);
 extern uint32_t win32_wndproc;
 
-/* crt.c: C runtime replacements by native address */
-int crt_call(uint32_t addr);
-void crt_init(const char *game_dir, const char *save_dir);
-
 /* ddraw.c: DirectDraw */
 uint32_t ddraw_create(void);
 int ddraw_com_call(uint32_t iface, uint32_t method);
@@ -94,16 +90,8 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len);
 void text_select(uint32_t hdc, uint32_t font);
 void text_set_color(uint32_t hdc, uint32_t fg, uint32_t bg, int mode);
 
-/* sound.c: music and voices (replaces the native DirectSound/MP3 code) */
-int sound_init(void);
-void sound_shutdown(void);
-void sound_music_play(int n);
-void sound_music_stop(void);
-int sound_status(char *voice_out, size_t cap); /* music number or -1 */
-void sound_music_pause(int pause);
-void sound_voice_play(const char *rel);
-void sound_voice_stop(void);
-int sound_wav_check(int n, char **files); /* --wav-check; returns failures */
+/* sound.c: see platform/sound.h */
+#include "platform/sound.h"
 
 /* Interface ids for COM thunks */
 enum {

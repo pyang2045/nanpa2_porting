@@ -59,7 +59,7 @@ set(SOURCES
   src/x86/x86.c
   src/x86/asset.c
   src/hle/hle.c
-  src/hle/crt.c
+  src/platform/files.c
   src/hle/win32.c
   src/hle/clock.c
   src/hle/ddraw.c

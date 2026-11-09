@@ -2,6 +2,7 @@
 #ifndef NANPA2_GAME_FILE_H
 #define NANPA2_GAME_FILE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* 0x401050: load the game file `name` (looked up under DATA\, then under the
@@ -9,7 +10,7 @@
  * opened is skipped. `name` and `buf` lie in the emulated address space (the
  * state object G, or the emulated heap and stack): the C runtime that reads
  * them is behind the HLE boundary. Registers are not part of the contract. */
-void game_file_load(const char *name, void *buf);
+void game_file_load(const char *name, void *dst, size_t cap);
 /* 0x401160: write size bytes at buf to the file `name` ("wb", as given). The
  * FLAG save image is game_file_save(name, &G.save, SAVE_SIZE). */
 void game_file_save(const char *name, const void *buf, uint32_t size);

@@ -12,10 +12,16 @@
  * src/hle serves them unchanged. Semantics: re-notes.md "Start-up" and
  * "Window procedure".
  */
+#include <stdio.h>
+
 #include "game/ctl.h"
 #include "game/startup.h"
 #include "game/state.h"
 #include "game/vm.h"
+#include "hle/hle.h"
+#include "hle/logo.h"
+#include "platform/files.h"
+#include "platform/sound.h"
 #include "x86/x86.h"
 
 /* import address table slots (the loaded image's .idata) */
@@ -23,7 +29,6 @@
 #define IAT_DELETEOBJECT 0x41b010u
 #define IAT_CREATEFONT 0x41b018u
 #define IAT_GETSTOCKOBJECT 0x41b01cu
-#define IAT_GETDRIVETYPE 0x41b068u
 #define IAT_SHOWCURSOR 0x41b11cu
 #define IAT_GETSYSMETRICS 0x41b134u
 #define IAT_POSTQUIT 0x41b140u
@@ -71,9 +76,6 @@
 #define PALETTE_ENTRIES 0x4ac07cu /* 256 x 4 bytes */
 #define FONTS 0x4ac070u         /* u32[3] */
 
-#define CD_FMT 0x431188u        /* "%sSPEECH\A\A10930.WAV" */
-#define CD_FALLBACK_FILE 0x431174u /* "SPEECH\A\A10930.WAV" */
-#define MODE_READ 0x43103cu
 #define WND_CLASS 0x431160u
 #define ICON_NAME 0x431168u
 #define FONT_FACE 0x4311a0u
@@ -112,32 +114,24 @@ static uint32_t cdecl_call(uint32_t addr, int n, const uint32_t *a)
  * tried in the current folder (prefix ""). Returns 1 if found. */
 static uint32_t cd_search(void)
 {
-	uint32_t esp = cpu.r[ESP];
-	cpu.r[ESP] -= 0x28;
-	uint32_t local = cpu.r[ESP];
-	uint32_t found = 0;
+	FILE *found = NULL;
 	for (uint32_t drive = 0; drive < 0x1a; drive++) {
 		wr8(CD_PREFIX, 'A' + drive);
-		if (IMPORT(IAT_GETDRIVETYPE, CD_PREFIX) != 5) {
+		if (!files_drive_is_cd((char)('A' + drive)))
 			continue;
-		}
-		cdecl_call(0x412c90, 3, (const uint32_t[]){ local, CD_FMT, CD_PREFIX });
-		uint32_t f = cdecl_call(0x412d13, 2, (const uint32_t[]){ local, MODE_READ });
-		if (f) {
-			found = f;
+		char path[64];
+		snprintf(path, sizeof path, "%sSPEECH\\A\\A10930.WAV", (const char *)x86_ptr(CD_PREFIX, 1));
+		found = files_open(path, "rb");
+		if (found)
 			break;
-		}
 	}
 	if (!found) {
 		wr8(CD_PREFIX, 0);
-		found = cdecl_call(0x412d13, 2, (const uint32_t[]){ CD_FALLBACK_FILE, MODE_READ });
-		if (!found) {
-			cpu.r[ESP] = esp;
+		found = files_open("SPEECH\\A\\A10930.WAV", "rb");
+		if (!found)
 			return 0;
-		}
 	}
-	cdecl_call(0x412d6e, 1, (const uint32_t[]){ found });
-	cpu.r[ESP] = esp;
+	fclose(found);
 	return 1;
 }
 
@@ -156,7 +150,7 @@ static uint32_t display_init(void)
 	uint32_t key = cpu.r[ESP];
 	IMPORT(IAT_SHOWCURSOR, 1);
 	/* DirectSound: the HLE 0x402ad0 (cdecl, the window) */
-	cdecl_call(0x402ad0, 1, (const uint32_t[]){ SC(hwnd) });
+	sound_init();
 	if (IMPORT(IAT_DDRAWCREATE, 0, DDRAW, 0) != 0) {
 		message_box(MSG_DD_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
@@ -245,7 +239,7 @@ static void shutdown(void)
 	}
 	release_at(DDRAW);
 	/* DirectSound: the HLE 0x402c70 */
-	HLE0(0x402c70);
+	sound_shutdown();
 	IMPORT(IAT_SHOWCURSOR, 1);
 }
 
@@ -288,7 +282,8 @@ uint32_t game_main(uint32_t hinst)
 		result = 0;
 		goto leave;
 	}
-	cdecl_call(0x401e20, 1, (const uint32_t[]){ LOGO_ARG }); /* the logo player (HLE) */
+	win32_show_cursor(0); /* the first thing the logo player does, whether or not a movie plays */
+	logo_play();
 	uint32_t ok = display_init();
 	if (!ok) {
 		result = 0;
@@ -326,7 +321,7 @@ static uint32_t key_bit(uint32_t vk)
 
 static void voice_stop(void)
 {
-	HLE0(0x403440);
+	sound_voice_stop();
 }
 
 /* 0x402570: after the pointer moved with the cursor drawn: wait for the
@@ -422,11 +417,11 @@ uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lpa
 		SC_SET(paused, 1);
 		SC_SET(active, 0);
 		voice_stop();
-		HLE0(0x403220); /* music pause (HLE) */
+		sound_music_pause(1);
 		goto done;
 	}
 	if (SC(paused)) {
-		HLE0(0x403250); /* music resume (HLE) */
+		sound_music_pause(0);
 	}
 	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ hwnd });
 	SC_SET(active, 1);

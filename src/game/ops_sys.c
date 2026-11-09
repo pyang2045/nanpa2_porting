@@ -13,10 +13,13 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
+#include <stdio.h>
+
 #include "game/ctl.h"
 #include "game/file.h"
 #include "game/map.h"
 #include "game/vm.h"
+#include "platform/sound.h"
 #include "x86/x86.h"
 #include "game/state.h"
 
@@ -303,10 +306,10 @@ int vm_op_music(void)
 {
 	uint32_t a = parse(NULL);
 	if (a) {
-		HLE0(0x4032c0);
+		sound_music_stop();
 		return loop_at(0x4073b4);
 	}
-	HLE(0x402cb0, rd16(ARG(1)));
+	sound_music_play((int)rd16(ARG(1)));
 	return loop_at(0x4073c8);
 }
 
@@ -316,7 +319,9 @@ int vm_op_voice(void)
 	parse(NULL);
 	uint32_t src, last;
 	vm_string_arg(STRING_BUF, &src, &last);
-	HLE(0x403360, STRING_BUF);
+	char rel[160];
+	snprintf(rel, sizeof rel, "SPEECH%.140s", (const char *)x86_ptr(STRING_BUF, 1));
+	sound_voice_play(rel);
 	return loop_at(0x4073e9);
 }
 

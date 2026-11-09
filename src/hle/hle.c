@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "logo.h"
+#include "platform/files.h"
 #include "lzh.h"
 #include "game/state.h"
 
@@ -81,7 +82,7 @@ static int map_imports(void)
 
 int hle_init(const char *game_dir, const char *save_dir)
 {
-	crt_init(game_dir, save_dir);
+	files_init(game_dir, save_dir);
 	win32_init();
 	return map_imports();
 }
@@ -215,23 +216,6 @@ static void override_call(uint32_t addr)
 		return;
 	case 0x4034a0: /* music stream pump: SDL audio pulls instead */
 		return;
-	case 0x4075f0: { /* decompress(dst, src): src is a malloc'd file image */
-		/* native 0x401050 reads the whole file before calling; the size is
-		 * the heap block size, which is enough for the bit reader */
-		uint32_t dst = hle_arg(0), src = hle_arg(1);
-		uint32_t cap = rd32(src - 8) - 8;
-		size_t n;
-		unsigned char *out = lzh_decode(x86_ptr(src, cap), cap, &n);
-		if (!out)
-			x86_trap(addr, "corrupt GP4/ANI data");
-		memcpy(x86_ptr(dst, (uint32_t)n), out, n);
-		/* emulated CPU time of the native decoder: lifting it and counting
-		 * gave about 70 instructions per input byte + 1.2 per output byte
-		 * (0.7M for ELF.GP4, 2.4M for NAME.GP4) */
-		ctl_work_us(PACE_DECODE_US(cap, n));
-		free(out);
-		return;
-	}
 	}
 	char msg[64];
 	snprintf(msg, sizeof msg, "no HLE for %08x", addr);
@@ -302,7 +286,5 @@ void hle_call(uint32_t addr)
 		snprintf(msg, sizeof msg, "import %s", i < nimports ? imports[i].name : "?");
 		x86_trap(addr, msg);
 	}
-	if (crt_call(addr))
-		return;
 	override_call(addr);
 }
