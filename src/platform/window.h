@@ -10,7 +10,7 @@
  * and up 0x202, WM_RBUTTONDOWN 0x204 and up 0x205, WM_KEYDOWN 0x100 and up 0x101 (wparam a
  * virtual key code), WM_ACTIVATEAPP 0x1c, WM_DESTROY 2, WM_QUIT 0x12 (the game ends).
  *
- * The game's 16 ms clock is a timer the platform runs against the game clock (src/hle/clock.h):
+ * The game's 16 ms clock is a timer the platform runs against the game clock (src/platform/clock.h):
  * the tick callback runs from the pump and from the game's waits, on the game's thread, never
  * concurrently with it.
  */

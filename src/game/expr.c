@@ -11,8 +11,6 @@
 #include <stdio.h>
 
 #include "game/vm.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 enum {
 	TOK_END = 0x03,       /* end of expression */

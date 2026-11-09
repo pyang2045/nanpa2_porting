@@ -12,15 +12,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "game/ctl.h"
 #include "game/startup.h"
-#include "game/state.h"
 #include "game/vm.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
 #include "platform/text.h"
-#include "platform/window.h"
 #include "platform/logo.h"
 #include "platform/files.h"
 #include "platform/sound.h"
@@ -166,9 +160,8 @@ static void paint(void)
 }
 
 /* The window procedure, stdcall (hwnd, msg, wparam, lparam): returns the
- * result for the message. Called by the HLE message pump (win32.c), which
- * keeps the CPU registers across it as x86_call did. The native registers
- * it leaves (ECX per path, EDX = 0) were never read. */
+ * result for the message. Called by the platform's message pump
+ * (platform/window.h). */
 uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
 	uint32_t result = 0;

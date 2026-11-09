@@ -1,4 +1,4 @@
-/* GDI text for the lifted code. Native 0x401900 (char, x, y, size, fg, bg)
+/* GDI text for the game. Native 0x401900 (char, x, y, size, fg, bg)
  * draws one Big5 or ASCII character with TextOutA at (0, 0) of the scratch
  * surface 0x4ab058 (font 0x4ac070[size & 3]: MingLiU at em heights 15, 24,
  * 32, weights 700, 700, 400; text colour 0xf0f0f0 on 0, opaque), then
@@ -9,11 +9,8 @@
  * bloc/bdat; MingLiU and Apple LiSung have hand-made strikes), otherwise its
  * outline through stb_truetype, unantialiased like GDI on an 8-bit DC; bold
  * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
 #include "platform/text.h"
-#include "platform/window.h"
+#include "platform/surface.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -26,7 +23,7 @@
 #ifdef _WIN32
 /* kernel32's MultiByteToWideChar (UINT, DWORD, LPCCH, int, LPWSTR, int),
  * declared here rather than with <windows.h> and its macros (min, max,
- * near, far, ERROR, ...) next to the emulator headers */
+ * near, far, ERROR, ...) next to the game's headers */
 __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *s,
 							 int n, wchar_t *w, int wn);
 #else

@@ -31,11 +31,7 @@
 #include <string.h>
 
 #include "game/expr.h"
-#include "game/state.h"
 #include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 
 #define FRAME() RT(frame)

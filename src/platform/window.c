@@ -1,9 +1,5 @@
 /* Platform API: the window, the message queue, the 16 ms timer and the cursor (platform/window.h). */
-#include "platform/window.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
 #include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "game/ctl.h"
 #include "game/pace.h"
@@ -19,7 +15,6 @@
 #include "dev/status.h"
 #include "platform/present.h"
 #include "game/startup.h"
-#include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
 

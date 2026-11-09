@@ -4,9 +4,7 @@
  *
  * Reimplements 0x4061d4 (block skip), 0x40741b with 0x4074a3 (argument
  * parser), 0x406dc4 (string argument), 0x406395 (VM init) and 0x4068e1
- * (menu item step). The register-level wrappers at the end give each its
- * native contract; the C functions above them are what the opcode
- * handlers in src/game/ops.c call.
+ * (menu item step). These are what the opcode handlers in src/game/ops*.c call.
  */
 #include <stdio.h>
 
@@ -14,8 +12,6 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 uint32_t vm_eval(uint32_t *pc)
 {

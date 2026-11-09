@@ -8,16 +8,9 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
-#include "game/ctl.h"
 #include "game/expr.h"
 #include "game/vm.h"
 #include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
-#include "platform/window.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 /* back to the loop (the native `jmp 0x4060f9`) at pc */
 static int to_loop(uint32_t pc)

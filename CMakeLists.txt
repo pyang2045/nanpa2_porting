@@ -9,11 +9,10 @@ endif()
 
 find_package(SDL2 REQUIRED)
 
-# Game code: the C engine (src/game) runs on the emulated address space of
-# src/x86 (docs/refactor.md). The interpreter (src/x86/interp.c) still
-# dispatches the units by native address until R2 is finished; it decodes no
-# game code any more (the game code is all C), so the build needs neither the
-# exe nor capstone and the binary holds nothing of the game.
+# The engine is plain C: the game logic (src/game) runs on the game state G (state.h) and calls the
+# platform API (src/platform: files, surfaces, text, window, sound; docs/refactor.md). Nothing of the exe's
+# code is used, so the build needs neither the exe nor any tool beyond a C11 compiler and SDL2, and the
+# binary holds nothing of the game.
 # Python: for the tests.
 find_package(Python3 COMPONENTS Interpreter)
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
@@ -120,13 +119,10 @@ if(UNIX AND NOT APPLE)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
-  # the interpreter runs the whole game: optimized in Debug builds too
 endif()
 # macOS app bundle: build/同級生２.app with SDL inside (tools/bundle_macos.sh).
 # It holds no game data (the game folder is found or asked for at run time,
-# see src/launch.c). Built with NANPA2_BACKEND=interp it holds nothing of the
-# game either (test no_game_bytes); a recomp .app holds the game code lifted
-# from your nanpa2.exe, so never share that one.
+# see src/launch.c). It holds nothing of the game either (test no_game_bytes).
 #   ninja -C build nanpa2_app        or configure with -DNANPA2_APP_BUNDLE=ON
 if(APPLE)
   option(NANPA2_APP_BUNDLE "Build build/同級生２.app with the default target" OFF)

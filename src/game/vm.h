@@ -2,8 +2,9 @@
  * Script VM state, read and written at its native addresses.
  *
  * The state is in G (state.h); the script image, its segments and the VM's
- * address-valued words are still addressed natively through the alias. This
- * header names those addresses; see re-notes.md "Script VM state".
+ * address-valued words are G addresses (game/gmem.h: the original's numbering,
+ * used as indices into G). This header names those addresses; see re-notes.md
+ * "Script VM state".
  */
 #ifndef NANPA2_GAME_VM_H
 #define NANPA2_GAME_VM_H
@@ -132,7 +133,7 @@ uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last);
 
 /* Opcode handlers: entered with vm_pc past the opcode bytes, they return -1
  * (on with the loop) or the block result (the native `ret` out of the running
- * block). The ops that are still register-level pieces are below. */
+ * block). */
 int vm_op_set_flags(void);       /* 0a */
 int vm_op_set_flags_expr(void);  /* 0b */
 int vm_op_set_reg(void);         /* 0c */
@@ -220,7 +221,7 @@ void game_anim_step(void);              /* 0x403624 */
 void game_anim_control(uint32_t op, uint32_t n, uint32_t a, uint32_t b);
 void game_anim_reset(void);             /* 0x406dff */
 void game_palette_copy(const uint16_t *src); /* 0x40752c */
-void game_palette_copy_at(uint32_t src);     /* the same, by guest address */
+void game_palette_copy_at(uint32_t src);     /* the same, by G address */
 
 static inline uint32_t vm_script_byte(uint32_t pc)
 {

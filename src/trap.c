@@ -3,9 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "game/state.h"
 #include "dev/dev.h"
-#include "game/gmem.h"
 #include "game/vm.h"
 #include "platform/clock.h"
 

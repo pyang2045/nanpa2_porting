@@ -50,7 +50,7 @@ int present_capture(const char *bmp_path, int w, int h);
 /* A frame below this mean luminance (0..255) counts as black. */
 #define PRESENT_BLACK_LUMA 4
 
-/* Presenter counters for the live status file and watchdog (src/hle/status.c).
+/* Presenter counters for the live status file and watchdog (src/dev/status.c).
  * Call on the main thread. Times are SDL_GetTicks() values, 0 = never. */
 struct present_stats {
 	unsigned long frames_in;      /* present_frame / present_frame_rgb calls */

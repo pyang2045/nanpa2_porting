@@ -27,9 +27,6 @@
  * Time: an opcode costs PACE_OP_US, an expression PACE_EVAL_US, a skipped block
  * its length (pace.h); each pump costs PACE_PUMP_US.
  *
- * Handlers that have not been converted yet (the subsystem ops of ops_sys.c)
- * are still register-level pieces: legacy() runs one on the emulated CPU until
- * it jumps back to the loop head, with ESI = vm_pc.
  */
 #include <setjmp.h>
 
@@ -38,12 +35,6 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
-#include "platform/window.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 #define INPUT_SKIP 0x40u      /* Ctrl: no waiting for clicks */
 #define BIG5_NEWLINE 0xa1beu

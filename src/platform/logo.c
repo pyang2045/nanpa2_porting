@@ -30,10 +30,6 @@
 
 #include "cinepak.h"
 #include "fsys.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "dev/status.h"

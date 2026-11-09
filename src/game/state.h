@@ -1,14 +1,12 @@
 /*
  * The game state as C structs (docs/refactor.md, R1).
  *
- * The state used to live in the emulated 32-bit memory at the addresses of
- * nanpa2.exe's data and bss, read and written with rd16(0x4452e8) and the
- * like. It is now one object, G, that is the whole data area 0x431000-0x4c0000 in
- * its native layout, backed by one alias (x86_alias, state_init): code that
- * still reads an address, the HLE layer, bulk copies and the script VM (whose
- * segments are addresses) get G's bytes, and the unchecked indices of the
- * script land where they did natively. The comments give the native address
- * of each field. New code names the field.
+ * The game state is one object, G: the whole data area of nanpa2.exe that the game
+ * writes (0x431000-0x4c0000) in its native layout, so that the unchecked indices of
+ * the scripts land where they did natively, and the FLAG file and the checkpoints
+ * see the bytes they always did. The comments give the native address of each field,
+ * and an address is also an index into G (game/gmem.h). Code names the field. G is
+ * initialised from the asset (state_init) and is the only game state.
  */
 #ifndef NANPA2_GAME_STATE_H
 #define NANPA2_GAME_STATE_H
@@ -170,7 +168,7 @@ RT_CHECK(pitch, 0x4462aeu);
 _Static_assert(sizeof(struct vm_rt) == 0x4462beu - RT_BASE, "vm_rt covers 0x445cdc-0x4462be");
 
 /* Palette, fade, cursor, window and DirectDraw globals, 0x4aac50-0x4ac51c. The
- * timer callback (0x4028c0, src/hle/hle.c) steps the fade and blinks the cursor
+ * timer tick (0x4028c0, src/game/timer.c) steps the fade and blinks the cursor
  * from here. */
 #define SC_BASE 0x4aac50u
 #pragma pack(push, 1)
@@ -327,7 +325,7 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
 #define ANI_BASE 0x4a62beu
 #define ANI_SIZE 0x4992u
 
-/* The sound words the native DirectSound code kept (src/hle/sound.c replaces it;
+/* The sound words the native DirectSound code kept (src/platform/sound.c replaces it;
  * nothing in C reads them) and the cursor bitmap */
 #define SND_BASE 0x4be540u
 #define CBITS_BASE 0x4be900u
@@ -335,8 +333,8 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
 /* The whole initialised and zero-initialised data of nanpa2.exe that the game
  * writes, 0x431000-0x4c0000, in its native layout (so every address the native
  * code computed, including the unchecked indices of the script, lands where it
- * did). One alias backs it (state_init). Outside it the emulated memory holds the
- * code, the read-only data, the stack and the heap. */
+ * did). The rest of the exe (code, read-only data, the C runtime) is not part of the
+ * engine: nothing reads it. */
 #define DATA_BASE 0x431000u
 #define DATA_END 0x4c0000u
 struct game_state {

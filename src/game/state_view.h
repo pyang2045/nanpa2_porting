@@ -1,7 +1,7 @@
 /*
- * The game state as the replay checkpoints see it (src/hle/replay.c): the
+ * The game state as the replay checkpoints see it (src/dev/replay.c): the
  * layout independent view. Only this file knows where the state lives, so
- * moving the state out of the emulated memory (docs/refactor.md, R1) changes
+ * moving the state (docs/refactor.md, R1 and R4) changes
  * these functions and not the checkpoints.
  */
 #ifndef NANPA2_GAME_STATE_VIEW_H

@@ -1,11 +1,8 @@
-#include "platform/clock.h"
 
 #include <SDL.h>
 
-#include "game/gmem.h"
-#include "platform/sound.h"
+#include "platform/clock.h"
 #include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "dev/replay.h"
@@ -46,7 +43,7 @@ uint64_t clock_timer_ms(void)
 }
 
 /* Budget: the virtual time since the base point may not exceed the real time elapsed times the
- * speed. Ahead of it, sleep; far behind (HLE work, a stall, an unthrottled stretch), move the base
+ * speed. Ahead of it, sleep; far behind (a stall, an unthrottled stretch), move the base
  * point so the game never bursts to catch up. Waits on the game timer are unaffected: the pumps
  * that spin on them cost virtual time too, and the timer itself follows real time. */
 void clock_throttle(void)
@@ -78,4 +75,9 @@ void clock_work(uint32_t us)
 		screen_present(0);
 		SDL_PumpEvents();
 	}
+}
+
+uint64_t clock_log_ms(void)
+{
+	return replay_det() ? replay_ms() : SDL_GetTicks();
 }

@@ -20,8 +20,6 @@
 #include "game/file.h"
 #include "game/state_view.h"
 #include "game/vm.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 
 /* call 0x4061d4: skip the block at pc; the depth counter is gone (AX = 0) */

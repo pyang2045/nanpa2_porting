@@ -35,6 +35,9 @@ void clock_work(uint32_t us);
 /* the game timer's clock in ms (deterministic or speed 0: the virtual time) */
 uint64_t clock_timer_ms(void);
 
+/* milliseconds for the timing log (NANPA2_TIMELOG): the virtual time in deterministic mode, else the host's */
+uint64_t clock_log_ms(void);
+
 /* sleep if the virtual time is ahead of real time x speed */
 void clock_throttle(void);
 

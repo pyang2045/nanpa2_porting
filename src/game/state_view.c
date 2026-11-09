@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#include "game/state.h"
 #include "game/vm.h"
 #include "dev/replay.h"
 
@@ -26,7 +25,7 @@ void state_save_import(const uint8_t *in, size_t n)
 
 /* The fields of G that hold platform values: object handles, the window, the font handles, the
  * timer id, the locked pixel pointers and the DirectDraw lock descriptor. Their values are
- * whatever the platform layer hands out (in R3 and before, addresses of the emulated heap), so
+ * whatever the platform layer hands out (in R3 and before, addresses of the emulated heap, and still the value the legacy handle scheme gives the screen), so
  * the data hash leaves them out. The pitches, the animation and script addresses and every
  * other word of G are state and stay in. */
 #define MASK(member, n) { offsetof(struct game_state, member), (n) }

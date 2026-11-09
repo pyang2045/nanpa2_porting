@@ -1,5 +1,4 @@
 /* Platform API: surfaces, the palette and the screen. See surface.h. */
-#include "platform/surface.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -7,10 +6,7 @@
 #include <string.h>
 
 #include "dev/dev.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
 #include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "trap.h"

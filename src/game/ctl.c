@@ -1,18 +1,11 @@
 #include "game/ctl.h"
 
-#include <SDL.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "game/state.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/clock.h"
-#include "dev/replay.h"
 
 int ctl_pump(void)
 {
@@ -31,7 +24,7 @@ void ctl_tlog(const char *label, uint32_t arg)
 		on = getenv("NANPA2_TIMELOG") != NULL;
 	if (!on)
 		return;
-	uint64_t ms = replay_det() ? replay_ms() : SDL_GetTicks();
+	uint64_t ms = clock_log_ms();
 	fprintf(stderr, "T %llu %u %s %x\n", (unsigned long long)ms, RT(frame), label, arg);
 }
 

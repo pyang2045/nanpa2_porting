@@ -1,5 +1,5 @@
 /* Whether anyone can see the desktop: screen lock and display sleep, for the
- * live status file (src/hle/status.c) and the smoke test. macOS:
+ * live status file (src/dev/status.c) and the smoke test. macOS:
  * desktop_macos.c (CoreGraphics); elsewhere unknown. Safe to call from any
  * thread; it is a WindowServer round trip, so call it about once a second. */
 #ifndef NANPA2_DESKTOP_H

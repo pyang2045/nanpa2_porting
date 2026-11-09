@@ -7,8 +7,7 @@
  * same thread (events, timer callbacks, presentation), as the original's
  * PeekMessage loop did. A WM_QUIT makes the pump leave the engine with
  * ctl_quit(), which unwinds to the one place that called ctl_catch(): the top
- * of the game, or (while pieces of the register-level VM still exist) a
- * wrapper that runs direct-style code from a piece.
+ * of the game.
  *
  * Pacing (R3): the game waits on the 16 ms timer and spends time only in the
  * few kinds of busy work of pace.h, each an explicit ctl_work_us(). There are

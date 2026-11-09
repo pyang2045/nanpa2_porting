@@ -5,7 +5,7 @@
  * Both make two runs of the same play differ. In deterministic mode
  * (NANPA2_DETERMINISTIC=1, and implied by --record and --replay) the game
  * clock is the virtual time of the pacing model (src/game/pace.h,
- * src/hle/clock.h; whatever --speed says), the message pump takes the host event queue at a
+ * src/platform/clock.h; whatever --speed says), the message pump takes the host event queue at a
  * count of pumps and not of milliseconds, and nothing the host or the audio
  * thread does reaches the game's state. Two runs with the same input are
  * then identical to the bit.
@@ -19,8 +19,10 @@
  *   li.*   layout independent: the screen, the palette, the saved variables
  *          (the 0xc00-byte image the save file holds), the scripts reached,
  *          the FLAG files in the save folder. They survive the refactor.
- *   raw.*  the emulated memory (.data and .bss in pages of 4 KB, heap, stack)
- *          and the virtual clock; for checking the same code twice.
+ *   raw.*  the virtual clock (raw.clock) and the hash of the whole game state G with the platform's
+ *          handles masked out (raw.gdata, game/state_view.c); for checking the same code twice.
+ *          (R3 and before also had raw.cpu, raw.data, raw.heap, raw.stack and raw.pg, the emulated
+ *          machine; a recording that has them is replayed without comparing those.)
  * --replay FILE posts the recorded messages at the same pump and compares
  * every checkpoint with the recorded one; the first difference stops the
  * run (exit code 3) and names the checkpoint and what differs.
@@ -34,7 +36,7 @@
 
 int replay_det(void);        /* deterministic clock */
 int replay_replaying(void);  /* host input, scripts and the bot are off */
-/* After hle_init: open the recording or replay file named by the
+/* After files_init: open the recording or replay file named by the
  * environment (NANPA2_RECORD, NANPA2_REPLAY); save_dir is the FLAG folder. */
 void replay_init(const char *save_dir);
 /* Virtual milliseconds: instructions run / 25000 */

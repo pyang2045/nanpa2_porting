@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the exploration bot (NANPA2_EXPLORE, src/hle/explore.c) headless for several seeds and
+"""Run the exploration bot (NANPA2_EXPLORE, src/dev/explore.c) headless for several seeds and
 report MES coverage and problems.
 
 usage: explore.py --bin BIN --game GAME --out DIR [--seeds 1-6] [--frames 300000]
@@ -9,7 +9,7 @@ usage: explore.py --bin BIN --game GAME --out DIR [--seeds 1-6] [--frames 300000
 Each seed runs in DIR/SEED with its own NANPA2_SAVE_DIR (a copy of --saves if given, else
 empty, which starts the game from the Prologue). Its log goes to DIR/SEED/log.txt.
 The report lists every *.MES under GAME/DATA that no run reached, and per seed:
-  - traps ("x86 trap");
+  - traps ("game trap");
   - watchdog warnings ("WARNING:");
   - stalls ("explore: stall");
   - exit status.
@@ -76,7 +76,7 @@ def report(args):
         names = re.findall(r'^explore: reached (\S+) frame (\d+)', text, re.M)
         for n, f in names:
             reached.setdefault(n, (seed, int(f)))
-        problems = re.findall(r'^(x86 trap.*|.*WARNING:.*|explore: stall.*|explore\.py: .*)$', text, re.M)
+        problems = re.findall(r'^(game trap.*|.*WARNING:.*|explore: stall.*|explore\.py: .*)$', text, re.M)
         last = names[-1][0] if names else '-'
         print('seed %s: %d MES, last %s' % (seed, len(names), last))
         for p in problems:

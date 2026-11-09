@@ -1,5 +1,4 @@
 /* Deterministic mode, recording and replay: see replay.h. */
-#include "dev/replay.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -7,13 +6,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "dev/replay.h"
 #include "platform/clock.h"
 #include "game/pace.h"
 #include "game/state_view.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
 #include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 
 #define WM_QUIT_MSG 0x12u

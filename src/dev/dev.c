@@ -19,20 +19,16 @@
  *   NANPA2_SPEED=N  run the game N times faster than the original (clock.c; 0 = as
  *       fast as the host can; NANPA2_TURBO is the old name), for long scripted runs
  *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
-#include "dev/dev.h"
 
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "dev/dev.h"
 #include "dev/explore.h"
 #include "game/file.h"
-#include "game/state.h"
 #include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "dev/replay.h"

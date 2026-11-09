@@ -1,6 +1,6 @@
 /*
- * nanpa2.dat: the built-in data of the player's nanpa2.exe, without its code (R4: src/asset.c; it
- * was src/x86/asset.c, with the exe image loader of src/x86/x86.c).
+ * nanpa2.dat: the built-in data of the player's nanpa2.exe, without its code (R4: this file; it was
+ * src/x86/asset.c together with the exe image loader of src/x86/x86.c).
  *
  * The engine reimplements every game function in C (docs/reimpl.md), but the
  * C still reads the exe's initialized data at its native addresses through

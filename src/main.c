@@ -22,9 +22,9 @@
  *                                                       (Alt+Enter, Cmd+F toggle)
  *   --record FILE / --replay FILE                       record the play (inputs and state
  *                                                       checkpoints) / replay it and
- *                                                       compare (src/hle/replay.h)
- *   --deterministic                                     the game clock follows the emulated
- *                                                       CPU, not the host
+ *                                                       compare (src/dev/replay.h)
+ *   --deterministic                                     the game clock is the virtual time
+ *                                                       of the pacing model, not the host's
  *   --pause-inactive                                    stop the game while the
  *                                                       window is in the background
  *                                                       (the original behaviour)
@@ -33,9 +33,10 @@
  * the remembered choice, next to the executable or .app, ./game, then a
  * folder picker.
  *
- * Playing runs the game's C reimplementation (src/game) on the hand-written
- * Win32/DirectX layer in src/hle, with the built-in data of the player's
- * nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe once).
+ * Playing runs the game's C reimplementation (src/game) on the platform API
+ * (src/platform: files, surfaces, text, window, sound), with the built-in data
+ * of the player's nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe
+ * once). Nothing of the exe's code runs.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -222,12 +223,12 @@ static int run_game(const char *game, const char *exe, const char *font)
 	if (replay_replaying() && !game_speed_set)
 		clock_init(0); /* a replay runs as fast as the host can */
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
-	 * script interpreter until the game ends */
+	 * script VM until the game ends */
 	uint64_t t0 = SDL_GetPerformanceCounter();
 	game_main();
 	replay_finish();
 	SDL_free(save);
-	/* with NANPA2_SPEED=0: the game time against the host's, HLE time included */
+	/* with NANPA2_SPEED=0: the game time against the host's */
 	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
 	double game_secs = (double)clock_us() / 1e6;
 	SDL_Log("Game: %.1f s of game time in %.1f s (%.2fx)", game_secs, secs, secs > 0 ? game_secs / secs : 0.0);

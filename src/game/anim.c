@@ -13,20 +13,15 @@
  * (0x401ca0) are the native screen routines, called as the native code
  * calls them.
  *
- * R2: ordinary C. The slots are struct anim_slot in G.an; `start` and `pc`
- * hold guest addresses into G.ani, as the data area keeps them, and the
- * interpreter reads the instruction bytes through a pointer. No register
- * is part of any contract: the callers (the VM loop, the waits, the op 1a
- * handler) overwrite or ignore EAX, EBX, ECX, EDX and EDI after these,
- * and ESI is kept. Semantics: re-notes.md "Animation slots".
+ * The slots are struct anim_slot in G.an; `start` and `pc` hold G addresses into
+ * G.ani (game/gmem.h), as the data area keeps them, and the interpreter reads the
+ * instruction bytes through a pointer. Semantics: re-notes.md "Animation slots".
  */
 #include <string.h>
 
 #include "game/ctl.h"
 #include "game/pace.h"
-#include "game/state.h"
 #include "game/vm.h"
-#include "game/gmem.h"
 
 #define ANIM_SLOTS AN_BASE
 #define ANIM_SLOT_SIZE 24u
@@ -61,7 +56,9 @@ void game_palette_copy(const uint16_t *src)
 
 void game_palette_copy_at(uint32_t src)
 {
-	game_palette_copy((const uint16_t *)g_ptr(src, 512));
+	uint16_t table[256]; /* the 16 + 240 colours: copied out, the source is not aligned */
+	memcpy(table, g_ptr(src, 512), sizeof table);
+	game_palette_copy(table);
 }
 
 /* slot n of the script: not range checked natively (a number past 9 runs on

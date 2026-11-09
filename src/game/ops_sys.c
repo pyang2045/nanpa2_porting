@@ -15,13 +15,10 @@
  */
 #include <stdio.h>
 
-#include "game/ctl.h"
 #include "game/file.h"
 #include "game/map.h"
 #include "game/vm.h"
 #include "platform/sound.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 /* call 0x40741b: the argument list at vm_pc; returns argument 0's value (the
  * native EAX), *count = the number of arguments (the native ECX) */

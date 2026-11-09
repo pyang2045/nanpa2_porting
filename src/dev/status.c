@@ -2,7 +2,7 @@
  *
  * The main thread refreshes a snapshot of what only it may read (SDL window
  * state, presenter counters) a few times a second; a writer thread turns it,
- * together with the game's own state read from emulated memory, into
+ * together with the game's own state read from G, into
  * $TMPDIR/nanpa2-status-<pid>.json once a second and runs the watchdog. The
  * thread keeps writing if the main thread hangs, so a stall shows up too.
  *
@@ -32,10 +32,7 @@
 #endif
 
 #include "dev/dev.h"
-#include "game/gmem.h"
 #include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/desktop.h"
 #include "platform/present.h"

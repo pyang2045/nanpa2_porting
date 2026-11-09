@@ -1,5 +1,5 @@
 /*
- * The palette (stage 5B): the two colour tables, the DirectDraw palette
+ * The palette: the two colour tables, the palette
  * entries built from them, the fade between the displayed entries and the
  * tables, and the wait for the fade to end.
  *
@@ -8,7 +8,7 @@
  * builds 256 PALETTEENTRY records at PAL_ENTRIES from them. A fade
  * (0x401d30) stores, per entry and channel, the distance from the entries
  * displayed now to the tables, and the start colours at PAL_START; the
- * 16 ms timer callback (src/hle/hle.c, native 0x4028c0) then moves the
+ * 16 ms timer tick (src/game/timer.c, native 0x4028c0) then moves the
  * entries 16 steps along it, and clears PAL_FADING at the end.
  * Semantics: re-notes.md "Palette and fades".
  *
@@ -19,11 +19,6 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "game/gmem.h"
-#include "game/state.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
-#include "platform/text.h"
 #include "platform/window.h"
 #include "platform/surface.h"
 

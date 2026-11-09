@@ -13,19 +13,17 @@
  * G address and bounded by the end of G: natively the loader wrote wherever the address went,
  * here a file that would run past the end of G traps.
  */
-#include "game/file.h"
 
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "game/file.h"
 #include "game/ctl.h"
 #include "game/pace.h"
-#include "game/state.h"
 #include "lzh.h"
 #include "platform/files.h"
-#include "game/gmem.h"
 
 #define CD_PREFIX 0x431030u   /* string: where the CD search found the game's CD */
 

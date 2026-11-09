@@ -107,7 +107,7 @@ enum {
 /* ---- views ---- */
 
 /* the byte at offset off of script segment 1, n bytes; the segment runs on into
- * the memory after it (G, then the emulated memory) as it does natively */
+ * the memory after it in G as it does natively (past the end of G it traps) */
 static inline uint8_t *seg1_ptr(uint32_t off, uint32_t n)
 {
 	if (off + n <= SEG1_SIZE + IMG_SIZE_B + ANI_SIZE + 0x1000u)

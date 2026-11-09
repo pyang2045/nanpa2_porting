@@ -23,8 +23,6 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
-#include "game/gmem.h"
-#include "game/state.h"
 
 #define SURFACES 0x44629eu /* u32[]: surface objects */
 #define PITCHES 0x4462aeu  /* u32[]: their pitches */

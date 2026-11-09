@@ -6,8 +6,8 @@
  * The text window is a rectangle in 8-pixel columns (x) and pixel rows
  * (y) on surface 0; the cursor advances by a character width in columns
  * and wraps to the next line, and from the last line back to the top.
- * A character is drawn by GDI into the scratch surface 0x4ab058 (through
- * the game's own import calls, which src/hle/text.c serves) and copied
+ * A character is drawn into the scratch surface G.sc.scratch_surface (through
+ * the platform's text call, src/platform/text.c) and copied
  * from there as an opaque N x N cell in the text colours. Semantics:
  * re-notes.md "Text routine".
  */
@@ -15,12 +15,7 @@
 #include "game/pace.h"
 #include "game/vm.h"
 #include "game/gmem.h"
-#include "game/state.h"
-#include "game/gmem.h"
-#include "platform/sound.h"
-#include "platform/surface.h"
 #include "platform/text.h"
-#include "platform/window.h"
 
 
 #define SCRATCH_PITCH 0x280u
