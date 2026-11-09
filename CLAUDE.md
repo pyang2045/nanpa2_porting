@@ -32,16 +32,22 @@ addresses.
 The game code of `nanpa2.exe` (0x401000-0x407800) runs on an emulated 32-bit address space
 (`src/x86/`); calls to imports, COM methods, CRT functions and the overridden game functions go
 to `hle_call`. Two backends (`-DNANPA2_BACKEND`): **interp** (default, the build to share) is
-the interpreter `src/x86/interp.c`, which decodes the player's `nanpa2.exe` from the game folder
-at run time, so the build needs neither the exe nor capstone and the binary holds nothing of
-the game (ctest `no_game_bytes`). **recomp** (development and reference, never share) has
+the interpreter `src/x86/interp.c`. No native game instruction runs any more, so the game needs
+only the exe's built-in data (tables, strings, import directory, globals' start values), which
+`src/x86/asset.c` cuts once from the player's `nanpa2.exe` into `nanpa2.dat` (first launch or
+`nanpa2 --make-assets`; local, gitignored, never shipped; no code bytes). The game then runs
+without the exe, which the differential harness, the oracle modes (`NANPA2_DIFF`, `_FUZZ`,
+`_START_ORACLE`, `_INTERP`) and `--exe` still need (`src/assets.c` decides). The build needs
+neither the exe nor capstone and the binary holds nothing of the game (ctest `no_game_bytes`,
+`asset_only`). **recomp** (development and reference, never share) has
 `tools/recomp.py` (capstone, in `tools/.venv`) lift `game/nanpa2.exe` to `build/gen/recomp.c`
 at build time (generated, never committed); it also holds the interpreter (`NANPA2_INTERP=1`)
 and the block-by-block comparison of the two (`NANPA2_LOCKSTEP=1`, `src/x86/lockstep.c`).
 `src/hle/overrides.h` is the one list of overrides, game overrides and probes for both.
 
 - `src/x86/`: CPU state, memory, flags, heap, `x86_call`, poll hook for backward jumps,
-  `interp.c`/`interp_core.h` (interpreter), `lockstep.c` (recomp builds).
+  `interp.c`/`interp_core.h` (interpreter), `lockstep.c` (recomp builds), `asset.c`
+  (`nanpa2.dat` writer and loader; `src/assets.c` picks asset or exe).
 - `src/hle/`: `hle.c` (import/COM thunks, overridden game functions by native address),
   `win32.c` (message queue, SDL events to WM_*, timer), `ddraw.c` (surfaces, Blt, palette),
   `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
@@ -62,7 +68,8 @@ and the block-by-block comparison of the two (`NANPA2_LOCKSTEP=1`, `src/x86/lock
 - `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
   minimp3, public domain).
 
-Dev hooks: `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
+Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
+`docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
 (screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.
 `NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`; `NANPA2_SAVE_DIR` also

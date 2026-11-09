@@ -20,8 +20,9 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 Two backends run the game code of `nanpa2.exe` (`-DNANPA2_BACKEND`, `--backend`):
 
-- `interp` (default): an x86 interpreter (`src/x86/interp.c`) loads the player's own
-  `nanpa2.exe` from the game folder at run time. The build needs neither the exe nor
+- `interp` (default): an x86 interpreter (`src/x86/interp.c`) that no longer executes any game
+  instruction; the game is C, and what it still reads from the exe is its built-in data,
+  which comes from `nanpa2.dat` (see "Game data"). The build needs neither the exe nor
   capstone, and the binary and `.app` hold nothing of the game (ctest `no_game_bytes`): this
   is the build to share, like xsystem4, the player supplies the game files.
 - `recomp`: `tools/recomp.py` lifts the game code of your `nanpa2.exe` (default
@@ -81,6 +82,19 @@ ninja -C build                 #   -DNANPA2_PYTHON=... (Python with capstone)
 Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` from
 `data1.cab` there (`unshield x data1.cab`). See `game/README.md`.
 
+`nanpa2.exe` is needed **once**. The engine reimplements the game code in C but still reads the
+exe's built-in data (tables, strings, the import directory, the start values of the
+globals); the first launch cuts those ranges (about 95 KB of data, no code) out of your
+exe into `nanpa2.dat`, in the game folder, or in the save folder if the game folder is not
+writable. `nanpa2 --make-assets [--game DIR] [--exe PATH] [--out FILE]` does it by hand. From
+then on the game runs from `nanpa2.dat` and the exe may be deleted; keep the file with the
+game folder (or in the save folder). `nanpa2.dat` is made on your machine from your copy, is
+never committed or shipped, and is checked at each start (a damaged or foreign file is
+refused; with the exe present it is made again). Without both `nanpa2.dat` and `nanpa2.exe`
+the game says so and stops. The developer modes that run the original code (`NANPA2_DIFF`,
+`NANPA2_FUZZ`, `NANPA2_START_ORACLE`, `NANPA2_INTERP`, `NANPA2_LOCKSTEP`, `--exe`, and the
+`recomp` build) load the whole exe instead and say so if it is missing.
+
 ## Run
 
 ```sh
@@ -96,7 +110,7 @@ still accepted.
 Without `--game` the game folder is looked up in this order: `NANPA2_GAME_DIR`; the folder
 remembered from an earlier choice; next to the executable or the `.app`, or in a `game` folder
 there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the repository's
-`game/`); `./game`. If none of them has `DATA/` and `nanpa2.exe`, a folder picker opens
+`game/`); `./game`. If none of them has `DATA/` and `nanpa2.dat` or `nanpa2.exe`, a folder picker opens
 (macOS) and the choice is remembered in `game-folder.txt` in the save folder
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.

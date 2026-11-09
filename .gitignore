@@ -2,6 +2,8 @@
 game/*
 !game/README.md
 *.iso
+# nanpa2.dat: the built-in data cut from the player's nanpa2.exe, local only
+nanpa2.dat
 # decompiled exe and Ghidra project: local only
 decomp/
 # builds

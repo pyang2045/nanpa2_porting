@@ -82,10 +82,12 @@ set(GAME_SOURCES
 set(SOURCES
   src/main.c
   src/launch.c
+  src/assets.c
   src/lzh.c
   src/gp4.c
   src/fsys.c
   src/x86/x86.c
+  src/x86/asset.c
   src/x86/interp.c
   src/hle/hle.c
   src/hle/crt.c
@@ -268,6 +270,12 @@ if(NANPA2_BACKEND STREQUAL "interp")
   add_test(NAME no_game_bytes COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/no_game_bytes.py"
     "${NANPA2_GAME_DIR}/nanpa2.exe" ${_scan})
   set_tests_properties(no_game_bytes PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+  # nanpa2.dat: cut from the exe, holds no game code; the game runs from it
+  # with the exe hidden and matches a run with the whole exe (about 2 min,
+  # headless; tests/asset_only.py)
+  add_test(NAME asset_only COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/asset_only.py"
+    $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/asset-only")
+  set_tests_properties(asset_only PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
 else()
   # Lockstep (about 30 s, headless): the interpreter shadows every block of
   # the recompiled code from launch to the title (src/x86/lockstep.c).

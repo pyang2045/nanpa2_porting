@@ -76,6 +76,11 @@ static int resolve(const char *rel, char *out, size_t cap)
 }
 #endif
 
+int fsys_path(const char *rel, char *out, size_t cap)
+{
+	return resolve(rel, out, cap);
+}
+
 FILE *fsys_open(const char *rel)
 {
 	char path[1024];

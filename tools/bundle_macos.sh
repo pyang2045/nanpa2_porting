@@ -12,8 +12,8 @@
 # signed ad hoc (install_name_tool breaks the signatures), and
 # LSMinimumSystemVersion is set to the highest minos of the files.
 #
-# No game data goes in; the game folder, nanpa2.exe included, is found at
-# run time (src/launch.c). An interp build (the default) holds nothing of the
+# No game data goes in; the game folder, with nanpa2.exe or the nanpa2.dat made
+# from it, is found at run time (src/launch.c, src/assets.c). An interp build (the default) holds nothing of the
 # game (ctest no_game_bytes); a recomp binary holds the game code lifted from
 # your nanpa2.exe, so a recomp app is for this machine only.
 set -eu

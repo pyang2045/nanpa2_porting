@@ -33,6 +33,56 @@ So the script VM 0x4060d4 owns all opcode handlers reached through its jump tabl
 (3,765 bytes). About a third of the functions are hand-written assembly with register
 arguments.
 
+## The asset: running without nanpa2.exe (src/x86/asset.c, src/assets.c)
+
+After Stage 6 no native game instruction runs (`NANPA2_NATIVE_REPORT=1`: 0), yet the interp build
+still loaded the whole exe, because the C reads the exe's initialized data at its native addresses
+through the `vm.h` accessors. `nanpa2.dat` holds exactly that data and no code, cut from the
+player's own exe on their machine (first launch, or `nanpa2 --make-assets`); the format is in
+re-notes.md. The source holds the format and the two address ranges kept, no bytes of the exe;
+the file is gitignored and never shipped.
+
+**What the engine touches.** `NANPA2_IMAGE_TRACE=FILE` (dev mode, `x86_ptr` marks every byte of
+the 0xc1000-byte PE image it hands out, 1 = data access, 2 = the interpreter's decoder; the
+file lists the touched runs at exit). Every read and write of the emulated memory goes through
+`x86_ptr`, bulk ones included, so a run's trace is complete for the paths it took (a bulk
+access marks its whole length, an upper bound). The traces were taken with the exe hidden
+(so an access to an omitted range reads a silent zero and is visible in the trace): explore
+seed 31 from a new game (60,000 frames, to s15.mes), seed 43 from saves32 (30,000 frames, to
+s5.mes), and the 300,000-frame runs of seeds 42 and 43 (turbo 2, to the town and beyond, 19 and 70
+MES files). All five agree on every region but the data (marked bytes there: 357 KB to 441 KB,
+the buffers), and in none of them was a byte of the game code, the rest of .text or .rsrc touched:
+
+| Region | Size | Touched |
+|---|---|---|
+| PE header 0x400000-0x401000 | 4096 | 8 bytes (e_lfanew, the import directory pointer) |
+| game code 0x401000-0x4077ad | 26,541 | **0** (neither read as data nor decoded) |
+| rest of .text 0x4077ad-0x41b000 | 79,955 | **0** (MP3 library, C runtime) |
+| .rdata 0x41b000-0x431000 | 90,112 | the import directory and names (0x41b000-0x41b18c), constants, 0x42fc4c-0x4304bf |
+| .data initialized 0x431000-0x4ab000 | 499,712 | 357-441 KB marked: tables, the script/work areas, the 322 KB image buffer 0x4562be-0x4a4cc6 (written) |
+| bss 0x4ab000-0x4c0000 | 86,016 | globals (zero at load) |
+| .rsrc 0x4c0000-0x4c1000 | 4096 | 0 |
+
+The interpreter's decoder never ran (flag 2 absent): every game address is an override that
+dispatches before the decode. The asset therefore keeps the header page and the whole of
+.rdata and the initialized .data rather than the traced bytes (a path no run took may read
+another table), and none of .text. Zero runs of 32 bytes or more are recorded, not stored (the
+.data is mostly zero): 96,053 bytes in all. The writer refuses a range that overlaps
+0x401000-0x4077ff and the loader checks the same; ctest `asset_only` also looks for every 64-byte
+run of the exe's .text in the file.
+
+**Without the code.** With only the asset the memory at 0x401000-0x4077ff is zero.
+`x86_code_absent` makes the interpreter's decoder stop with "native game code is not in memory"
+if anything ever tries to run it. `src/assets.c` loads the whole exe instead (and says so
+in the log, or stops when it is missing) for: `--exe`, the recomp build, `NANPA2_DIFF`,
+`NANPA2_DIFF_DIR`, `NANPA2_FUZZ`, `NANPA2_START_ORACLE`, `NANPA2_INTERP`, `NANPA2_LOCKSTEP`:
+those run the original code as the oracle.
+
+**Lookup.** Not those modes: `<game>/nanpa2.dat`, then `<save folder>/nanpa2.dat`; a file that is
+damaged or from another build is skipped. None usable and an exe present: the asset is made
+(game folder, else save folder, else the exe is loaded whole with a log line) and loaded, so the
+asset path is the normal one. Neither: "no nanpa2.dat and no nanpa2.exe", exit 1.
+
 ## Stage 6: the pump chain, the wipe, the click path, the tails (src/game/map_pump.c, wipe.c, loop.c)
 
 The last stage: no game function is left to run natively. `NANPA2_NATIVE_REPORT=1` counts the

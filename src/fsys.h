@@ -13,6 +13,10 @@ const char *fsys_root(void);
  * case-insensitively, since the CD mixes "MUSIC/00.mp3" with "DATA/01.GP4". */
 FILE *fsys_open(const char *rel);
 
+/* The host path of a game file (matched like fsys_open); 1 if it exists. A
+ * path is written either way (the file to create). */
+int fsys_path(const char *rel, char *out, size_t cap);
+
 /* Read a whole game file into a malloc'd buffer. */
 unsigned char *fsys_read(const char *rel, size_t *len);
 
