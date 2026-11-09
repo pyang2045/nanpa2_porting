@@ -295,6 +295,7 @@ static struct alias {
 	uint8_t *ptr;
 } aliases[MAX_ALIAS];
 static int naliases;
+uint8_t *x86_data_obj;
 static uint16_t alias_tab[X86_ALIAS_HI - X86_ALIAS_LO]; /* alias number + 1 per byte */
 
 void x86_alias(uint32_t addr, void *obj, uint32_t size)
@@ -307,6 +308,8 @@ void x86_alias(uint32_t addr, void *obj, uint32_t size)
 	memcpy(obj, x86_mem + (addr - MEM_BASE), size);
 	aliases[naliases] = (struct alias){ addr, size, obj };
 	naliases++;
+	if (addr == X86_ALIAS_LO && size == X86_ALIAS_HI - X86_ALIAS_LO)
+		x86_data_obj = obj;
 	for (uint32_t i = 0; i < size; i++)
 		alias_tab[addr - X86_ALIAS_LO + i] = (uint16_t)naliases;
 }
@@ -342,4 +345,40 @@ void x86_read_virtual(uint32_t a, void *dst, uint32_t n)
 		if (lo < hi)
 			memcpy((uint8_t *)dst + (lo - a), aliases[i].ptr + (lo - aliases[i].addr), hi - lo);
 	}
+}
+
+/* Dev check (NANPA2_DATA_CHECK=1): writes into the data area that no alias
+ * holds, i.e. state still in emulated memory (since R1 the alias covers all of
+ * it, so there must be none). The snapshot is taken when the game starts, the
+ * check when it ends; the differing ranges are listed. */
+static uint8_t *unaliased_snap;
+
+void x86_unaliased_snapshot(void)
+{
+	if (!getenv("NANPA2_DATA_CHECK"))
+		return;
+	unaliased_snap = malloc(X86_ALIAS_HI - X86_ALIAS_LO);
+	memcpy(unaliased_snap, x86_mem + (X86_ALIAS_LO - MEM_BASE), X86_ALIAS_HI - X86_ALIAS_LO);
+}
+
+int x86_unaliased_check(void)
+{
+	if (!unaliased_snap)
+		return 0;
+	uint32_t n = 0, lo = 0, hi = 0;
+	for (uint32_t a = X86_ALIAS_LO; a <= X86_ALIAS_HI; a++) {
+		int diff = a < X86_ALIAS_HI && !alias_tab[a - X86_ALIAS_LO] &&
+			   x86_mem[a - MEM_BASE] != unaliased_snap[a - X86_ALIAS_LO];
+		if (diff && lo && a - hi < 256) {
+			hi = a;
+		} else if (diff || (lo && a - hi >= 256) || (a == X86_ALIAS_HI && lo)) {
+			if (lo) {
+				fprintf(stderr, "data-check: unaliased bytes changed in 0x%x..0x%x\n", lo, hi);
+				n++;
+			}
+			lo = hi = diff ? a : 0;
+		}
+	}
+	fprintf(stderr, "data-check: %u changed ranges outside the aliases\n", n);
+	return (int)n;
 }

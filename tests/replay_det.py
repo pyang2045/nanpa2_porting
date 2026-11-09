@@ -82,8 +82,10 @@ def main():
     if flags(da) != flags(db):
         print("FAIL: the FLAG files differ between the runs")
         return 1
-    rc, out, _ = run(exe, game, work, "r1", ["--replay", ra], {})
-    if rc or "replay: ok" not in out:
+    # NANPA2_DATA_CHECK=2: all game state is in the C objects (src/game/state.h);
+    # a write into the data area that no alias holds fails the run (exit 4)
+    rc, out, _ = run(exe, game, work, "r1", ["--replay", ra], {"NANPA2_DATA_CHECK": "2"})
+    if rc or "replay: ok" not in out or "data-check: 0 changed" not in out:
         print(out[-2000:])
         print("FAIL: the replay did not match (exit %d)" % rc)
         return 1
