@@ -6,7 +6,8 @@
  * the scripts land where they did natively, and the FLAG file and the checkpoints
  * see the bytes they always did. The comments give the native address of each field,
  * and an address is also an index into G (game/gmem.h). Code names the field. G is
- * initialised from the asset (state_init) and is the only game state.
+ * initialised by code (state.c state_defaults) except for a few ranges of the game's own text, which
+ * come from the asset (state_init), and is the only game state.
  */
 #ifndef NANPA2_GAME_STATE_H
 #define NANPA2_GAME_STATE_H
@@ -69,7 +70,8 @@ struct save_image {
 			uint16_t menu_rows;   /* 0x445300 */
 			uint16_t menu_count;  /* 0x445302 */
 			uint16_t menu_run;    /* 0x445304 the menu loop runs while set */
-			uint8_t pad_306[6];   /* 0x445306 */
+			uint8_t pad_306[2];   /* 0x445306 */
+			uint32_t w_308;       /* 0x445308 @[0x1d], @[0x1e]: 0xffffffff at start (the engine reads it only as script data) */
 			uint16_t palette[16]; /* 0x44530c the base colours, 0x0GRB */
 			uint8_t pad_32c[16];  /* 0x44532c */
 			uint32_t segment[4];  /* 0x44533c script segment base addresses */
@@ -104,6 +106,7 @@ SAVE_CHECK(n.menu_list_ptr, 0x4452fau);
 SAVE_CHECK(n.menu_skip, 0x4452feu);
 SAVE_CHECK(n.menu_rows, 0x445300u);
 SAVE_CHECK(n.menu_run, 0x445304u);
+SAVE_CHECK(n.w_308, 0x445308u);
 SAVE_CHECK(n.palette, 0x44530cu);
 SAVE_CHECK(n.segment, 0x44533cu);
 SAVE_CHECK(n.pic_rect, 0x44538au);
@@ -337,9 +340,22 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
  * engine: nothing reads it. */
 #define DATA_BASE 0x431000u
 #define DATA_END 0x4c0000u
+struct data_head {
+	uint8_t pad_000[0x30];          /* 0x431000 native function pointers (dead) */
+	char cd_prefix[4];              /* 0x431030 drive of the game's CD, "X:\\"; "" when it is the folder */
+	uint8_t pad_034[0x140 - 0x34];  /* 0x431034 the native file-name formats ("%s%s", ".GP4", "DATA\\%s", "FLAG",
+	                                 * "MUSIC\\%02d.WAV", "SPEECH\\...") and the MCI and error texts: the C holds
+	                                 * its own formats and nothing reads these */
+	char msg_no_cd[0x18];           /* 0x431140 the message of the no-CD box (game text, from the asset) */
+	char msg_no_cd_title[8];        /* 0x431158 its title (game text, from the asset) */
+	uint8_t pad_160[0x4312ccu - 0x431160u]; /* 0x431160 window class and title, more texts: not read */
+};
+_Static_assert(offsetof(struct data_head, cd_prefix) == 0x30, "cd_prefix");
+_Static_assert(offsetof(struct data_head, msg_no_cd) == 0x140, "msg_no_cd");
+_Static_assert(offsetof(struct data_head, msg_no_cd_title) == 0x158, "msg_no_cd_title");
+_Static_assert(sizeof(struct data_head) == 0x4312ccu - 0x431000u, "data_head");
 struct game_state {
-	uint8_t head[0x4312ccu - DATA_BASE]; /* 0x431000 .data head: file name formats and strings
-	                                      * (read-only) and the CD prefix at 0x431030 */
+	struct data_head head;               /* 0x431000 .data head */
 	struct anim_state an;                /* 0x4312cc */
 	struct map_data map;                 /* 0x4313c6 */
 	uint8_t script[SCRIPT_SIZE];         /* 0x435e78 MES image, segment 0 */
@@ -371,8 +387,8 @@ GS_CHECK(cursor_bits, CBITS_BASE);
 _Static_assert(sizeof(struct game_state) == DATA_END - DATA_BASE, "game_state covers 0x431000-0x4c0000");
 extern struct game_state G;
 
-/* After the asset is loaded (asset.h): G takes the data area of its image, and the image is
- * released. 1 ok. */
+/* After the asset is loaded (asset.h): G is set to its start values (in code) and the ranges of game
+ * text (asset_content) are copied from the image, which is then released. 1 ok. */
 int state_init(void);
 
 /* Field access with the width and zero extension of rd8/rd16/wr8/wr16 */

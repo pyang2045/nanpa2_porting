@@ -93,7 +93,7 @@ Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` 
 `data1.cab` there (`unshield x data1.cab`). See `game/README.md`.
 
 `nanpa2.exe` is needed **once**. The engine reimplements the game code in C but still reads the
-exe's built-in data (tables, strings, the start values of the globals); the first launch cuts those ranges (about 12 KB of data, no code) out of your
+exe's built-in data (tables, strings, the start values of the globals); the first launch cuts those ranges (about 120 bytes: the game's own messages, no code) out of your
 exe into `nanpa2.dat`, in the game folder, or in the save folder if the game folder is not
 writable. `nanpa2 --make-assets [--game DIR] [--exe PATH] [--out FILE]` does it by hand. From
 then on the game runs from `nanpa2.dat` and the exe may be deleted; keep the file with the

@@ -628,10 +628,29 @@ The asset shrank after R4 (asset version 2): `state_init` is its only consumer a
 holds the initialized .data only (12,170 bytes in 18 ranges, about 13 KB stored). Poisoning the image
 outside `G` before `state_init` left all four goldens matching. Version 1 files are still read.
 
+**G from code.** Of the 12,170 non-zero bytes of the initialised .data, `state_defaults`
+(src/game/state.c) now defines what the engine reads, as typed fields: the CD prefix `"A:\\"`
+(0x431030, `data_head.cd_prefix`), the animation slots' start 0xf4, the idle value 0xff and the script
+random seed 0x8801 (0x4312cc-0x4313c4), the map's last_sprite, last_click and last_area 0xffff, the
+sprite random seed 0x8a, the tile offset table (derived: 40 tiles of 2 bytes per row, rows 1280 bytes
+apart; 0x4355fa), the script name `start.mes` and its DOS terminator bytes (0x444e78), the menu input
+mask 0x7e, text window right 79 and bottom 399, text colour 7, line height 16, advance 2 (0x4452e1), the
+word 0xffffffff at 0x445308, the 16 base colours (derived, 0x44530c), the FLAG name `flag0`
+(0x445d86) and the fade length 8 (0x44628e). Not reproduced because nothing reads it: the native
+function pointers (0x43100c-, 0x435576-0x4355fa, 0x435dfc-0x435e60, 0x4313d9), the native file-name
+format, MCI and error strings of the head (0x431034-0x4312cc: the C holds its own formats), and 6,586
+bytes at 0x4a72c0-0x4aac42 (the MP3 library's tables inside the ANI buffer, overwritten when the file is
+read). Left in the asset (asset version 3, 124 bytes): the no-CD message and title (0x431140, 0x431158) and
+the 7-byte text at 0x445c71, which are the game's own text. Check: with the whole image loaded and the
+defaults applied, the bytes of G differ from the image only in the ranges listed as unread; the four
+`golden_r4` replays match every `li.*` and `raw.clock` checkpoint on a build that starts from zero for
+those ranges. `raw.gdata` of the old recordings no longer matches (it hashed the unread bytes), so the
+goldens need `NANPA2_REPLAY_CHECK=li,raw.clock` from here on or a new recording.
+
 ### Architecture summary (R4 and after)
 
 ```
-nanpa2.dat / nanpa2.exe --asset.c--> image --state_init--> G (struct game_state, native layout)
+state_defaults (code) + nanpa2.dat (game text only) --state_init--> G (struct game_state, native layout)
                                                             |
  SDL events --window.c--> WM_* queue --win_pump--> game_wndproc --> G.rt.input_bits, cursor ...
  16 ms timer (clock.c) ---------------------------> game_timer_tick --> G.rt.frame, fades

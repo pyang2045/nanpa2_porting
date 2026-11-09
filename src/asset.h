@@ -6,7 +6,8 @@
  * format in re-notes.md "nanpa2.dat") and holds only data ranges, no game code. Loading it
  * (or the exe, for the dev modes) produces an image laid out as the exe's loader would: the byte
  * at virtual address a is image[a - IMAGE_BASE]. The game state `G` is initialised from the
- * data range of the image (state_init); the image is released after that.
+ * defaults in code (state_defaults) and from the few ranges of game text in the image
+ * (asset_content); the image is released after that.
  */
 #ifndef NANPA2_ASSET_H
 #define NANPA2_ASSET_H
@@ -19,6 +20,12 @@
 /* The game code of the exe: it is never part of the asset */
 #define GAME_CODE_START 0x00401000u
 #define GAME_CODE_END 0x00407800u
+
+/* The ranges of the image that G cannot be given by code: the game's own text, kept in the asset
+ * (state_init copies exactly these; an older asset that holds more is read just the same) */
+struct asset_range { uint32_t lo, hi; };
+extern const struct asset_range asset_content[];
+extern const unsigned asset_content_n;
 
 /* 1 if the first n bytes of a file are the header of that nanpa2.exe (the Taiwan release built
  * 2000-07-10: the native addresses throughout the engine are this build's) */
