@@ -57,8 +57,8 @@ while [ $# -gt 0 ]; do
 done
 
 case $backend in
-'' | recomp | interp) ;;
-*) echo "build.sh: --backend is interp or recomp" >&2; exit 2 ;;
+'' | interp) ;;
+*) echo "build.sh: --backend is interp (the recomp backend was removed in R2)" >&2; exit 2 ;;
 esac
 recomp=0
 [ "$backend" = recomp ] && recomp=1

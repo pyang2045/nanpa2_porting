@@ -7,8 +7,7 @@ from the asset alone.
    its bytes may be a 64-byte run of that code (or of the rest of .text);
 2. a game folder without nanpa2.exe (symlinks to the real one) and with the
    asset in it runs headless to a scripted point on game time
-   (NANPA2_INPUT_CLOCK=frames) with no trap and no native instruction
-   (NANPA2_NATIVE_REPORT), and its screenshots and HLE call trace equal
+   (NANPA2_INPUT_CLOCK=frames) with no trap, and its screenshots and HLE call trace equal
    those of the same run with the whole exe loaded (NANPA2_INTERP=1);
 3. a folder with the exe and no asset makes one at the first launch;
 4. a folder with neither stops with a clear message.
@@ -50,7 +49,7 @@ def run(name, gamedir, extra=None, quit_ms=None, timeout=300, shots=False):
     save = os.path.join(scratch, name + "-save")
     os.makedirs(save, exist_ok=True)
     env = dict(os.environ, NANPA2_HEADLESS="1", NANPA2_SAVE_DIR=save, NANPA2_INPUT_CLOCK="frames",
-               NANPA2_NATIVE_REPORT="1", NANPA2_HLETRACE="1", **(extra or {}))
+               NANPA2_HLETRACE="1", **(extra or {}))
     if quit_ms:
         env["NANPA2_INPUT"] = "quit,%d" % quit_ms
     if shots:
@@ -99,8 +98,6 @@ for name, d, extra in (("asset", hidden, {}), ("exe", whole, {"NANPA2_INTERP": "
     p = run(name, d, extra, quit_ms=24000, shots=True)
     if p.returncode != 0 or "x86 trap" in p.stderr or "WARNING" in p.stderr:
         fail("%s run: exit %d\n%s" % (name, p.returncode, p.stderr[-1500:]))
-    if "native: 0 game instructions" not in p.stderr:
-        fail("%s run: native game code ran:\n%s" % (name, p.stderr[-800:]))
     want = "assets: " + os.path.join(d, "nanpa2.dat") if name == "asset" else "loaded whole"
     if want not in p.stderr:
         fail("%s run did not log %r" % (name, want))

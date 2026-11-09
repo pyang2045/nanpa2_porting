@@ -1,3 +1,8 @@
+> **Historical.** This file describes the reimplementation as it was built (units overriding native
+> functions, pieces, call exits, the differential harness, the interpreter). R2 (docs/refactor.md)
+> removed all of that machinery: the game is ordinary C now. The inventory and the format notes
+> below stay as the record of what each function does; addresses in comments are still the native ones.
+
 # Reimplementing the game logic
 
 The port runs the game code of `nanpa2.exe` in an interpreter (`src/x86/interp.c`, the default)

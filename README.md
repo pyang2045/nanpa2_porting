@@ -18,18 +18,11 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 ## Build
 
-Two backends run the game code of `nanpa2.exe` (`-DNANPA2_BACKEND`, `--backend`):
-
-- `interp` (default): an x86 interpreter (`src/x86/interp.c`) that no longer executes any game
-  instruction; the game is C, and what it still reads from the exe is its built-in data,
-  which comes from `nanpa2.dat` (see "Game data"). The build needs neither the exe nor
-  capstone, and the binary and `.app` hold nothing of the game (ctest `no_game_bytes`): this
-  is the build to share, like xsystem4, the player supplies the game files.
-- `recomp`: `tools/recomp.py` lifts the game code of your `nanpa2.exe` (default
-  `game/nanpa2.exe`) to C in the build folder, with Python and capstone. For development and
-  reference only; never share it. It also holds the interpreter: `NANPA2_INTERP=1` runs that
-  instead, and `NANPA2_LOCKSTEP=1` checks the two against each other block by block (ctest
-  `lockstep`).
+The game is C (`src/game`); no game instruction of `nanpa2.exe` runs. What it still reads from the exe
+is its built-in data, which comes from `nanpa2.dat` (see "Game data"). The build needs neither the exe
+nor capstone, and the binary and `.app` hold nothing of the game (ctest `no_game_bytes`): this is the
+build to share, like xsystem4, the player supplies the game files. (The `recomp` backend, which lifted
+the game code with capstone, and the interpreter were removed in refactor stage R2.)
 
 The scripts check the tools, name the packages
 when something is missing (they never run `sudo`), and pass `--exe`, `--game-dir`,
@@ -91,9 +84,8 @@ then on the game runs from `nanpa2.dat` and the exe may be deleted; keep the fil
 game folder (or in the save folder). `nanpa2.dat` is made on your machine from your copy, is
 never committed or shipped, and is checked at each start (a damaged or foreign file is
 refused; with the exe present it is made again). Without both `nanpa2.dat` and `nanpa2.exe`
-the game says so and stops. The developer modes that run the original code (`NANPA2_DIFF`,
-`NANPA2_FUZZ`, `NANPA2_START_ORACLE`, `NANPA2_INTERP`, `NANPA2_LOCKSTEP`, `--exe`, and the
-`recomp` build) load the whole exe instead and say so if it is missing.
+the game says so and stops. `--exe` and `NANPA2_INTERP=1` load the whole exe
+instead and say so if it is missing.
 
 ## Run
 

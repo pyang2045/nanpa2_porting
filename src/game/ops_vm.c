@@ -163,9 +163,8 @@ int vm_op_wait(void)
 {
 	COST(1); /* call 0x406acc */
 	vm_wait_click();
-	cpu.r[EBX] = SV(text_colour);
 	COST(2);
-	game_clear_text_window(cpu.r[EBX]); /* 0x406b24: draws, no waiting */
+	game_clear_text_window(SV(text_colour)); /* 0x406b24: draws, no waiting */
 	return loop_at(0x406607);
 }
 
@@ -291,11 +290,10 @@ int vm_op_flag_file(void)
  * place value fits, so a value too big for the digits gives a "digit"
  * above 9, as natively. Out: AX = 0, BX = the last digit's code, CX = 1,
  * EDI past the digits (DI only, for ASCII), DL/DH kept. */
-static void game_format_number_regs(void)
+static void format_number(uint32_t value, uint32_t dl, uint32_t dh)
 {
 	static const uint16_t place[5] = { 10000, 1000, 100, 10, 1 };
-	uint32_t edi = 0x445ce6, ax = cpu.r[EAX] & 0xffff, bx = cpu.r[EBX];
-	uint32_t dl = cpu.r[EDX] & 0xff, dh = (cpu.r[EDX] >> 8) & 0xff;
+	uint32_t edi = 0x445ce6, ax = value & 0xffff, bx = 0;
 	COST(3);
 	if (dh) {
 		wr8(edi++, VM_STRING);
@@ -333,10 +331,6 @@ static void game_format_number_regs(void)
 		}
 		COST(5);
 	}
-	cpu.r[EAX] = (cpu.r[EAX] & 0xffff0000u) | ax;
-	cpu.r[EBX] = bx;
-	cpu.r[ECX] = (cpu.r[ECX] & 0xffff0000u) | 1;
-	cpu.r[EDI] = edi;
 }
 
 #define NUMBER_TEXT 0x445ce6u   /* 0x4069fd writes the digits here */
@@ -349,13 +343,8 @@ int vm_op_print_number(void)
 	uint32_t a;
 	vm_parse_args(&vm_pc, &a);
 	uint32_t f = SV(number_format);
-	/* AX = the value, DL/DH from the format byte; the formatter reads the rest
-	 * of EBX/EDX as the native handler left them (upper halves are dead: it
-	 * keeps and clears only the words it names) */
-	cpu.r[EAX] = a;
-	cpu.r[EDX] = (cpu.r[EDX] & 0xffff0000u) | (f & 0xf0) << 8 | (f & 0x0f);
 	COST(5);
-	game_format_number_regs();
+	format_number(a, f & 0x0f, (f & 0xf0) >> 4 ? 1 : 0);
 	uint32_t saved = vm_pc;
 	vm_pc = NUMBER_TEXT - VM_SCRIPT;
 	COST(4);
