@@ -2,6 +2,8 @@
 > functions, pieces, call exits, the differential harness, the interpreter). R2 (docs/refactor.md)
 > removed all of that machinery: the game is ordinary C now. The inventory and the format notes
 > below stay as the record of what each function does; addresses in comments are still the native ones.
+> R4 then removed the emulated PC as well (no `src/x86`, no HLE thunks: the game calls the platform API in
+> `src/platform` and works on `G` alone); `src/hle/*` and `src/x86/*` named below are gone, see docs/refactor.md "R4".
 
 # Reimplementing the game logic
 

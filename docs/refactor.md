@@ -1,6 +1,9 @@
 # Refactor: from the emulated machine to a free-standing C engine
 
-The game logic is C (docs/reimpl.md) but still runs inside the model of the 32-bit PC it was
+(This is the plan and the log of the refactor as it went; the "R4" section at the end describes the
+engine as it is now, and its last subsection is the architecture summary.)
+
+The game logic is C (docs/reimpl.md) but ran inside the model of the 32-bit PC it was
 written for: its state is bytes of emulated memory at native addresses (`rd32(0x446292)`), its
 units pass values in emulated registers and push native stack frames, its pace comes from
 instruction charges (`X86_COUNT`) at 25 MIPS, and Win32, DirectDraw and the C runtime are reached
@@ -14,7 +17,7 @@ reimplementation is then no longer byte for byte the original, the differential 
 | R1 | game state in C structs instead of emulated memory | done: all of the data area is one C object; what stays addressed and why is listed below |
 | R2 | ordinary C calls instead of register and stack conventions (`cpu.r[]`, `push32`, `go(ra)`, jump units) | done: see "R2" below |
 | R3 | real-time pacing that keeps the original speed (no per-unit charges) | done: see "R3" below |
-| R4 | direct calls into the platform layer instead of HLE thunks | not started |
+| R4 | direct calls into the platform layer instead of HLE thunks; no emulated address space | done: see "R4" below |
 
 ## R0: deterministic mode, recording and replay
 
@@ -439,7 +442,7 @@ logs. Result against the golden_r2 runs:
   fade wait, which gained `ctl_work_us(PACE_SPIN_US)`: they spin without a pump on a flag the timer
   callback sets, and the timer used to run from the polls they no longer have.
 
-### Left for R4 and later
+### Left for R4 and later (all done in R4 except the map code's indexing, which stays on purpose)
 
 - `hle_invoke`, the C runtime and Win32 thunks, the emulated stack, heap and address space (R4).
 - The `native_pc` and `exit_pc`/`loop_pc` parameters of the opcode helpers in ops.c, ops_sys.c and
@@ -457,3 +460,193 @@ logs. Result against the golden_r2 runs:
   stops being aliased and its pointer-valued fields (segment bases, animation `start`/`pc`,
   locked pixel pointers) become indices or C pointers with conversion at the FLAG save and load.
   R3's leftovers are listed at the end of the R3 section.
+
+## R4: a free-standing C engine
+
+R4 removed the last of the model of the PC: the Win32, DirectDraw, DirectSound and C runtime thunks
+(`hle_invoke`, `HLE()`, the import table and the COM vtables), the emulated stack, heap and 32-bit
+address space (`src/x86`), the aliases of `G`, and the checkpoint keys of the emulated machine. The
+game logic now calls a small platform API, and `G` is an ordinary C object. Commits (oldest first,
+on top of 5b37d43): 8123dcd (the checkpoint key `raw.gdata`), aee4867 (files and sound),
+b168ef3 (surfaces, text, window, timer: `hle_invoke` and the thunks go), 5d5612e (`src/x86`,
+the FLAG serializer, the dead parameters), f40feb6 (`src/hle` dissolved into `src/platform` and
+`src/dev`), b55d64f (comments, includes, build scripts), f1bd5f8 (self-test), and the documentation
+commits after them.
+
+### The checkpoint keys, and why the recordings were re-recorded first
+
+`raw.data` hashed the emulated data area, which held the surface handles, the DirectDraw lock
+descriptor and the locked pixel pointers: addresses of the emulated heap. Once surfaces are platform
+objects those words cannot keep their values, so before anything else changed (8123dcd, on the R3
+code) a new key was added beside the old ones: **`raw.gdata`**, the hash of the whole of `G` with the
+fields that hold platform values zeroed (`platform_fields[]` in `src/game/state_view.c`: `rt.surface`,
+`sc.scratch_surface`, `hwnd`, `hinstance`, `font`, `surface_desc`, `lock_ptr`, `surface_desc_rest`,
+`ddraw`, `palette_obj`, `timer_id`, and the three locked pointers of `map.v`; the pitches, the segment
+bases, the animation addresses and every other word stay in). That commit also made `--replay` with
+`--record` write the replayed messages, so a golden can be carried over to a new key set by replaying
+it. The procedure: replay the four `golden_r3` recordings on 5b37d43 + that commit, with
+`--record`: every old key matched (`replay: ok` for all four), the new recordings' messages equal the old
+ones and their `li.*` and `raw.clock` equal too (`replay_diff.py --li` says "identical" between a
+`golden_r3` and a `golden_r4` recording), and they carry `raw.gdata` as well. These are `golden_r4`
+(kept outside the repository, with the old keys still in the files). Every later commit replays all
+four of them.
+
+| Key | Now |
+|---|---|
+| `li.frame`, `li.screen`, `li.pal`, `li.save`, `li.mes`, `li.files`, `li.vm`, `li.flags` | unchanged; `li.save` is the export of the FLAG serializer |
+| `raw.clock` | unchanged (the virtual microseconds) |
+| `raw.gdata` | new: hash of `G` with the platform words zeroed; same value in R3 and R4 code |
+| `raw.cpu`, `raw.data`, `raw.heap`, `raw.stack`, `raw.pg` | retired with the emulated machine. A recording that has them still replays: the keys the live run does not produce are skipped (`replay.c`, `replay_diff.py`) |
+
+`NANPA2_DATA_CHECK` (a snapshot of the data area outside the aliases) is retired: there are no
+aliases and nothing outside `G`; an access that leaves `G` traps (below). `replay_det` no longer runs it.
+
+### The platform API
+
+Game code calls these directly (no thunks, no argument frames, no emulated memory); the host
+implements them in `src/platform`.
+
+| Header | What the game uses | Replaces |
+|---|---|---|
+| `platform/files.h` | `files_open(path, mode)` with the game's paths (`DATA\x`, `Q:\DATA\x`, `FLAGn`), `files_size`, `files_drive_is_cd`; the save folder, case rules and the open log are inside | fopen/fread/fwrite/fclose/malloc/sprintf/strrchr/_stricmp... of `crt.c`, GetDriveTypeA |
+| `platform/surface.h` | `surf_create`, `surf_lock` (pixels and pitch), `surf_size`, `surf_set_colorkey`, `surf_has_colorkey`, `surf_blt_fast`, `surf_fill`, `pal_set`, `screen_snapshot`, `screen_present`, `screen_wait_vblank` | DirectDraw objects, Lock/Unlock, BltFast/Blt, SetEntries, WaitForVerticalBlank |
+| `platform/text.h` | `text_init`, `text_font_create`, `text_draw(surface, x, y, font, bytes, len, fg, bg, opaque)` | GDI: CreateFont, GetDC, SelectObject, SetTextColor/BkColor/BkMode, TextOut |
+| `platform/window.h` | `win_open(handlers)`, `win_show`, `win_post`, `win_pump`, `win_timer_start/stop`, `win_show_cursor`, `win_warp_cursor`, `win_message_box`; WM_* numbers | RegisterClass/CreateWindow/ShowWindow, PostMessage, PeekMessage, timeSetEvent, ShowCursor, SetCursorPos, MessageBox |
+| `platform/sound.h` | `sound_init/shutdown`, `sound_music_play/stop/pause`, `sound_voice_play/stop` | the sound overrides called by native address |
+| `platform/logo.h`, `platform/clock.h` | `logo_play`, `clock_*` (pacing, R3) | the logo override |
+
+Choices: surfaces are named by 32-bit **handles** (kept in `G.rt.surface[]`, so the script's unchecked
+surface numbers still index words of `G`), with their pixels in plain memory and `surf_lock` returning
+the pointer (the lock is a formality); every surface has `SURF_SLACK` (1 MiB) of slack each side, because the
+original ran over the end of a surface into the next heap block when a script's rectangle was out of
+range, and a write that lands in the slack is harmless. The primary surface's handle is a constant
+(`SURF_PRIMARY_HANDLE`, the value the emulated heap gave it): the script register S receives the last
+unlock's result, which is the screen's handle after an off-screen surface was unlocked, and it is in the
+saved image. Costs of the time model (`ctl_work_us`) are charged by the game at the points they were
+charged before (blit, fill, glyph, decode), not by the platform. The Win32-message emulation stays in
+`platform/window.c` as an implementation detail: the host's events become WM_* messages in a queue and
+`win_pump` hands one to the game's window procedure (`game_wndproc`), because the scripts depend on
+Windows' way of delivering input (button down and up as separate messages, key repeat dropped, mouse
+moves coalesced, input as bits that a click handler and a wait loop poll). The timer tick
+(`game_timer_tick`, native 0x4028c0) is game code in `src/game/timer.c`; the platform calls it.
+
+### G addresses, and pointer-valued state
+
+`G` stays one contiguous object in the native layout. The values the game keeps in it that the
+original used as addresses are kept as they were, as **G addresses**: integers in the original's numbering
+(0x431000-0x4c0000) that index `G` (`g_ptr(a, n)` in `src/game/gmem.h` is `(uint8_t *)&G + (a - 0x431000)` after a
+bounds check). They are not host pointers and nothing in `G` is. The reason is the unchecked indices
+("Out-of-range indices", above): a slot number past 9, a surface number past 3, a tile offset
+past 1000 or an offset past the end of a segment read and write the bytes after the member, which needs `G` to be
+contiguous and an address to be a position in it. The numbering is the original's because the FLAG
+file holds the segment bases and the data hash covers them. What each address-valued word became:
+
+| State | Held | Now |
+|---|---|---|
+| script segment bases `G.save.n.segment[4]`, the VM's program counter and labels (offsets), string and block arguments | in the FLAG image / G | G addresses and offsets, unchanged; the serializer does not take the segment bases from a file (below) |
+| animation slot `start`, `pc`, `loop[2]` (addresses in the ANI file) | G | G addresses, unchanged (`anim.c`) |
+| the locked pixel pointers (`G.map.v.locked_*`, `G.sc.lock_ptr`) and the lock descriptor | G, emulated heap addresses | C pointers in `map_draw.c`'s `lk` and local variables; the G words are unused (kept for the layout) |
+| surface and palette objects, DirectDraw object, window, font and timer handles | G, emulated heap addresses | platform handles for surfaces and fonts (`G.rt.surface`, `G.sc.scratch_surface`, `G.sc.font`); the rest unused |
+| `G.rt` word at 0x445cdc (the native top ESP) | G | `pad_cdc`: outside the FLAG image, dead since R3 |
+
+An access that leaves `G` used to fall through to the emulated memory (zeros, read-only data, the heap, the
+stack); it now traps (`game_fault`, "game memory fault"), as does a file that would run past the end of
+the data (`game_file_load` knows the room it has), an ANI/GP4 stream that does not decode, a surface
+number that names no surface, a script opcode outside the native tables and the other
+cases that were `x86_trap` (now `game_trap`, which prints the native address of the code that would
+have run, the frame, the script and the script offset). `game_divide_error` is the expression
+divide by zero.
+
+### The FLAG serializer
+
+`state_save_export` and `state_save_import` (`src/game/state_view.c`) are the one place the state is
+converted to and from the file. The file is `G.save`, 0xc00 bytes, in the original's layout (all
+little-endian, packed, each field `_Static_assert`ed at its offset): the running script's name (32 bytes, 0x0),
+the 4-bit flags (0x400 bytes, 0x20, two per byte), registers `@`..`Z` (27 x u16, 0x420), the word array `@[0..]`
+from 0x456 with the named words of `struct save_image` (map selector, surface select, segment select, text
+delay and flags, mouse, the text window and cursor, colour, size and advance, the menu list pointer, rows and
+count, the 16 base palette words at 0x494, the four segment bases at 0x4c4, the last picture's rectangle at
+0x512, then the work buffer to the end). Fields that hold addresses: **only the four u32 segment bases**; every
+other field is a value. Export writes the bases as the original's addresses; import takes everything from the
+file except the bases, which the VM set-up that follows every load (`vm_init`) derives again, so an old
+or hand-made file cannot put a bad address into the engine. A short file leaves the rest of the state as it was
+(as the original's read did); a longer one is read up to 0xc00 bytes (the original overran into the words after the
+image, undefined). The op `04 21` loads and saves through them (`ops_vm.c`), and the checkpoint `li.save` and
+`NANPA2_SAVETEST` use the export.
+
+### Verification
+
+- **Goldens**: the four `golden_r4` recordings (newgame 271 checkpoints, town 331, saveload 33, menu 161) replay
+  with every checkpoint matched on `li.*`, `raw.clock` and `raw.gdata` after every chunk (files, sound,
+  surfaces/text/window, `src/x86`, the directory move) and on the final commit twice (`fin1`, `fin2`), headless, scratch
+  save folders.
+- **Saves are byte-compatible**: the replays of newgame and town write FLAG0 and FLAG6 during the run (Prologue
+  saves); the files the final build wrote are byte-identical (3072 bytes each, same `cksum`) to those 5b37d43 wrote for the
+  same recorded input, for all four goldens. The install's own `FLAG0..6` (copied; `game/` untouched) were loaded by a bot
+  run recorded on 5b37d43 (seed 41, 8000 frames: the title's Main item reads `flag6`, then OPEN1) and replayed on the
+  final build: 33 checkpoints matched (`li.save`, `li.files`, `li.mes` included), all seven files unchanged. By
+  construction the format is the old one (the layout asserts did not change) and the original's own load code is
+  the format's definition, as before.
+- **Long run**: 300000 frames of the bot (seed 48, deterministic, speed 0, from the town saves): 4800.3 s of game time
+  in 45 s, TOWN.MES opened 7 times, 513 file opens, no trap and no warning; the 5b37d43 binary on the same run opens the
+  same 513 files in the same order and writes identical FLAG0 and FLAG6.
+- **ctest**: selftest (now through the serializer), replay_det (5.6 s instead of about 35: the engine is faster
+  without the emulated stack), wavcheck, no_game_bytes, asset_only (recordings of an asset run and a whole-exe run
+  must be equal), smoke (skipped: no visible screen).
+
+### Portability audit
+
+The code assumes a **64-bit little-endian host**; `state.h` has an `#error` for other byte orders, and no code
+depends on the width of `long`, `size_t` or a pointer (`uint32_t` for G addresses, `uint8_t *` for pixels, `size_t`
+for sizes). What was checked: a syntax-only compile of every source with `-Wshorten-64-to-32 -Wpointer-to-int-cast
+-Wint-to-pointer-cast -Wcast-align -Wformat=2 -Wsign-compare` (the former `guest()` casts of pointers to
+`uint32_t` are gone with the emulated memory; the remaining narrowing is intentional 16- and 8-bit register and
+field arithmetic of the scripts, plus minimp3's own `size_t` to `int`; the one alignment cast of game data, the
+palette copy, now goes through a local array); the packed structs (`#pragma pack(1)` with the offsets
+asserted) are never pointed into by address-of except the anim slot, which is packed too, so unaligned members are
+accessed by the compiler's packed access; the `-m64` question is moot on this machine (arm64 is LP64) and the Windows
+LLP64 difference does not touch the game (`long` appears only in `ftell` and file sizes, and in the presenter's counters). Not available here: a 32-bit,
+big-endian or Windows build; `tools/build_msys2.sh` stays untested. `getline` (replay.c), `__typeof__` and
+`__builtin_expect` are GNU/POSIX (MSYS2 GCC has them, MSVC does not).
+
+### What the platform's behaviour changed (and what did not)
+
+Not changed: every observable of the goldens. Changed, all in cases the original left undefined: a script
+that writes outside `G` or a file that runs past the data now stops with a trap instead of writing into
+whatever lay behind; a surface rectangle that leaves the surface by more than the slack
+would fault; the order of the unchecked-index behaviours inside `G` is as before. Retired
+dev variables: `NANPA2_DATA_CHECK`, `NANPA2_HLETRACE` (the HLE call trace),
+`NANPA2_IMAGE_TRACE` (which bytes of the exe the run touched) and `NANPA2_INTERP` (now
+`NANPA2_LOAD_EXE=1`: the data from the whole exe instead of nanpa2.dat, for the asset test).
+
+### Architecture summary (R4 and after)
+
+```
+nanpa2.dat / nanpa2.exe --asset.c--> image --state_init--> G (struct game_state, native layout)
+                                                            |
+ SDL events --window.c--> WM_* queue --win_pump--> game_wndproc --> G.rt.input_bits, cursor ...
+ 16 ms timer (clock.c) ---------------------------> game_timer_tick --> G.rt.frame, fades
+                                                            |
+ src/game: script VM (loop.c ops*.c vm.c expr.c), text, anim, map*.c, screen.c, wipe.c, startup.c, file.c
+        |  reads and writes G by field names and G addresses (gmem.h)
+        |  calls the platform API: files.h surface.h text.h window.h sound.h  (and ctl_work_us for time)
+        v
+ src/platform: files.c surface.c text.c window.c sound.c logo.c clock.c present_*.{c,m} -> SDL2 (+ Metal)
+ src/dev: replay.c (checkpoints over G and the screen), explore.c, dev.c, status.c
+```
+
+Control flow is direct style (R2): waits are loops around `ctl_pump()`, a quit unwinds with `setjmp`/`longjmp`
+to `ctl_catch`. Time is the explicit model of `pace.h` (R3). State is `G` and nothing else; the platform's
+objects (surfaces, palette, fonts, window, audio) hold no game state the game reads except through the handles and
+pointers it was given. The checkpoints hash the screen, the palette, the FLAG image, the files and scripts reached,
+the game clock and `G` (platform words masked).
+
+### Left
+
+- The map code still indexes its members by byte offset (`seg1_ptr`, `cursor_plane`, `hist_*`) to keep the
+  unchecked-index behaviour; that is the contract of `G` and is documented where it is used.
+- `G` has words nothing reads or writes any more (the DirectDraw lock descriptor, `ddraw`, `palette_obj`,
+  `timer_id`, `hwnd`, `hinstance`, the three `locked_*`, `pad_cdc`): they are kept for the layout, marked in
+  `state.h`, and masked in the data hash.
+- Untested: the Linux and Windows builds, a 32-bit or big-endian host.
+- `docs/reimpl.md` is the historical inventory of the 142 native functions.

@@ -29,50 +29,48 @@ addresses.
 
 ## Layout
 
-The game logic is C (`src/game/`, ordinary calls and typed state: `docs/refactor.md`, R2). The
-only thing of the original machine it still touches is the emulated address space (`src/x86/`) that
-its state `G` (`src/game/state.h`, the whole data area 0x431000-0x4c0000 in native layout) is aliased
-into, and the thunk layer below: Win32, DirectDraw, COM and C runtime calls are made by native
-address through `hle_invoke` (`src/game/ctl.h`), which pushes the arguments on the emulated stack and
-calls `hle_call`. No game instruction runs: nothing decodes `nanpa2.exe` code. The game needs only
-the exe's built-in data (tables, strings, import directory, globals' start values), which
-`src/x86/asset.c` cuts once from the player's `nanpa2.exe` into `nanpa2.dat` (first launch or
-`nanpa2 --make-assets`; local, gitignored, never shipped; no code bytes). The game then runs
-without the exe (`--exe` and `NANPA2_INTERP=1` still load the whole exe; `src/assets.c` decides).
-The build needs neither the exe nor capstone and the binary holds nothing of the game (ctest
-`no_game_bytes`, `asset_only`). The recomp backend, the interpreter, lockstep and the differential
-harness were removed in R2.
+The engine is plain C (refactor stages R0-R4, `docs/refactor.md`): no x86 code runs and nothing emulates
+the PC the game was written for. The game logic calls a small platform API; the platform implements it on
+SDL2. Game code never includes SDL, Metal or Objective-C.
 
-- `src/x86/`: the emulated address space (memory, aliases onto `G`, heap, stack), the CPU registers
-  the HLE layer reads its arguments from, and
-  `asset.c` (`nanpa2.dat` writer and loader; `src/assets.c` picks asset or exe).
-- `src/hle/`: `hle.c` (import/COM thunks, HLE overrides by native address), `win32.c` (message queue,
-  SDL events to WM_*, timer, the pump), `ddraw.c` (surfaces, Blt, palette), `text.c` (GDI text via
-  stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3), `crt.c` (MSVC CRT by address),
-  `dev.c` (scripted input and screenshots), `replay.c` (record and replay).
-- `src/game/`: the game: `ctl.h` (cost, poll, pump, quit, the HLE boundary), `loop.c`/`ops*.c`/`vm.c`
-  (the script VM: `vm_pc`, nested `vm_loop()`, handlers in opcode tables), `expr.c`, `text.c`,
-  `screen.c`/`wipe.c`/`anim.c` (graphics), `file.c`, `startup.c` (`game_main`, window procedure),
-  `map*.c` (town map), `state.h` (G).
-- `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
-  `launch.c` (game folder lookup and picker, remembered path, log file for Finder launches),
-  `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`,
-  `platform/dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
-- `tools/`: `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
-  `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots), `bundle_macos.sh`
-  (target `nanpa2_app`: `build/同級生２.app` with SDL inside).
-- `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
-  minimp3, public domain).
+- `src/game/`: the game. `state.h` defines `G`, one object that is the exe's data area (0x431000-0x4c0000) in
+  its native layout, initialised from `nanpa2.dat` (`state_init`) and the only game state; `gmem.h` has
+  `rd8..wr32`/`g_ptr` over it by the original's numbering ("G addresses": segment bases, animation
+  pc, labels are integers that index G, never host pointers; outside G traps). The VM (`loop.c`, `ops*.c`,
+  `vm.c`, `expr.c`), text, animation, the town map (`map*.c`), palette and picture/rectangle/cursor
+  routines (`screen.c`, `wipe.c`), `startup.c` (`game_main`, window procedure), `timer.c` (the 16 ms tick),
+  `file.c` (the game's file loader), `ctl.c` (the message pump as a call, `ctl_quit` unwinding, the clock
+  charge `ctl_work_us`), `pace.h` (the time model), `state_view.c` (the FLAG serializer, the checkpoint
+  views, the data hash). Native addresses stay in comments as documentation.
+- `src/platform/`: the platform API and its host implementation: `files.h` (the game's DOS paths on the
+  host, FLAG files in the save folder), `surface.h` (8-bit surfaces by handle, pixel pointers, BltFast,
+  fill, palette, the screen), `text.h` (Big5 glyphs, stb_truetype), `window.h` (WM_* message queue, the
+  16 ms timer, cursor), `sound.h` (SDL audio, MP3 via minimp3), `logo.c`, `clock.[ch]` (pacing, `--speed`),
+  `present.h` (macOS: `present_metal.m` CAMetalLayer CRT shader; else `present_sdl.c` SDL_Renderer),
+  `dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
+- `src/dev/`: `replay.c` (deterministic mode, `--record`/`--replay`, state checkpoints), `explore.c` (the
+  exploration bot), `dev.c` (scripted input, screenshots, `NANPA2_SAVETEST`), `status.c` (live status file).
+- `src/`: `asset.c` (the `nanpa2.dat` format and the exe image loader), `assets.c` (where the data comes
+  from), `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
+  `launch.c` (game folder lookup, remembered path, log file for Finder launches), `main.c`.
+- `tools/`: `build.sh`, `build_msys2.sh`, `bundle_macos.sh` (target `nanpa2_app`: `build/同級生２.app` with
+  SDL inside), `replay_diff.py`, `explore.py`, `gp4png.py`, `lzh.py`, `sheet.py`, `peek.py`, `disasm.py`
+  (table-aware objdump to `decomp/game.asm`), `timing_stats.py`; `ghidra_scripts/DecompileAll.java`;
+  `tests/` (ctest: selftest, replay_det, wavcheck, no_game_bytes, asset_only, smoke, decode_all);
+  `third_party/` (stb_truetype, minimp3, public domain).
 
-Refactor (docs/refactor.md): replay is the check for every step (`--record FILE`, `--replay FILE`,
-`NANPA2_DETERMINISTIC=1`); the game state is the struct `G` of `src/game/state.h` (R1), the
-logic runs as ordinary C calls (R2), pacing (R3) and the platform calls (R4) are next.
+The save files (`FLAGn`, 0xc00 bytes) are `G.save` in the original's byte layout, written and read only
+through `state_save_export/import` (`state_view.c`); `docs/refactor.md` lists the fields. The engine assumes a
+64-bit little-endian host.
 
 Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
 (screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.
-`NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`; `NANPA2_SAVE_DIR` also
+`NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`, `NANPA2_LOAD_EXE=1` (data from the whole
+exe instead of `nanpa2.dat`), `NANPA2_SPEED`/`--speed`, `NANPA2_DETERMINISTIC`, `--record`/`--replay`
+(`NANPA2_REPLAY_CHECK=li,raw.clock,raw.gdata` picks the checkpoint keys), `NANPA2_EXPLORE=SEED`
+`NANPA2_EXPLORE_FRAMES=N` (the bot); `NANPA2_SAVE_DIR` also
 holds `game-folder.txt` and `nanpa2.log`, so app tests leave the real save folder alone.
 
 ## Build and run
@@ -83,8 +81,9 @@ cmake -S . -B build -G Ninja && ninja -C build
 ./build/nanpa2 --view                            # picture viewer: Left/Right, Esc
 ./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
 ./build/decode_all game                          # expect "ok 705 bad 0"
-ctest --test-dir build -R smoke --output-on-failure  # after each merge: one window, renders
-                                                 # (Skipped = passed, screen not visible)
+ctest --test-dir build --output-on-failure       # all: selftest, replay_det, wavcheck, no_game_bytes,
+                                                 # asset_only, and smoke (one window, renders;
+                                                 # Skipped = passed, screen not visible)
 cat $TMPDIR/nanpa2-status-*.json                 # live state of every running instance
 ```
 
@@ -114,6 +113,6 @@ $G/support/analyzeHeadless decomp/ghidra Nanpa2 -import game/nanpa2.exe -overwri
 About a quarter of the game functions are hand-written assembly with register arguments
 (`unaff_ESI`, `in_EAX` in the decompile); read those with
 `objdump -d --x86-asm-syntax=intel --start-address=0x... --stop-address=0x... game/nanpa2.exe`.
-Game code is 0x401000-0x4077ac (142 functions, `docs/reimpl.md`); a statically linked MP3
-decoder library follows to 0x412c81, then the MSVC runtime from 0x412c90. Cite native addresses in code
-comments, commits and notes.
+Game code is 0x401000-0x4077ac (142 functions, `docs/reimpl.md`, historical: the C engine replaced all of
+it); a statically linked MP3 decoder library follows to 0x412c81, then the MSVC runtime from 0x412c90.
+Cite native addresses in code comments, commits and notes.

@@ -671,7 +671,7 @@ file's top level returns through 0f's `ret` (0x4065bf) with whatever ECX the han
 before it left, so every handler must leave ECX's high half zero, as the native ones do
 (the differential harness checks it, `diff_live_bits`).
 
-## Running the game code: interpreter, recompile, lockstep
+## Running the game code: interpreter, recompile, lockstep (historical: removed in R2)
 
 The game code the engine runs is 0x401000-0x407800 (the MSVC runtime after it is replaced
 by address in src/hle/crt.c). It is 6045 reachable instructions (traversal from WinMain
@@ -717,7 +717,7 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
   after any direct jump (jmp, jcc, loop) to addr, which recomp.py allows only from inside
   that body (check_oracles); calls and indirect transfers to addr still reach the override.
 
-### nanpa2.dat: the exe's built-in data without its code (src/x86/asset.c)
+### nanpa2.dat: the exe's built-in data without its code (src/asset.c)
 
 Little-endian. Header 48 bytes: `"N2AS"`; u32 version 1; u32 PE TimeDateStamp 0x39697c6a; u32
 SizeOfImage 0xc1000; u32 size of the source exe; u32 range count; u64 FNV-1a of the source exe;
@@ -841,3 +841,35 @@ globals, the sound words 0x4be540-0x4be900 (only the native DirectSound code use
 cursor bitmap 0x4be900 (128 dwords, byte-swapped by op 04 15 4) and the rest of the C runtime and
 MP3 library data. The sections of the exe the game never writes (.rdata, the strings in `head`,
 the tile offset table) are asset data.
+
+## Findings of R4 (the platform API replaced the C runtime and Win32 thunks)
+
+Facts about the exe that showed up when the C runtime calls of `file.c` and `startup.c` were written as
+plain C:
+
+- **The file loader's name test is `FLAG`, not `DATA`.** 0x401050 compares the first four characters of
+  the name with the string at 0x431058, which is "FLAG": a name that starts with it (the save slots) is
+  opened as given; every other name is `sprintf`ed with the format at 0x431050, "DATA\%s". The format at
+  0x431034 is "%s%s" (the CD prefix at 0x431030, initially "A:\", then the name); the modes are "rb" (0x43103c)
+  and "wb" (0x431060); the extensions tested for decompression are ".ANI" (0x431040) and ".GP4"
+  (0x431048). If the open fails, the second attempt is the prefix and the name; both attempts count as
+  opens in the replay's `li.files`.
+- **The decompressor's input length.** 0x401050 reads a packed file into a `malloc` block of the file's
+  size and passes that block to 0x4075f0, whose bit reader takes its length from the block: the heap size
+  rounded to 16 including an 8-byte header, minus the header (`((size + 8 + 15) & ~15) - 8`), the file's bytes
+  followed by zeros. The pacing model's decode cost uses that length (`PACE_DECODE_US(in, out)`).
+- **The CD search** tries drive letters A-Z in order, writing the letter into the prefix at 0x431030, and
+  only a CD-ROM drive (GetDriveTypeA = 5) opens "%sSPEECH\A\A10930.WAV" (0x431188 is the format); the port
+  answers CD-ROM for drive Q. If none opens, the prefix is cleared and "SPEECH\A\A10930.WAV" (0x431174)
+  is tried in the current folder.
+- **The fade step factor** at 0x41b188 is the float 0.0625 (1/16): the timer callback computes
+  `delta * (step * k) + start` in double.
+- **Script register S after a surface unlock.** 0x4012b0 returns the screen's DirectDraw object (a heap
+  address) when the surface unlocked is not the screen, 0 when the cursor is off, else the cursor's x; ops
+  19 0, 19 3 and 19 4 and the map's redraws store the low word in S. The value is in the saved image and a
+  script could read it, so the port's primary surface handle is a constant with the value the emulated
+  heap gave it (`SURF_PRIMARY_HANDLE`).
+- **The FLAG file** is the 0xc00 bytes from 0x444e78: name 0x0, flags 0x20, registers 0x420, the word array
+  0x456, the base palette 0x494, the four segment bases 0x4c4 (the only addresses in it; rewritten by the VM
+  set-up after every load), the last picture rectangle 0x512, the work buffer 0x51e. The words 0x445a78-0x445cdc
+  after it and the native top ESP at 0x445cdc are not saved.
