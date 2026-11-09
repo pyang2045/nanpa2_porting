@@ -1,8 +1,8 @@
 /*
  * The town map (stage 5A): state layout and the internal interfaces of
- * src/game/map*.c. Emulated memory stays the only state store, so the
- * native code that is left (the parts that pump messages) sees what the C
- * does. Semantics: re-notes.md "Town map".
+ * src/game/map*.c. The state is G.map (cells, work planes, the variables
+ * G.map.v) and G.seg1 (the script segment 1), at their native addresses
+ * through the alias. Semantics: re-notes.md "Town map".
  *
  * The map state record M sits in script segment 1 at the word @[5]
  * (0x4452d8); the tile layer, the walk grid, the sprite table, the area
@@ -90,6 +90,19 @@ enum {
  * player's last positions, which the follower sprites replay */
 #define HISTORY 0x435dcau
 #define HISTORY_LEN 10
+
+/* the history ring G.map.v.history, by byte offset; a script-supplied index past
+ * the 50 bytes runs on into the padding after it as natively */
+static inline uint8_t *hist_p(uint32_t off)
+{
+	return (uint8_t *)&G.map.v + offsetof(struct map_vars, history) + off;
+}
+static inline uint32_t hist_rd8(uint32_t off) { return *hist_p(off); }
+static inline uint32_t hist_rd16(uint32_t off) { uint16_t v; memcpy(&v, hist_p(off), 2); return v; }
+static inline uint32_t hist_rd32(uint32_t off) { uint32_t v; memcpy(&v, hist_p(off), 4); return v; }
+static inline void hist_wr8(uint32_t off, uint32_t v) { *hist_p(off) = (uint8_t)v; }
+static inline void hist_wr16(uint32_t off, uint32_t v) { uint16_t t = (uint16_t)v; memcpy(hist_p(off), &t, 2); }
+static inline void hist_wr32(uint32_t off, uint32_t v) { memcpy(hist_p(off), &v, 4); }
 
 static inline uint32_t map_base(void)
 {

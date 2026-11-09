@@ -29,11 +29,7 @@
 #define SURF_SCREEN 0x44629eu /* the three surfaces the map locks, as the native code names them */
 #define SURF_TILES 0x4462a6u
 #define SURF_SPRITES 0x4462aau
-#define LOCKED_SCREEN 0x435548u  /* their locked pixel pointers */
-#define LOCKED_TILES 0x43554cu
-#define LOCKED_SPRITES 0x435550u
 #define TILE_OFFSETS 0x4355fau   /* u16 per tile number (low 12 bits) */
-#define LAYER_TILE 0x435556u     /* u16 x 3: the sprite tiles of the cell being drawn */
 #define WORK 0x435248u           /* 3 planes of 256 bytes: tile & sprites, tile bits, tile mask */
 #define TILE_PITCH 0x280u        /* a sheet is 640 pixels wide */
 
@@ -63,9 +59,9 @@ static void unlock_surface(uint32_t surface_var)
  * the pointers at LOCKED_*) */
 static void lock_all(void)
 {
-	wr32(LOCKED_SCREEN, lock_surface(SURF_SCREEN));
-	wr32(LOCKED_TILES, lock_surface(SURF_TILES));
-	wr32(LOCKED_SPRITES, lock_surface(SURF_SPRITES));
+	MV_SET(locked_screen, lock_surface(SURF_SCREEN));
+	MV_SET(locked_tiles, lock_surface(SURF_TILES));
+	MV_SET(locked_sprites, lock_surface(SURF_SPRITES));
 }
 
 static void unlock_all(void)
@@ -168,10 +164,10 @@ void game_map_overlay_sprites(void)
 			uint32_t p = rd16(SEG1 + pat);
 			uint32_t w = rd8(SEG1 + p), h;
 			wr8(sp + S_WIDTH, w);
-			wr8(0x43555c, w);
+			MV_SET(draw_w, w);
 			h = rd8(SEG1 + p + 2);
 			wr8(sp + S_HEIGHT, h);
-			wr8(0x43555d, h);
+			MV_SET(draw_h, h);
 			uint32_t tiles = p + 4;
 			ebp = (ebp & 0xffff0000u) | ry;
 			X86_COUNT(37 + 6);
@@ -309,7 +305,7 @@ static void work_store(uint32_t dst)
 static uint32_t sprite_pixels(uint32_t t)
 {
 	uint32_t i = (t - 1) & 0xfff;
-	return (rd16(TILE_OFFSETS + 2 * i) << 3) + rd32(LOCKED_SPRITES);
+	return (rd16(TILE_OFFSETS + 2 * i) << 3) + MV(locked_sprites);
 }
 
 /* 0x403eff: draw the cell at record `cell` onto the screen at offset
@@ -317,8 +313,8 @@ static uint32_t sprite_pixels(uint32_t t)
  * the 0-3 sprite tiles over it, the last drawn first. All registers kept. */
 static void cell_draw(uint32_t cell, uint32_t dst_off)
 {
-	uint32_t src = rd32(LOCKED_TILES);
-	uint32_t dst = dst_off + rd32(LOCKED_SCREEN);
+	uint32_t src = MV(locked_tiles);
+	uint32_t dst = dst_off + MV(locked_screen);
 	uint32_t tile = rd16(cell) & 0xfff;
 	src += rd16(TILE_OFFSETS + 2 * tile) << 3;
 	uint32_t layers = 0;
@@ -340,30 +336,30 @@ static void cell_draw(uint32_t cell, uint32_t dst_off)
 		cell_tile(src, dst);
 		break;
 	case 1:
-		wr16(LAYER_TILE, rd16(cell + 2));
+		MV_SET(layer_tile[0], rd16(cell + 2));
 		X86_COUNT(4 + 6 + 2 + 1);
 		work_load(src);
-		work_overlay(sprite_pixels(rd16(LAYER_TILE)));
+		work_overlay(sprite_pixels(MV(layer_tile[0])));
 		work_store(dst);
 		break;
 	case 2:
-		wr16(LAYER_TILE, rd16(cell + 2));
-		wr16(LAYER_TILE + 2, rd16(cell + 4));
+		MV_SET(layer_tile[0], rd16(cell + 2));
+		MV_SET(layer_tile[1], rd16(cell + 4));
 		X86_COUNT(7 + 12 + 3 + 1);
 		work_load(src);
-		work_overlay(sprite_pixels(rd16(LAYER_TILE + 2)));
-		work_overlay(sprite_pixels(rd16(LAYER_TILE)));
+		work_overlay(sprite_pixels(MV(layer_tile[1])));
+		work_overlay(sprite_pixels(MV(layer_tile[0])));
 		work_store(dst);
 		break;
 	default:
-		wr16(LAYER_TILE, rd16(cell + 2));
-		wr16(LAYER_TILE + 2, rd16(cell + 4));
-		wr16(LAYER_TILE + 4, rd16(cell + 6));
+		MV_SET(layer_tile[0], rd16(cell + 2));
+		MV_SET(layer_tile[1], rd16(cell + 4));
+		MV_SET(layer_tile[2], rd16(cell + 6));
 		X86_COUNT(10 + 18 + 4 + 1);
 		work_load(src);
-		work_overlay(sprite_pixels(rd16(LAYER_TILE + 4)));
-		work_overlay(sprite_pixels(rd16(LAYER_TILE + 2)));
-		work_overlay(sprite_pixels(rd16(LAYER_TILE)));
+		work_overlay(sprite_pixels(MV(layer_tile[2])));
+		work_overlay(sprite_pixels(MV(layer_tile[1])));
+		work_overlay(sprite_pixels(MV(layer_tile[0])));
 		work_store(dst);
 		break;
 	}
@@ -381,7 +377,7 @@ void game_map_cell_draw(void)
  * locked screen. Out: EAX = the last dword written; the rest is kept. */
 void game_map_cell_clear_bit3(void)
 {
-	uint32_t dst = cpu.r[EDX] + rd32(LOCKED_SCREEN);
+	uint32_t dst = cpu.r[EDX] + MV(locked_screen);
 	uint32_t pitch = rd32(PITCHES), v = 0;
 	X86_COUNT(4);
 	for (uint32_t row = 0; row < 16; row++) {

@@ -40,8 +40,6 @@
 #define HLE_PUMP 0x401bf0u
 #define TAIL 0x40740fu      /* the return address of the handler's call of 0x403a70 */
 #define TAIL_PIECE 0x407410u /* after its `pop esi`: mov [S], ax; jmp 0x4060f9 */
-#define SCROLLED 0x435572u    /* u8: the view scrolled in the player's step */
-#define APPROACH 0x435e61u
 
 #define CNT(n) X86_COUNT(n)
 
@@ -137,14 +135,14 @@ uint32_t game_rc_pumped(void)
 		goto outside;
 	set16(ECX, ((CX16 >> 4) - rd16(m + M_SCREEN_X) + rd16(m + M_VIEW_X)));
 	set16(EDX, (((DX16 - rd16(m + M_SCREEN_Y)) & 0xffff) >> 4) + rd16(m + M_VIEW_Y));
-	wr8(APPROACH, 0);
+	MV_SET(approach, 0);
 	CNT(8);
 	game_map_plan_walk();
 	popal();
 	CNT(2);
 	return go(pop32());
 outside:
-	wr8(MAP_AUTOWALK, 0);
+	MV_SET(autowalk, 0);
 	popal();
 	CNT(3);
 	return go(pop32());
@@ -166,7 +164,7 @@ static uint32_t pl_kb_begin(void)
 
 static void pl_moved(void)
 {
-	wr8(MAP_MOVED, 0xff);
+	MV_SET(moved, 0xff);
 }
 
 /* 0x4045eb: after the pump: WM_QUIT, else popad and the four keys (left,
@@ -220,20 +218,20 @@ static uint32_t pl_end(void)
 		return go(pop32());
 	}
 	uint32_t sp = SEG1 + cpu.r[ESI];
-	wr8(MAP_AUTOWALK, 0);
+	MV_SET(autowalk, 0);
 	wr8(sp + S_FRAME, rd8(sp + S_FRAME) ^ 1);
 	CNT(10);
 	for (int i = 0; i < 9; i++) {
-		uint32_t from = HISTORY + 5 * (8 - i), to = from + 5;
-		wr32(to, rd32(from));
-		wr8(to + 4, rd8(from + 4));
+		uint32_t from = 5 * (8 - i), to = from + 5;
+		hist_wr32(to, hist_rd32(from));
+		hist_wr8(to + 4, hist_rd8(from + 4));
 		CNT(9);
 		if (i < 8)
 			X86_POLL(0x40469c);
 	}
-	wr8(HISTORY, cpu.r[EAX]);
-	wr16(HISTORY + 1, cpu.r[EBX]);
-	wr16(HISTORY + 3, cpu.r[ECX]);
+	hist_wr8(0, cpu.r[EAX]);
+	hist_wr16(1, cpu.r[EBX]);
+	hist_wr16(3, cpu.r[ECX]);
 	CNT(9);
 	return go(pop32());
 }
@@ -260,14 +258,14 @@ static uint32_t pl_none(void) /* 0x4045d7 */
  * (the vertical test said no) */
 static uint32_t pl_sideways(uint32_t m, uint32_t sp)
 {
-	wr8(SCROLLED, 0);
+	MV_SET(scrolled, 0);
 	uint32_t ax = (rol16(rd16(sp + S_Y) - rd16(m + M_VIEW_Y), 4) + rd16(m + M_SCREEN_Y)) & 0xffff;
 	CNT(7);
 	uint32_t before = ax;
 	ax = (ax - 0x30) & 0xffff;
 	if (before < 0x30) { /* sub ax, 0x30 borrowed: jae not taken */
 		ax = (ax + 0x30) & 0xffff;
-		wr8(SCROLLED, 0xff);
+		MV_SET(scrolled, 0xff);
 		CNT(2);
 	}
 	set16(EAX, ax);
@@ -276,7 +274,7 @@ static uint32_t pl_sideways(uint32_t m, uint32_t sp)
 		return pl_none();
 	ax = (ax + 0x20 + 0x60) & 0xffff;
 	CNT(4);
-	if (rd8(SCROLLED) != 0) {
+	if (MV(scrolled) != 0) {
 		ax = (ax - 0x30) & 0xffff;
 		CNT(1);
 	}
@@ -367,7 +365,7 @@ uint32_t game_pl_pumped_b(void)
 static uint32_t player_begin(void)
 {
 	uint32_t sp = SEG1 + cpu.r[ESI];
-	wr8(MAP_MOVED, 0);
+	MV_SET(moved, 0);
 	cpu.r[EAX] = rd8(sp + S_FRAME);
 	push32(cpu.r[EAX]);
 	cpu.r[EBX] = rd16(sp + S_X);
@@ -379,7 +377,7 @@ static uint32_t player_begin(void)
 		return pl_kb_begin();
 	pushal();
 	CNT(3);
-	if (rd8(MAP_AUTOWALK) == 0xff) { /* 0x404497 */
+	if (MV(autowalk) == 0xff) { /* 0x404497 */
 		game_map_walk_step();
 		wr8(sp + S_FRAME, rd8(sp + S_FRAME) ^ 1);
 		CNT(2);
@@ -399,9 +397,9 @@ static uint32_t ev_4052f1(void)
 {
 	set16(EAX, cpu.r[EBX]);
 	CNT(3);
-	if (rd16(MAP_LAST_CLICK) == AX16)
+	if (MV(last_click) == AX16)
 		return ev_40530b();
-	wr16(MAP_LAST_CLICK, AX16);
+	MV_SET(last_click, AX16);
 	CNT(2);
 	return ev_405372();
 }
@@ -410,18 +408,18 @@ static uint32_t ev_4052f1(void)
 static uint32_t ev_40530b(void)
 {
 	set16(EAX, 0);
-	wr16(MAP_ARGS, 0);
+	MV_SET(args[0], 0);
 	CNT(2);
 	game_map_area_trigger();
 	CNT(3);
 	if (AX16 == 0xffff) {
-		wr16(MAP_LAST_AREA, 0xffff);
+		MV_SET(last_area, 0xffff);
 		CNT(2);
 		return ev_405372();
 	}
 	CNT(2);
-	if (rd16(MAP_LAST_AREA) != AX16) {
-		wr16(MAP_LAST_AREA, AX16);
+	if (MV(last_area) != AX16) {
+		MV_SET(last_area, AX16);
 		set16(EAX, AX16 + 0x32);
 		CNT(3);
 		return ev_405372();
@@ -431,11 +429,11 @@ static uint32_t ev_40530b(void)
 	cpu.r[ESI] = rd16(SEG1 + cpu.r[EDI] + M_SPRITES);
 	set16(EAX, rd8(SEG1 + cpu.r[ESI] + S_FRAME) >> 1);
 	CNT(7);
-	if (AX16 == rd16(MAP_LAST_SPRITE)) {
+	if (AX16 == MV(last_sprite)) {
 		set16(EAX, 0xffff);
 		CNT(1);
 	} else {
-		set16(EAX, rd16(MAP_LAST_AREA) + 0x32);
+		set16(EAX, MV(last_area) + 0x32);
 		CNT(3);
 	}
 	return ev_405372();
@@ -450,7 +448,7 @@ static uint32_t ev_405372(void)
 	cpu.r[EDI] = SV(map_sel);
 	cpu.r[ESI] = rd16(SEG1 + cpu.r[EDI] + M_SPRITES);
 	set16(EAX, rd8(SEG1 + cpu.r[ESI] + S_FRAME) >> 1);
-	wr16(MAP_LAST_SPRITE, AX16);
+	MV_SET(last_sprite, AX16);
 	cpu.r[EAX] = pop32();
 	CNT(10);
 	if (AX16 == 0xffff) {
@@ -483,7 +481,7 @@ uint32_t game_ev_released(void)
 static uint32_t ev_4052e1(void)
 {
 	cpu.r[EAX] = pop32();
-	wr16(MAP_LAST_CLICK, AX16);
+	MV_SET(last_click, AX16);
 	CNT(3);
 	return ev_405372();
 }
@@ -544,15 +542,15 @@ uint32_t game_ev_pumped_a(void)
 			return ev_4052f1();
 		set16(EAX, cpu.r[EBX]);
 		CNT(3);
-		if (rd8(MAP_MOVED) != 0xff)
+		if (MV(moved) != 0xff)
 			return ev_4052f1();
 		CNT(1);
-		wr16(MAP_LAST_CLICK, AX16); /* 0x4052e2 */
+		MV_SET(last_click, AX16); /* 0x4052e2 */
 		CNT(2);
 		return ev_405372();
 	}
 	CNT(2);
-	if (rd8(MAP_MOVED) != 0xff)
+	if (MV(moved) != 0xff)
 		return ev_4052f1();
 	push32(cpu.r[EAX]);
 	CNT(2);
@@ -564,12 +562,12 @@ uint32_t game_ev_pumped_a(void)
 static uint32_t ev_begin(void)
 {
 	cpu.r[EAX] = 0;
-	wr16(MAP_ARGS, 0);
+	MV_SET(args[0], 0);
 	CNT(2);
 	game_map_collision();
 	CNT(3);
 	if (AX16 == 0xffff) {
-		wr16(MAP_LAST_CLICK, AX16); /* 0x405305 */
+		MV_SET(last_click, AX16); /* 0x405305 */
 		CNT(1);
 		return ev_40530b();
 	}
@@ -661,7 +659,7 @@ static uint32_t sprites_begin(void)
 /* 0x4051c2: sub-op 12 */
 static uint32_t s12_begin(void)
 {
-	wr8(MAP_MOVED, 0);
+	MV_SET(moved, 0);
 	push32(0x4051ce);
 	CNT(2);
 	return sprites_begin();

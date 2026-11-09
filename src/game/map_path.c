@@ -25,16 +25,6 @@
 #include "game/map.h"
 #include "game/state.h"
 
-#define PATH_GRID 0x435e62u      /* u16: copy of the walk grid's offset (written, never read) */
-#define PATH_FROM_CELL 0x435e64u /* u16: the sprite's cell in the grid */
-#define PATH_GOAL_CELL 0x435e66u /* u16: the goal's cell */
-#define PATH_GOAL_X 0x435e68u    /* u16 */
-#define PATH_GOAL_Y 0x435e6au
-#define PATH_FROM_X 0x435e6cu    /* u16: the sprite's cell */
-#define PATH_FROM_Y 0x435e6eu
-#define PATH_W 0x435e70u         /* u16: the map's size */
-#define PATH_H 0x435e72u
-#define APPROACH 0x435e61u       /* u8: bit 0, walk up to a goal that is a wall */
 
 #define GRID_WALL 0xffu
 #define GRID_FREE 0xfeu
@@ -49,7 +39,7 @@ static uint32_t grid_at(uint32_t i)
  * tile at (x, y + 1) or (x + 1, y + 1) has its wall bit (bit 15). */
 static void build_walk_grid(uint32_t m)
 {
-	uint32_t grid = rd16(MAP_WALK_BASE);
+	uint32_t grid = MV(walk_base);
 	uint32_t tile = rd16(m + M_LAYER) + 4;
 	tile = (tile & 0xffff0000u) | ((tile + rd16(m + M_MAP_W)) & 0xffff);
 	tile = (tile & 0xffff0000u) | ((tile + rd16(m + M_MAP_W)) & 0xffff);
@@ -107,7 +97,7 @@ static int flood(int32_t x, int32_t y, uint32_t mask, uint32_t cell, int32_t dep
 		goto fail;
 	}
 	X86_COUNT(4);
-	if ((int32_t)rd16(PATH_W) - 1 < x) {
+	if ((int32_t)MV(path_w) - 1 < x) {
 		X86_COUNT(1);
 		goto fail;
 	}
@@ -117,7 +107,7 @@ static int flood(int32_t x, int32_t y, uint32_t mask, uint32_t cell, int32_t dep
 		goto fail;
 	}
 	X86_COUNT(4);
-	if ((int32_t)rd16(PATH_H) - 1 < y) {
+	if ((int32_t)MV(path_h) - 1 < y) {
 		X86_COUNT(1);
 		goto fail;
 	}
@@ -132,7 +122,7 @@ static int flood(int32_t x, int32_t y, uint32_t mask, uint32_t cell, int32_t dep
 		X86_COUNT(1 + 8);
 		return 1;
 	}
-	uint32_t px = rd16(PATH_FROM_X), py = rd16(PATH_FROM_Y);
+	uint32_t px = MV(path_from_x), py = MV(path_from_y);
 	X86_COUNT(2);
 	if ((mask & 0xffff) == 0xffff) {
 		mask &= 0xffff0000u;
@@ -195,7 +185,7 @@ visit:
 	for (int k = 0; k < 4; k++) {
 		int32_t nx = x, ny = y;
 		uint32_t nc = cell;
-		uint32_t w = rd16(PATH_W);
+		uint32_t w = MV(path_w);
 		switch (order[mask & 7][k]) {
 		case U: ny = y - 1; nc = (cell & 0xffff0000u) | ((cell - w) & 0xffff); break;
 		case D: ny = y + 1; nc = cell + w; break;
@@ -219,11 +209,11 @@ won:
  * cell is blocked */
 static void start_flood(void)
 {
-	int32_t goal_x = (int32_t)rd16(PATH_GOAL_X), goal_y = (int32_t)rd16(PATH_GOAL_Y);
-	uint32_t goal = rd16(PATH_GOAL_CELL);
+	int32_t goal_x = (int32_t)MV(path_goal_x), goal_y = (int32_t)MV(path_goal_y);
+	uint32_t goal = MV(path_goal_cell);
 	X86_COUNT(1 + 1 + 8 + 2); /* the call, pushal, up to the call, or, jne */
 	if (!flood(goal_x, goal_y, 0xffff, goal, (int32_t)GRID_GOAL)) {
-		wr8(SEG1 + rd16(PATH_FROM_CELL), GRID_WALL);
+		wr8(SEG1 + MV(path_from_cell), GRID_WALL);
 		X86_COUNT(2);
 	}
 	X86_COUNT(2); /* popal, ret */
@@ -239,7 +229,7 @@ static void approach(uint32_t m, uint32_t s)
 	X86_COUNT(1); /* the call */
 	for (;;) {
 		uint32_t progress = 0;
-		uint32_t cell = rd16(MAP_WALK_BASE);
+		uint32_t cell = MV(walk_base);
 		X86_COUNT(5);
 		uint32_t rows = 0;
 		do {
@@ -316,7 +306,7 @@ static void approach(uint32_t m, uint32_t s)
 
 static uint32_t cell_of(uint32_t m, uint32_t x, uint32_t y)
 {
-	return (((rd16(m + M_MAP_W) * y) & 0xffff) + x + rd16(MAP_WALK_BASE)) & 0xffff;
+	return (((rd16(m + M_MAP_W) * y) & 0xffff) + x + MV(walk_base)) & 0xffff;
 }
 
 /* 0x405966: plan a walk for sprite ESI (an offset in segment 1) to the cell
@@ -327,19 +317,19 @@ void game_map_plan_walk(void)
 	uint32_t s = cpu.r[ESI], gx = cpu.r[ECX] & 0xffff, gy = cpu.r[EDX] & 0xffff;
 	uint32_t sp = SEG1 + s;
 	X86_COUNT(2);
-	if (rd8(MAP_AUTOWALK) != 0) {
-		wr8(MAP_AUTOWALK, 0);
+	if (MV(autowalk) != 0) {
+		MV_SET(autowalk, 0);
 		X86_COUNT(2);
 		return;
 	}
 	uint32_t m = SEG1 + SV(map_sel);
-	wr16(PATH_FROM_X, rd16(sp + S_X));
-	wr16(PATH_FROM_Y, rd16(sp + S_Y));
-	wr16(PATH_GOAL_X, gx);
-	wr16(PATH_GOAL_Y, gy);
-	wr16(PATH_W, rd16(m + M_MAP_W));
-	wr16(PATH_H, rd16(m + M_MAP_H));
-	wr16(PATH_GRID, rd16(MAP_WALK_BASE));
+	MV_SET(path_from_x, rd16(sp + S_X));
+	MV_SET(path_from_y, rd16(sp + S_Y));
+	MV_SET(path_goal_x, gx);
+	MV_SET(path_goal_y, gy);
+	MV_SET(path_w, rd16(m + M_MAP_W));
+	MV_SET(path_h, rd16(m + M_MAP_H));
+	MV_SET(path_grid, MV(walk_base));
 	X86_COUNT(17);
 	build_walk_grid(m);
 	/* every `mul` leaves the high word of its product in DX, and DX is the
@@ -347,32 +337,32 @@ void game_map_plan_walk(void)
 	 * is looked for in row 0) */
 	uint32_t prod = gy * rd16(m + M_MAP_W);
 	uint32_t dx_reg = prod >> 16;
-	uint32_t goal = ((prod & 0xffff) + gx + rd16(MAP_WALK_BASE)) & 0xffff;
+	uint32_t goal = ((prod & 0xffff) + gx + MV(walk_base)) & 0xffff;
 	X86_COUNT(6);
 	if (grid_at(goal) != GRID_WALL) {
-		wr16(PATH_GOAL_CELL, goal);
+		MV_SET(path_goal_cell, goal);
 		uint32_t from = cell_of(m, rd16(sp + S_X), rd16(sp + S_Y));
 		dx_reg = (rd16(m + M_MAP_W) * rd16(sp + S_Y)) >> 16;
-		wr16(PATH_FROM_CELL, from);
+		MV_SET(path_from_cell, from);
 		wr8(SEG1 + from, 0);
 		X86_COUNT(9);
 		start_flood();
 		X86_COUNT(3);
 		if (grid_at(goal) < GRID_FREE) {
-			wr8(MAP_AUTOWALK, 0xff);
+			MV_SET(autowalk, 0xff);
 			X86_COUNT(2);
 			return;
 		}
 	}
 	X86_COUNT(2);
-	if (!(rd8(APPROACH) & 1)) {
-		wr8(MAP_AUTOWALK, 0);
+	if (!(MV(approach) & 1)) {
+		MV_SET(autowalk, 0);
 		X86_COUNT(2);
 		return;
 	}
 	X86_COUNT(5);
 	build_walk_grid(m);
-	uint32_t cell = ((((dx_reg * rd16(m + M_MAP_W)) & 0xffff) + gx + rd16(MAP_WALK_BASE)) & 0xffff);
+	uint32_t cell = ((((dx_reg * rd16(m + M_MAP_W)) & 0xffff) + gx + MV(walk_base)) & 0xffff);
 	uint32_t old = grid_at(cell);
 	wr8(SEG1 + cell, GRID_GOAL);
 	X86_COUNT(10);
@@ -385,7 +375,7 @@ void game_map_plan_walk(void)
 	uint32_t at = cell_of(m, rd16(sp + S_X), rd16(sp + S_Y));
 	uint32_t v = grid_at(at);
 	X86_COUNT(7 + 2 + (v == GRID_WALL ? 2 : v == GRID_FREE ? 4 : 4));
-	wr8(MAP_AUTOWALK, (v == GRID_WALL || v == GRID_FREE) ? 0 : 0xff);
+	MV_SET(autowalk, (v == GRID_WALL || v == GRID_FREE) ? 0 : 0xff);
 }
 
 /* 0x405691: one step of the walk: from the sprite's cell (mark v) to a
@@ -462,7 +452,7 @@ void game_map_walk_step(void)
 	uint32_t sel = SV(map_sel);
 	uint32_t m = SEG1 + sel;
 	uint32_t mw = rd16(m + M_MAP_W);
-	uint32_t c = (((mw * rd16(sp + S_Y)) & 0xffff) + rd16(sp + S_X) + rd16(MAP_WALK_BASE)) & 0xffff;
+	uint32_t c = (((mw * rd16(sp + S_Y)) & 0xffff) + rd16(sp + S_X) + MV(walk_base)) & 0xffff;
 	uint32_t v = grid_at(c);
 	X86_COUNT(10);
 	int done = 0;
@@ -499,7 +489,7 @@ void game_map_walk_step(void)
 		X86_COUNT(3);
 	}
 	cpu.r[EDI] = sel;
-	wr8(MAP_AUTOWALK, 0);
+	MV_SET(autowalk, 0);
 }
 
 /* Sub-op 30, 0x405542: plan a walk for sprite a to the destination in its
@@ -509,16 +499,16 @@ void game_map_walk_step(void)
 uint32_t game_map_op_walk(void)
 {
 	uint32_t sel = SV(map_sel);
-	uint32_t n16 = rd16(MAP_ARGS) << 4;
+	uint32_t n16 = MV(args[0]) << 4;
 	uint32_t s = ((n16) + rd16(SEG1 + sel + M_SPRITES)) & 0xffff;
 	uint32_t sp = SEG1 + s;
 	cpu.r[ESI] = s;
 	cpu.r[ECX] = rd8(sp + S_DEST_X);
 	cpu.r[EDX] = rd8(sp + S_DEST_Y);
-	wr8(APPROACH, 1);
+	MV_SET(approach, 1);
 	X86_COUNT(14);
 	game_map_plan_walk();
-	uint32_t f = rd8(MAP_AUTOWALK);
+	uint32_t f = MV(autowalk);
 	uint32_t bx = (f * 0x101 + 1) & 0xffff;
 	X86_COUNT(6);
 	return (0u - bx) & 0xffff;

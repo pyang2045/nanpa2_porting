@@ -79,9 +79,13 @@ void x86_img_mark(uint32_t a, uint32_t n);
 #define X86_ALIAS_LO 0x431000u
 #define X86_ALIAS_HI 0x4c0000u
 uint8_t *x86_alias_ptr(uint32_t a, uint32_t n);
+/* set when one object backs the whole range: the fast path of x86_ptr */
+extern uint8_t *x86_data_obj;
 /* Make [addr, addr + size) the bytes of obj; obj takes the memory's current
  * content. */
 void x86_alias(uint32_t addr, void *obj, uint32_t size);
+void x86_unaliased_snapshot(void);
+int x86_unaliased_check(void); /* the number of changed ranges */
 /* Copy n bytes of the emulated address space (aliases included) out */
 void x86_read_virtual(uint32_t a, void *dst, uint32_t n);
 
@@ -91,6 +95,8 @@ static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 		x86_fault(a);
 	if (__builtin_expect(x86_img_map != 0, 0) && a - MEM_BASE < IMG_SIZE)
 		x86_img_mark(a, n);
+	if (__builtin_expect(x86_data_obj != 0, 1) && a >= X86_ALIAS_LO && a + n <= X86_ALIAS_HI)
+		return x86_data_obj + (a - X86_ALIAS_LO);
 	if (a < X86_ALIAS_HI && a + n > X86_ALIAS_LO)
 		return x86_alias_ptr(a, n);
 	return x86_mem + (a - MEM_BASE);

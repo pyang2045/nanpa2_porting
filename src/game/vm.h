@@ -1,9 +1,9 @@
 /*
  * Script VM state, read and written at its native addresses.
  *
- * The reimplemented game logic (src/game) keeps emulated memory as its only
- * state store, so lifted and reimplemented code see the same variables. This
- * header names those variables; see re-notes.md "Script VM state".
+ * The state is in G (state.h); the script image, its segments and the VM's
+ * address-valued words are still addressed natively through the alias. This
+ * header names those addresses; see re-notes.md "Script VM state".
  */
 #ifndef NANPA2_GAME_VM_H
 #define NANPA2_GAME_VM_H

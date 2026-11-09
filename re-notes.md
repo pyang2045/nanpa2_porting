@@ -823,3 +823,21 @@ frame counter 0x446292), pumping messages (0x401bf0) each round; an input bit in
 cancel) sets a flag that skips all later waits, so the rest of the passes run at once. The
 pump's result is never read (a WM_QUIT is seen by the VM's next pump). 166,485 instructions for
 the set-up and 128 passes with no waits; with waits the pump rounds dominate.
+
+## The data area as one object (R1; src/game/state.h)
+
+0x431000-0x4c0000 (.data and bss; 0x8f000 bytes) is `struct game_state G`, in native layout, with
+these members (all offsets static-asserted): `head` 0x431000 (strings and formats, the CD prefix
+at 0x431030), animation slots 0x4312cc-0x4313c6, the map's cell grid 0x4313c8 (0x1f40 bytes, 4
+words per cell) and shadow 0x433308 (0x1f40), work planes 0x435248 (3 x 256), the map variables
+0x435548-0x435e78 (locked pixel pointers 0x435548/4c/50, layer tiles 0x435556, the 04 26
+arguments 0x43555e, event words 0x43556a-6e, mover flags 0x435570-73, the walk grid offset
+0x435574, the sub-op handler table 0x435576 (33 native addresses), the tile offset table
+0x4355fa (1000 u16, read-only), the position history 0x435dca (10 x 5 bytes), the random state
+0x435e60, the approach flag 0x435e61, the planner words 0x435e62-72), script segment 0
+0x435e78-0x444e78, the save image, 0x445a78-0x445cdc (unused), the VM block, segment 1
+0x4462be (64 KB), segments 2 and 3 0x4562be (320 KB), the ANI file 0x4a62be-0x4aac50, the screen
+globals, the sound words 0x4be540-0x4be900 (only the native DirectSound code used them), the
+cursor bitmap 0x4be900 (128 dwords, byte-swapped by op 04 15 4) and the rest of the C runtime and
+MP3 library data. The sections of the exe the game never writes (.rdata, the strings in `head`,
+the tile offset table) are asset data.

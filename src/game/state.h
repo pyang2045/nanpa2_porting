@@ -3,15 +3,12 @@
  *
  * The state used to live in the emulated 32-bit memory at the addresses of
  * nanpa2.exe's data and bss, read and written with rd16(0x4452e8) and the
- * like. A group of it that has moved is a field of the global G here, and
- * its address range is an alias (x86_alias, state_init): code that still
- * reads the address, the HLE layer, bulk copies and the script VM (whose
- * segments are addresses) get the object's bytes. The comments give the
- * native address of each field. New code names the field.
- *
- * Moved so far: the save image (struct save_image), the VM runtime block
- * (struct vm_rt), the screen, palette, cursor and window globals (struct
- * screen_state), the animation slots (struct anim_state).
+ * like. It is now one object, G, that is the whole data area 0x431000-0x4c0000 in
+ * its native layout, backed by one alias (x86_alias, state_init): code that
+ * still reads an address, the HLE layer, bulk copies and the script VM (whose
+ * segments are addresses) get G's bytes, and the unchecked indices of the
+ * script land where they did natively. The comments give the native address
+ * of each field. New code names the field.
  */
 #ifndef NANPA2_GAME_STATE_H
 #define NANPA2_GAME_STATE_H
@@ -248,15 +245,128 @@ struct anim_state {
 };
 #pragma pack(pop)
 _Static_assert(sizeof(struct anim_slot) == 24, "slots are 24 bytes");
+_Static_assert(sizeof(struct anim_state) == 0x4313c6u - AN_BASE, "anim_state covers 0x4312cc-0x4313c6");
 _Static_assert(offsetof(struct anim_state, last_frame) == 0x4313bcu - AN_BASE, "last_frame");
 _Static_assert(offsetof(struct anim_state, random_seed) == 0x4313c4u - AN_BASE, "random_seed");
 
-struct game_state {
-	struct save_image save;
-	struct vm_rt rt;
-	struct screen_state sc;
-	struct anim_state an;
+/* The town map's state outside the script segments, 0x4313c6-0x435e78: the cell
+ * grid and its shadow, the drawing work planes, the locked surface pointers, the
+ * 04 26 arguments, the movers' flags, the sub-op jump table, the tile offset table
+ * (read-only), the player's position history and the path planner's words
+ * (src/game/map*.c, re-notes.md "Town map"). */
+#define MAPD_BASE 0x4313c6u
+#define MAPD_CELLS 0x1f40u
+#pragma pack(push, 1)
+struct map_vars {
+	uint32_t locked_screen;    /* 0x435548 the pixel pointers of the three locked surfaces */
+	uint32_t locked_tiles;     /* 0x43554c */
+	uint32_t locked_sprites;   /* 0x435550 */
+	uint8_t pad_554[2];        /* 0x435554 */
+	uint16_t layer_tile[3];    /* 0x435556 the sprite tiles of the cell being drawn */
+	uint8_t draw_w;            /* 0x43555c */
+	uint8_t draw_h;            /* 0x43555d */
+	uint16_t args[6];          /* 0x43555e arguments 1..6 of the 04 26 sub-op */
+	uint16_t last_sprite;      /* 0x43556a event state */
+	uint16_t last_click;       /* 0x43556c */
+	uint16_t last_area;        /* 0x43556e */
+	uint8_t dir;               /* 0x435570 facing of the sprite being tested (frame >> 1) */
+	uint8_t moved;             /* 0x435571 0xff when a mover moved the player this frame */
+	uint8_t scrolled;          /* 0x435572 the view scrolled in the player's step */
+	uint8_t autowalk;          /* 0x435573 0xff while the player follows the walk grid */
+	uint16_t walk_base;        /* 0x435574 segment offset of the walk grid */
+	uint32_t subop[33];        /* 0x435576 sub-op handler table (native addresses) */
+	uint16_t tile_offsets[1000]; /* 0x4355fa tile number -> offset in the tile sheet (read-only) */
+	uint8_t history[50];       /* 0x435dca ring of 10 {frame u8, x u16, y u16} */
+	uint8_t pad_dfc[0x64];     /* 0x435dfc */
+	uint8_t random_seed;       /* 0x435e60 state of the sprite kind 0xe generator */
+	uint8_t approach;          /* 0x435e61 bit 0: walk up to a goal that is a wall */
+	uint16_t path_grid;        /* 0x435e62 copy of the walk grid's offset (written, never read) */
+	uint16_t path_from_cell;   /* 0x435e64 */
+	uint16_t path_goal_cell;   /* 0x435e66 */
+	uint16_t path_goal_x;      /* 0x435e68 */
+	uint16_t path_goal_y;      /* 0x435e6a */
+	uint16_t path_from_x;      /* 0x435e6c */
+	uint16_t path_from_y;      /* 0x435e6e */
+	uint16_t path_w;           /* 0x435e70 */
+	uint16_t path_h;           /* 0x435e72 */
+	uint8_t pad_e74[4];        /* 0x435e74 */
 };
+struct map_data {
+	uint8_t pad_3c6[2];                 /* 0x4313c6 */
+	uint8_t cells[MAPD_CELLS];          /* 0x4313c8 4 words per cell */
+	uint8_t shadow[MAPD_CELLS];         /* 0x433308 what was drawn last */
+	uint8_t work[0x300];                /* 0x435248 3 planes of 256 bytes */
+	struct map_vars v;                  /* 0x435548 */
+};
+#pragma pack(pop)
+_Static_assert(offsetof(struct map_vars, args) == 0x43555eu - 0x435548u, "args");
+_Static_assert(offsetof(struct map_vars, walk_base) == 0x435574u - 0x435548u, "walk_base");
+_Static_assert(offsetof(struct map_vars, subop) == 0x435576u - 0x435548u, "subop");
+_Static_assert(offsetof(struct map_vars, tile_offsets) == 0x4355fau - 0x435548u, "tile_offsets");
+_Static_assert(offsetof(struct map_vars, history) == 0x435dcau - 0x435548u, "history");
+_Static_assert(offsetof(struct map_vars, random_seed) == 0x435e60u - 0x435548u, "random_seed");
+_Static_assert(offsetof(struct map_vars, path_h) == 0x435e72u - 0x435548u, "path_h");
+_Static_assert(sizeof(struct map_vars) == 0x435e78u - 0x435548u, "map_vars");
+_Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
+
+/* The script and picture memory the VM addresses by segment and offset: segment 0
+ * is the script image (it runs on through the save image and the VM block),
+ * segment 1 (0x4462be) the map data, segments 2 and 3 (0x4562be) the picture
+ * buffers. The objects are contiguous as natively, so an offset past the end of a
+ * segment runs into the next, as it does there. */
+#define SCRIPT_BASE 0x435e78u
+#define SCRIPT_SIZE 0xf000u
+#define SEG1_BASE 0x4462beu
+#define SEG1_SIZE 0x10000u
+#define IMG_BASE 0x4562beu
+#define IMG_SIZE_B 0x50000u
+#define ANI_BASE 0x4a62beu
+#define ANI_SIZE 0x4992u
+
+/* The sound words the native DirectSound code kept (src/hle/sound.c replaces it;
+ * nothing in C reads them) and the cursor bitmap */
+#define SND_BASE 0x4be540u
+#define CBITS_BASE 0x4be900u
+#pragma pack(push, 1)
+/* The whole initialised and zero-initialised data of nanpa2.exe that the game
+ * writes, 0x431000-0x4c0000, in its native layout (so every address the native
+ * code computed, including the unchecked indices of the script, lands where it
+ * did). One alias backs it (state_init). Outside it the emulated memory holds the
+ * code, the read-only data, the stack and the heap. */
+#define DATA_BASE 0x431000u
+#define DATA_END 0x4c0000u
+struct game_state {
+	uint8_t head[0x4312ccu - DATA_BASE]; /* 0x431000 .data head: file name formats and strings
+	                                      * (read-only) and the CD prefix at 0x431030 */
+	struct anim_state an;                /* 0x4312cc */
+	struct map_data map;                 /* 0x4313c6 */
+	uint8_t script[SCRIPT_SIZE];         /* 0x435e78 MES image, segment 0 */
+	struct save_image save;              /* 0x444e78 */
+	uint8_t pad_a78[RT_BASE - 0x445a78u]; /* 0x445a78 */
+	struct vm_rt rt;                     /* 0x445cdc */
+	uint8_t seg1[SEG1_SIZE];             /* 0x4462be segment 1: map data */
+	uint8_t img[IMG_SIZE_B];             /* 0x4562be segments 2 and 3: picture buffers */
+	uint8_t ani[ANI_SIZE];               /* 0x4a62be the ANI file */
+	struct screen_state sc;              /* 0x4aac50 */
+	uint8_t pad_51c[SND_BASE - 0x4ac51cu]; /* 0x4ac51c CRT and MP3 library data */
+	uint8_t snd[CBITS_BASE - SND_BASE];  /* 0x4be540 the native sound words and buffers */
+	uint8_t cursor_bits[0x200];          /* 0x4be900 32x32 AND/XOR cursor bitmap */
+	uint8_t pad_b00[DATA_END - 0x4beb00u]; /* 0x4beb00 */
+};
+#pragma pack(pop)
+#define GS_CHECK(field, addr) _Static_assert(offsetof(struct game_state, field) == (addr) - DATA_BASE, #field)
+GS_CHECK(an, 0x4312ccu);
+GS_CHECK(map, MAPD_BASE);
+GS_CHECK(script, SCRIPT_BASE);
+GS_CHECK(save, SAVE_BASE);
+GS_CHECK(rt, RT_BASE);
+GS_CHECK(seg1, SEG1_BASE);
+GS_CHECK(img, IMG_BASE);
+GS_CHECK(ani, ANI_BASE);
+GS_CHECK(sc, SC_BASE);
+GS_CHECK(snd, SND_BASE);
+GS_CHECK(cursor_bits, CBITS_BASE);
+_Static_assert(sizeof(struct game_state) == DATA_END - DATA_BASE, "game_state covers 0x431000-0x4c0000");
 extern struct game_state G;
 
 /* After the image is installed: the groups that have moved become aliases
@@ -270,6 +380,8 @@ void state_init(void);
 #define AN_SET(f, v) (G.an.f = (__typeof__(G.an.f))(v))
 #define SC(f) ((uint32_t)G.sc.f)
 #define SC_SET(f, v) (G.sc.f = (__typeof__(G.sc.f))(v))
+#define MV(f) ((uint32_t)G.map.v.f)
+#define MV_SET(f, val) (G.map.v.f = (__typeof__(G.map.v.f))(val))
 #define RT(f) ((uint32_t)G.rt.f)
 #define RT_SET(f, v) (G.rt.f = (__typeof__(G.rt.f))(v))
 
