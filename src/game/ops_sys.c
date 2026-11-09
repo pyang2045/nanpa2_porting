@@ -311,12 +311,12 @@ uint32_t game_op_cursor(void)
 		return loop_at(0x406989);
 	}
 	case 4: {
-		uint32_t src = vm_segment_base(vm_segment_select()) + rd16(ARG(1)), dst = 0x4be900, v = 0;
+		uint32_t src = vm_segment_base(vm_segment_select()) + rd16(ARG(1)), dst = 0, v = 0;
 		X86_COUNT(9);
 		for (int i = 0; i < 0x80; i++) {
 			v = rd32(src);
 			v = v >> 24 | (v >> 8 & 0xff00u) | (v << 8 & 0xff0000u) | v << 24;
-			wr32(dst, v);
+			memcpy((uint8_t *)&G.cursor_bits + dst, &v, 4);
 			src += 4;
 			dst += 4;
 			X86_COUNT(4);

@@ -11,7 +11,7 @@ reimplementation is then no longer byte for byte the original, the differential 
 | Stage | What | State |
 |---|---|---|
 | R0 | deterministic mode, recordings with state checkpoints, replay and compare, a golden set | done |
-| R1 | game state in C structs instead of emulated memory | started: four groups moved, the rest listed below |
+| R1 | game state in C structs instead of emulated memory | done: all of the data area is one C object; what stays addressed and why is listed below |
 | R2 | ordinary C calls instead of register and stack conventions (`cpu.r[]`, `push32`, `go(ra)`, jump units) | not started |
 | R3 | real-time pacing that keeps the original speed (no per-unit charges) | not started |
 | R4 | direct calls into the platform layer instead of HLE thunks | not started |
@@ -122,46 +122,90 @@ take any layout once nothing names the address. Layout is pinned by `_Static_ass
 native address - base)` for every field, so the raw hashes stay valid and a wrong field is a
 compile error.
 
-**Moved** (each verified by all three golden replays, `li.*` and `raw.*`):
+**One object.** `struct game_state` (`G`) is the whole of the data and bss of `nanpa2.exe`
+that the game writes, 0x431000-0x4c0000 (585 KB), in its native layout, backed by a single alias
+(`x86_alias(DATA_BASE, &G, sizeof G)`; `x86_ptr` has a one-comparison fast path for it). Because
+the layout is native, every address the original computed lands where it did, including the
+unchecked script-supplied indices (see "Out-of-range indices"). Members, in address order, each
+offset static-asserted:
 
-| Struct | Native range | Holds |
+| Member | Native range | Holds |
 |---|---|---|
-| `save_image` (`G.save`) | 0x444e78-0x445a78, 0xc00 | script name, 4-bit flags, registers `@`-`Z`, the word array `@[i]` with the named words: map selector, surface select, text delay, VM flags, menu inputs, mouse, the text window and cursor, text colour, size, line height, the menu fields, the base palette, segment bases, the last picture rectangle, the work buffer. **This is the FLAG file.** |
-| `vm_rt` (`G.rt`) | 0x445cdc-0x4462be | VM top ESP, cursor and click-busy flags, click handlers, argument lists, name buffers, input bits, menu list, label tables and their save area, the picture and saved palettes, fade length, the frame counter, stopwatch, store segment, the surface and pitch tables |
-| `screen_state` (`G.sc`) | 0x4aac50-0x4ac51c | cursor background and position, palette start/delta/entries of the fade, scratch surface, window handle, fonts, the DirectDraw lock descriptor, the active/paused flags, the fade and cursor-blink state the timer callback steps |
-| `anim_state` (`G.an`) | 0x4312cc-0x4313c6 | the ten animation slots, last frame, idle word, the script random seed |
+| `head` | 0x431000-0x4312cc | .data head: file name formats and strings (read-only, asset-backed) and the CD prefix at 0x431030 (written once at start-up) |
+| `an` (`anim_state`) | 0x4312cc-0x4313c6 | the ten animation slots, last frame, idle word, the script random seed |
+| `map` (`map_data`) | 0x4313c6-0x435e78 | the cell grid and its shadow, the three drawing work planes, and `map.v` (`map_vars`): locked surface pointers, the 04 26 arguments, event state, mover flags, the sub-op table, the tile offset table (read-only), the position history ring, the path planner's words |
+| `script` | 0x435e78-0x444e78 | MES image, segment 0 (the VM addresses it by offset; offsets above 0xf000 run on into `save` and `rt`, as natively) |
+| `save` (`save_image`) | 0x444e78-0x445a78 | **the FLAG file**: script name, 4-bit flags, registers, the word array with the named words (map selector, text window, colours, menu fields, the base palette, segment bases, ...) |
+| `rt` (`vm_rt`) | 0x445cdc-0x4462be | VM top ESP, cursor and click flags, click handlers, argument lists, name buffers, input bits, menu list, label tables, `palette_picture`, `palette_saved`, fade length, frame counter, stopwatch, store segment, surface and pitch tables |
+| `seg1` | 0x4462be-0x4562be | script segment 1: the map record, tile layers, walk grid, sprite table |
+| `img` | 0x4562be-0x4a62be | segments 2 and 3, the 320 KB picture and GP4 work buffers |
+| `ani` | 0x4a62be-0x4aac50 | the ANI file |
+| `sc` (`screen_state`) | 0x4aac50-0x4ac51c | cursor background and position, the fade (`pal_start`, `pal_delta`, `pal_entries`), scratch surface, window, fonts, the DirectDraw lock descriptor, active/paused, the fade and cursor-blink state the timer callback steps |
+| `snd` | 0x4be540-0x4be900 | the native sound words and buffers: nothing in C reads them (src/hle/sound.c replaced that code) |
+| `cursor_bits` | 0x4be900-0x4beb00 | the 32x32 AND/XOR cursor bitmap (script op 04 15 4) |
+| `pad_*` | the rest | gaps and the C runtime / MP3 library data, never touched |
+
+Named in C (no address): `G.save.*` (`SV`), `G.rt.*` (`RT`), `G.sc.*` (`SC`), `G.an.*` (`AN`),
+`G.map.v.*` (`MV`), the three palette tables and the fade (screen.c, anim.c), the cursor bitmap
+and its saved background, the position history (`hist_*` in map.h). The invariant is checked:
+`NANPA2_DATA_CHECK=1` snapshots the data area of the emulated memory at the start and lists, at
+the end, every range outside an alias that changed; `=2` makes it exit 4. ctest `replay_det`
+runs its replay with it, so a future access that bypasses `G` fails the test. All four golden
+replays also run with it (0 ranges).
 
 **Save files.** The 0xc00-byte `save_image` *is* the file (script op 04 21 writes and reads
-exactly those bytes: `game_file_save`/`game_file_load` pass its emulated address to the C
-runtime, which now lands in the struct). The packed layout and the offsets are static-asserted, so
-existing saves load by construction; `state_save_image()` (state_view.c) is the explicit
-serializer the checkpoint uses and R2's file functions should call. `NANPA2_SAVETEST` and
+exactly those bytes). The packed layout and the offsets are static-asserted, so existing saves
+load by construction. The file functions are still the generic ones of file.c (the same loader
+reads MES and GP4 files into guest buffers and goes through the C runtime thunks, whose FILE
+handles and name strings are emulated memory), so the save image reaches them as the guest
+address of `G.save`; `state_save_image()` (state_view.c) is the explicit serializer the
+checkpoint uses. Calling it from the file layer has to wait for R4, when the C runtime thunks go
+and a file function takes a pointer and a size. `NANPA2_SAVETEST`, the `saveload` golden and
 `replay_det` (FLAG files compared between runs) cover the round trip.
 
-**Named but still addressed.** Accesses whose offset is computed (`rd8(VM_ARG_TYPES + n)`
-deliberately runs past 16 arguments into the values, as natively; animation slots indexed by a
-script number that is not range checked) stay on the address path through the alias, with the
-struct holding the bytes. Arrays (`G.rt.surface`, `G.sc.pal_*`, ...) are converted where the index
-is bounded.
+**Out-of-range indices.** The native code does not range-check script-supplied numbers: an
+animation slot, an argument index, a surface number, a cursor frame, a sprite pattern, a tile
+number, a history entry. Because the objects are laid out as natively and contiguously, such an
+index reads or writes the bytes it did natively, now inside `G`: a slot past 9 runs on into
+`last_frame`, `idle` and the map cells; a surface number past 3 reads the pitch table and then
+segment 1; a tile offset past 1000 reads the history ring; an offset in a segment past 64 KB
+enters the next segment. This is why those accesses are not turned into bounds-checked array
+accesses: they would change behaviour (a script that does it is undefined in the original, but a
+replayed run must stay identical). Where converted code indexes by such a number
+(`cursor_plane`, `hist_*`), it addresses the member by byte offset and may leave it, and the
+`_Static_assert`ed layout says what it lands in. An access that leaves `G` altogether (below
+0x431000 or from 0x4c0000 up) is the emulated memory again, and one that straddles the edge
+traps, as before.
 
-**Still in emulated memory** (R1 to do, in the order that reads best):
+**Still addressed, on purpose.**
 
-1. The script image 0x435e78 (segment 0, 60 KB; the VM and `@` address it by offset, and
-   segment 0 overlaps `G.save`), segment 1 (0x4462be: the map record, tile layers, walk grid and
-   sprite table, `map*.c` ~460 accesses) and segments 2 and 3 (the 320 KB image buffer
-   0x4562be, the ANI file at 0x4a62be, the GP4 work areas): to become buffers owned by a
-   `script`/`map`/`picture` struct, with typed views of the map record and sprites.
-2. The palette tables `G.save.n.palette` (converted) and `palette_picture`/`palette_saved`
-   (named, still read by address in screen.c and anim.c), the DirectDraw object tables
-   (`G.rt.surface`, `G.rt.pitch`) which hold emulated COM object addresses until R4.
-3. The .data between 0x431000 and 0x4312cc (file name formats and strings, read-only: stay as
-   tables behind accessors), the CD prefix, the sound state at 0x4be540-0x4be580 (sound.c
-   reads it by address) and the file/surface structures the HLE layer allocates on the emulated
-   heap (DirectDraw surfaces, COM objects, FILE handles: gone with R4).
-4. The CPU registers and the emulated stack (R2), `x86_icount` (R3).
+1. *Pointers stored in state.* The script segments' bases (`G.save.n.segment[]`, saved in the
+   FLAG image), the program counter and label offsets (offsets from 0x435e78), the animation
+   slots' `start` and `pc` (addresses in the ANI file), the locked pixel pointers, the surface
+   and DirectDraw objects (`G.rt.surface`, `G.sc.scratch_surface`, `ddraw`, `palette_obj`) and
+   `G.rt.top_esp` hold emulated addresses. They are values of the original's address model;
+   turning them into indices or C pointers changes the saved image (segments) or needs R2 (ESP,
+   the registers that carry them) and R4 (the DirectDraw objects).
+2. *The register-style map code.* map*.c, anim.c, ops_*.c, wipe.c and screen.c still carry the
+   native registers (`cpu.r[ESI]` = the sprite, `edi` = a cell) and read through addresses
+   computed from them: `rd16(sp + S_X)`, the cell and shadow grids (`edi = CELLS`),
+   the picture buffers. The bytes are in `G` (the alias) and the address arithmetic is the
+   original's; removing it is R2's job, not a state move.
+3. *The code, .rdata, the stack, the heap.* `x86_mem` outside 0x431000-0x4c0000 holds the exe's
+   code (decoded by the interpreter), the read-only data (tables behind the C runtime and
+   the DirectDraw thunks), the emulated stack (R2) and the heap: the C runtime's FILE handles,
+   DirectDraw and DirectSound surface and COM objects, `malloc`ed buffers, the surfaces' pixels
+   (R4: direct platform calls remove them). `raw.heap` and `raw.stack` still cover them.
+4. *Read-only tables.* `head` (strings and formats) and `map.v.tile_offsets` /`subop` are asset
+   data that the game never writes (the data check proves it for the runs above); they are
+   initialised from the asset at start-up and kept in `G` only because they sit between
+   mutable members. Decision: they stay as asset-backed tables, never copied into the source.
+5. *`x86_icount`* (R3) and the CPU registers (R2).
 
-**Boundary.** The HLE layer and the C runtime still address emulated memory; the aliases are
-how they see moved state. Nothing outside `src/game`, `src/hle` and `src/x86` names `G`.
+**Boundary after R1**, precisely: game state is `G`, a C object. `x86_mem` is used for the exe's
+code and read-only data, the stack, and the heap objects of the HLE layer; the aliases are how
+the C runtime thunks, the HLE layer, bulk copies and the script VM's segment accesses see `G`.
+Nothing outside `src/game`, `src/hle` and `src/x86` names `G`.
 
 ## Tooling after R1
 

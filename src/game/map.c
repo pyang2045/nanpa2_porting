@@ -34,11 +34,11 @@ static uint32_t op_init(void)
 	wr32(m + M_MAP_W, size);
 	uint32_t w = rd16(m + M_MAP_W), h = rd16(m + M_MAP_H);
 	uint32_t grid = ((w * h) * 2 + 4 + rd16(m + M_LAYER)) & 0xffff;
-	wr16(MAP_WALK_BASE, grid);
-	wr8(MAP_AUTOWALK, 0);
-	wr16(MAP_LAST_SPRITE, 0xffff);
-	wr16(MAP_LAST_CLICK, 0xffff);
-	wr16(MAP_LAST_AREA, 0xffff);
+	MV_SET(walk_base, grid);
+	MV_SET(autowalk, 0);
+	MV_SET(last_sprite, 0xffff);
+	MV_SET(last_click, 0xffff);
+	MV_SET(last_area, 0xffff);
 	X86_COUNT(26);
 	return (size & 0xffff0000u) | grid; /* EAX: the size's height over the offset */
 }
@@ -52,16 +52,16 @@ static void op_player_script(void)
 	uint32_t script = rd16(SEG1 + table);
 	wr8(SEG1 + script + 2, 0xc1);
 	wr8(SEG1 + script + 4, 0xc3);
-	wr16(MAP_LAST_SPRITE, 0xffff);
-	wr16(MAP_LAST_CLICK, 0xffff);
-	wr16(MAP_LAST_AREA, 0xffff);
+	MV_SET(last_sprite, 0xffff);
+	MV_SET(last_click, 0xffff);
+	MV_SET(last_area, 0xffff);
 	X86_COUNT(15);
 }
 
 /* the sprite table entry of MAP_ARGS[0] (EDI = M, ESI = the sprite) */
 static uint32_t sprite_arg(uint32_t m)
 {
-	uint32_t n = rd16(MAP_ARGS);
+	uint32_t n = MV(args[0]);
 	return ((n << 4) + rd16(m + M_SPRITES)) & 0xffff;
 }
 
@@ -70,7 +70,7 @@ static uint32_t sprite_arg(uint32_t m)
 static uint32_t op_sprite_script(void)
 {
 	uint32_t s = SEG1 + sprite_arg(map_base());
-	uint32_t b = rd16(MAP_ARGS + 2);
+	uint32_t b = MV(args[1]);
 	wr8(s + S_SCRIPT, b);
 	wr8(s + S_SCRIPT_PC, 0);
 	wr16(s + S_KIND, 0); /* kind and count */
@@ -83,7 +83,7 @@ static uint32_t op_sprite_script(void)
 static uint32_t op_sprite_enable(void)
 {
 	uint32_t s = SEG1 + sprite_arg(map_base());
-	uint32_t b = rd16(MAP_ARGS + 2);
+	uint32_t b = MV(args[1]);
 	if (b == 0)
 		wr8(s + S_FLAGS, rd8(s + S_FLAGS) & ~SPRITE_OFF);
 	else
@@ -97,15 +97,15 @@ static uint32_t op_sprite_enable(void)
 static uint32_t entry_arg(uint32_t m)
 {
 	uint32_t e = rd16(m + M_ENTRIES);
-	uint32_t n2 = rd16(MAP_ARGS) * 2;
+	uint32_t n2 = MV(args[0]) * 2;
 	return SEG1 + e + n2 * 8 + n2;
 }
 
 static void history_fill(void)
 {
 	for (uint32_t i = 1; i < HISTORY_LEN; i++) {
-		wr32(HISTORY + 5 * i, rd32(HISTORY));
-		wr8(HISTORY + 5 * i + 4, rd8(HISTORY + 4));
+		hist_wr32(5 * i, hist_rd32(0));
+		hist_wr8(5 * i + 4, hist_rd8(4));
 		X86_POLL(0x4050f6);
 	}
 	X86_COUNT(5 + 9 * 6);
@@ -116,7 +116,7 @@ static void history_fill(void)
  * limits. Stops the auto-walk. S = the entry's last limit word. */
 static uint32_t op_enter(void)
 {
-	wr8(MAP_AUTOWALK, 0);
+	MV_SET(autowalk, 0);
 	uint32_t m = map_base();
 	uint32_t e = entry_arg(m);
 	wr16(m + M_VIEW_X, rd16(e));
@@ -126,17 +126,17 @@ static uint32_t op_enter(void)
 	wr16(sp + S_X, x);
 	wr16(sp + 0x10 + S_X, x);
 	wr16(sp + 0x20 + S_X, x);
-	wr16(HISTORY + 1, x);
+	hist_wr16(1, x);
 	uint32_t y = rd16(e + 6);
 	wr16(sp + S_Y, y);
 	wr16(sp + 0x10 + S_Y, y);
 	wr16(sp + 0x20 + S_Y, y);
-	wr16(HISTORY + 3, y);
+	hist_wr16(3, y);
 	uint32_t f = rd16(e + 8) & 0xff;
 	wr8(sp + S_FRAME, f);
 	wr8(sp + 0x10 + S_FRAME, f);
 	wr8(sp + 0x20 + S_FRAME, f);
-	wr8(HISTORY, f);
+	hist_wr8(0, f);
 	history_fill();
 	wr32(m + M_MIN_X, rd32(e + 0xa));
 	uint32_t last = rd32(e + 0xe);
@@ -155,15 +155,15 @@ static uint32_t op_reset_history(void)
 	uint32_t x = rd16(sp + S_X);
 	wr16(sp + 0x10 + S_X, x);
 	wr16(sp + 0x20 + S_X, x);
-	wr16(HISTORY + 1, x);
+	hist_wr16(1, x);
 	uint32_t y = rd16(sp + S_Y);
 	wr16(sp + 0x10 + S_Y, y);
 	wr16(sp + 0x20 + S_Y, y);
-	wr16(HISTORY + 3, y);
+	hist_wr16(3, y);
 	uint32_t f = rd8(sp + S_FRAME);
 	wr8(sp + 0x10 + S_FRAME, f);
 	wr8(sp + 0x20 + S_FRAME, f);
-	wr8(HISTORY, f);
+	hist_wr8(0, f);
 	history_fill();
 	wr32(m + M_MIN_X, rd32(e + 0xa));
 	uint32_t last = rd32(e + 0xe);
@@ -180,7 +180,7 @@ static uint32_t op_unpack(void)
 {
 	uint32_t m = map_base();
 	uint32_t dst = rd16(m + M_LAYER);
-	uint32_t src = rd16(MAP_ARGS);
+	uint32_t src = MV(args[0]);
 	uint32_t w = rd16(SEG1 + src), h = rd16(SEG1 + src + 2);
 	wr16(SEG1 + dst, w);
 	wr16(SEG1 + dst + 2, h);
@@ -221,8 +221,8 @@ static uint32_t op_copy_cells(void)
 	uint32_t layer = rd16(m + M_LAYER);
 	uint32_t w = rd16(SEG1 + layer);
 	uint32_t stride = w * 2;
-	uint32_t a = rd16(MAP_ARGS), b = rd16(MAP_ARGS + 2), c = rd16(MAP_ARGS + 4), d = rd16(MAP_ARGS + 6);
-	uint32_t e = rd16(MAP_ARGS + 8), f = rd16(MAP_ARGS + 10);
+	uint32_t a = MV(args[0]), b = MV(args[1]), c = MV(args[2]), d = MV(args[3]);
+	uint32_t e = MV(args[4]), f = MV(args[5]);
 	uint32_t src = (((b * w) & 0xffff) + a) * 2 + 4 + layer;
 	uint32_t dst = (((f * w) & 0xffff) + e) * 2 + 4 + layer;
 	src &= 0xffff;
@@ -253,7 +253,7 @@ static uint32_t op_copy_cells(void)
 /* Sub-op 32, 0x40558f: stop the auto-walk. S = 32. */
 static void op_stop_walk(void)
 {
-	wr8(MAP_AUTOWALK, 0);
+	MV_SET(autowalk, 0);
 	X86_COUNT(2);
 }
 
@@ -268,7 +268,7 @@ void game_map_area_trigger(void)
 	uint32_t sel = SV(map_sel);
 	uint32_t areas = rd16(sel + SEG1 + M_AREAS);
 	uint32_t sprites = rd16(sel + SEG1 + M_SPRITES);
-	uint32_t s = ((((rd16(MAP_ARGS) & 0xffff) << 4) & 0xffff) + sprites) & 0xffff;
+	uint32_t s = ((((MV(args[0]) & 0xffff) << 4) & 0xffff) + sprites) & 0xffff;
 	uint32_t cx = rd16(SEG1 + s + S_X), dx = rd16(SEG1 + s + S_Y);
 	uint32_t bx, ax;
 	X86_COUNT(10);
@@ -329,7 +329,7 @@ int game_map_collide(uint32_t s)
 	}
 	uint32_t dir = (rd8(sp + S_FRAME) >> 1) & 0xff;
 	set8l(EAX, dir);
-	wr8(MAP_DIR, dir);
+	MV_SET(dir, dir);
 	uint32_t sel = SV(map_sel);
 	uint32_t base = rd16(SEG1 + sel + M_SPRITES);
 	uint32_t cx = rd16(sp + S_X), dx = rd16(sp + S_Y);
@@ -445,7 +445,7 @@ fin:
 void game_map_collision(void)
 {
 	uint32_t sel = SV(map_sel);
-	uint32_t n16 = rd16(MAP_ARGS) << 4;
+	uint32_t n16 = MV(args[0]) << 4;
 	uint32_t s = (n16 & 0xffff0000u) | ((n16 + rd16(sel + SEG1 + M_SPRITES)) & 0xffff);
 	cpu.r[EDI] = sel;
 	cpu.r[ESI] = s;

@@ -24,8 +24,6 @@
  */
 #include "game/map.h"
 
-#define RANDOM_SEED 0x435e60u /* u8: the linear congruential state of kind 0xe */
-#define APPROACH 0x435e61u
 
 /* the walk to the destination: the planner if no route is set, else one
  * step along it (kind 13, 0x4046f3) */
@@ -33,7 +31,7 @@ static void walk_to_destination(uint32_t sel, uint32_t sp)
 {
 	cpu.r[EDI] = sel;
 	X86_COUNT(6);
-	if (rd8(MAP_AUTOWALK) == 0xff) {
+	if (MV(autowalk) == 0xff) {
 		X86_COUNT(1); /* call */
 		game_map_walk_step();
 		X86_COUNT(1); /* jmp 0x404448 */
@@ -44,7 +42,7 @@ static void walk_to_destination(uint32_t sel, uint32_t sp)
 		saved[i] = cpu.r[i];
 	cpu.r[ECX] = rd8(sp + S_DEST_X);
 	cpu.r[EDX] = rd8(sp + S_DEST_Y);
-	wr8(APPROACH, 1);
+	MV_SET(approach, 1);
 	X86_COUNT(5);
 	game_map_plan_walk();
 	for (int i = 0; i < 8; i++)
@@ -138,16 +136,16 @@ int game_map_sprite_step(void)
 		X86_COUNT(2);
 		if (hi == 0xc) {
 			uint32_t n = lo * 5;
-			wr8(sp + S_FRAME, rd8(HISTORY + n));
-			wr32(sp + S_X, rd32(HISTORY + 1 + n));
+			wr8(sp + S_FRAME, hist_rd8(n));
+			wr32(sp + S_X, hist_rd32(1 + n));
 			X86_COUNT(9);
 			return 0;
 		}
 		X86_COUNT(2);
 		if (hi == 0xe) {
-			uint32_t r = rd8(RANDOM_SEED);
+			uint32_t r = MV(random_seed);
 			uint32_t nr = ((((r << 2) | (r >> 7)) & 0xff) + r + 1) & 0xff;
-			wr8(RANDOM_SEED, nr);
+			MV_SET(random_seed, nr);
 			hi = (nr & 3) + 1;
 			X86_COUNT(9);
 		}

@@ -1210,3 +1210,25 @@ the check.
   The converter now resolves names per file (tools: scratchpad convaddr.py, not committed).
 - What is left: docs/refactor.md "Still in emulated memory" (script and map buffers, sprites,
   sound words, HLE heap objects), then R2-R4.
+
+## 2026-11-09 (refactor R1 finished: all game state in one C object)
+
+Details: docs/refactor.md "R1", re-notes.md "The data area as one object". (Commit hashes below.)
+
+- `struct game_state G` is now the whole mutable data area 0x431000-0x4c0000 in native layout,
+  one alias (`x86_alias`, fast path in `x86_ptr`): the script image, segment 1 (map), the picture
+  buffers, the ANI file, the map's cells, shadow, work planes and variables (`map_data`), the
+  cursor bitmap, the sound words, the screen/palette/fade, the VM block, the save image and
+  the animation slots. The layout is native, so unchecked script indices (animation slot,
+  surface number, tile number, segment offsets) read and write what they did.
+- Converted to named fields: the three palette tables and the fade (screen.c, anim.c: `memcpy`
+  and arrays instead of `rd32` loops), the cursor bitmap and its saved background, the map
+  variables (`MV()`; ~100 accesses in map*.c), the position history (`hist_*`).
+- New check `NANPA2_DATA_CHECK=1|2` (src/x86/x86.c): lists data-area bytes changed outside an
+  alias; `=2` exits 4. ctest `replay_det` runs its replay with `=2`. Result on all four goldens:
+  0 ranges (before the single alias: 143 ranges, the script, segment 1, the picture buffers, the
+  ANI buffer and the cursor bits).
+- Not moved, and why: pointers stored in state and the register-style address arithmetic of the
+  map, anim and op code (R2), the C runtime and DirectDraw objects on the emulated heap (R4),
+  the FLAG file I/O through the generic file loader (R4, it needs the C runtime thunks to go),
+  the read-only tables of `head` and the tile offset table (asset data). See docs/refactor.md.

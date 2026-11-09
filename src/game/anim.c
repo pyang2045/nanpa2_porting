@@ -27,8 +27,6 @@
 #define ANIM_SLOT_COUNT 10u
 #define ANIM_DATA 0x4a62beu       /* the ANI file */
 #define ANIM_IDLE 0x4313c0u       /* script start of a reset slot */
-#define PALETTE_BASE 0x44530cu    /* u16[16]: the base colours */
-#define PALETTE_REST 0x445eaeu    /* u16[240]: the picture's colours */
 
 #define BLIT_COPY 0x401430u   /* cdecl (x0, y0, w, h, dx, dy, surfaces) */
 #define BLIT_MASKED 0x4014f0u /* the same, colour 8 transparent */
@@ -68,10 +66,8 @@ enum {
  * the palette tables. Registers and flags are kept. */
 void game_palette_copy(uint32_t src)
 {
-	for (uint32_t i = 0; i < 8; i++)
-		wr32(PALETTE_BASE + 4 * i, rd32(src + 4 * i));
-	for (uint32_t i = 0; i < 0x78; i++)
-		wr32(PALETTE_REST + 4 * i, rd32(src + 32 + 4 * i));
+	memcpy(G.save.n.palette, x86_ptr(src, 32), 32);
+	memcpy(G.rt.palette_picture, x86_ptr(src + 32, 480), 480);
 	X86_COUNT(14 + 8 + 0x78);
 }
 
