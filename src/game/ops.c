@@ -18,6 +18,7 @@
 #include "game/expr.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 /* back to the loop, as the native `jmp 0x4060f9` at native_pc */
 static uint32_t to_loop(uint32_t pc, uint32_t native_pc)
@@ -92,15 +93,15 @@ uint32_t game_op_store_words(void)
 {
 	uint32_t pc = cpu.r[ESI];
 	uint32_t r = reg_index(&pc);
-	wr32(VM_STORE_SEGMENT, vm_segment_select());
+	RT_SET(store_segment, vm_segment_select());
 	if (r == 0)
-		wr32(VM_STORE_SEGMENT, 0);
+		RT_SET(store_segment, 0);
 	uint32_t base = vm_reg(r);
 	uint32_t off = base + 2 * vm_eval(&pc);
 	X86_COUNT(16);
 	do {
 		uint32_t v = vm_eval(&pc);
-		wr16(vm_segment_base(rd32(VM_STORE_SEGMENT)) + off, v);
+		wr16(vm_segment_base(RT(store_segment)) + off, v);
 		off += 2;
 		X86_COUNT(12);
 	} while (another(&pc, 0x406555));
@@ -159,7 +160,7 @@ uint32_t game_op_text_colour(void)
 {
 	uint32_t pc = cpu.r[ESI], c;
 	vm_parse_args(&pc, &c);
-	wr16(VM_TEXT_COLOUR, c);
+	SV_SET(text_colour, c);
 	X86_COUNT(4);
 	return to_loop(pc, 0x4069c9);
 }

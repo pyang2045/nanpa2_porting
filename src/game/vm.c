@@ -13,6 +13,7 @@
 #include "game/expr.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 uint32_t vm_eval(uint32_t *pc)
 {
@@ -124,12 +125,12 @@ void game_skip_block_regs(void)
 void game_vm_init_regs(void)
 {
 	vm_set_reg(0, VM_ARRAY - VM_SCRIPT);
-	wr32(VM_SEGMENTS + 0, VM_SCRIPT);
-	wr32(VM_SEGMENTS + 4, VM_SEGMENT1);
-	wr32(VM_SEGMENTS + 8, VM_SEGMENT2);
-	wr32(VM_SEGMENTS + 12, VM_SEGMENT2);
-	wr16(VM_ARRAY, VM_ARRAY0_BUFFER - VM_SCRIPT);
-	wr16(VM_MENU_LIST_PTR, VM_MENU_LIST - VM_SCRIPT);
+	G.save.n.segment[0] = VM_SCRIPT;
+	G.save.n.segment[1] = VM_SEGMENT1;
+	G.save.n.segment[2] = VM_SEGMENT2;
+	G.save.n.segment[3] = VM_SEGMENT2;
+	G.save.n.w0_4[0] = (uint16_t)(VM_ARRAY0_BUFFER - VM_SCRIPT);
+	SV_SET(menu_list_ptr, VM_MENU_LIST - VM_SCRIPT);
 	X86_COUNT(17);
 }
 

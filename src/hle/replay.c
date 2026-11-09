@@ -177,14 +177,16 @@ static int build_cp(char *out, size_t cap)
 	ADD(" li.flags=%d/%016" PRIx64, nsaves, sv);
 	ADD(" raw.icount=%" PRIu64, (uint64_t)x86_icount);
 	ADD(" raw.cpu=%016" PRIx64, replay_hash(&cpu.r[0], sizeof cpu.r, 0));
-	ADD(" raw.data=%016" PRIx64, replay_hash(x86_ptr(DATA_LO, DATA_HI - DATA_LO), DATA_HI - DATA_LO, 0));
+	static uint8_t data[DATA_HI - DATA_LO];
+	x86_read_virtual(DATA_LO, data, sizeof data);
+	ADD(" raw.data=%016" PRIx64, replay_hash(data, sizeof data, 0));
 	uint32_t heap = x86_heap_top();
 	ADD(" raw.heap=%016" PRIx64, replay_hash(x86_ptr(HEAP_BASE, heap - HEAP_BASE), heap - HEAP_BASE, 0));
 	ADD(" raw.stack=%016" PRIx64, replay_hash(x86_ptr(cpu.r[ESP], STACK_TOP - cpu.r[ESP]), STACK_TOP - cpu.r[ESP], 0));
 	ADD(" raw.pg=");
-	for (uint32_t a = DATA_LO; a < DATA_HI; a += PAGE) {
-		uint32_t len = DATA_HI - a < PAGE ? DATA_HI - a : PAGE;
-		ADD("%04x", (unsigned)(replay_hash(x86_ptr(a, len), len, 0) & 0xffff));
+	for (uint32_t a = 0; a < sizeof data; a += PAGE) {
+		uint32_t len = sizeof data - a < PAGE ? (uint32_t)sizeof data - a : PAGE;
+		ADD("%04x", (unsigned)(replay_hash(data + a, len, 0) & 0xffff));
 	}
 #undef ADD
 	return (int)n;

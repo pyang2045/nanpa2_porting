@@ -14,6 +14,7 @@
  * touched. Only the diff builds use this.
  */
 #include "game/map.h"
+#include "game/state.h"
 
 /* a xorshift generator */
 static uint32_t rnd(uint32_t *s)
@@ -41,7 +42,7 @@ struct world {
 static struct world world(void)
 {
 	struct world w;
-	w.sel = rd16(MAP_SEL);
+	w.sel = SV(map_sel);
 	w.m = SEG1 + w.sel;
 	w.mw = rd16(w.m + M_MAP_W);
 	w.mh = rd16(w.m + M_MAP_H);
@@ -450,7 +451,7 @@ static int fuzz_chain_base(uint32_t *s, struct world *w)
 	wr8(MAP_AUTOWALK, chance(s, 20) ? 0xff : 0);
 	wr8(MAP_MOVED, chance(s, 50) ? 0xff : 0);
 	wr8(0x435572u, chance(s, 50) ? 0xff : 0);
-	wr8(0x445ce0u, chance(s, 70));
+	RT_SET(cursor_shown, chance(s, 70));
 	wr8(0x445d8fu, (uint8_t)(chance(s, 60) ? rnd(s) & 0x0f : 0) | (chance(s, 20) ? 0x10 : 0) |
 	               (chance(s, 20) ? 0x20 : 0));
 	for (uint32_t i = 0; i < 5 * HISTORY_LEN; i++)

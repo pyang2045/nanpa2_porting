@@ -48,6 +48,7 @@
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "hle/logo.h"
+#include "game/state.h"
 #include "hle/replay.h"
 #include "hle/status.h"
 #include "launch.h"
@@ -201,6 +202,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 		fprintf(stderr, "%s\n", err);
 		return 1;
 	}
+	state_init();
 #ifdef NANPA2_HAVE_RECOMP
 	x86_lockstep_init();
 #endif

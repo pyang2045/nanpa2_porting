@@ -10,6 +10,7 @@
 #include "dev.h"
 #include "status.h"
 #include "platform/present.h"
+#include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
 #define WM_DESTROY 0x0002
@@ -314,7 +315,7 @@ static uint32_t dispatch(const struct msg *m)
 	uint32_t r = x86_call(win32_wndproc, 4, args);
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
-			rd8(0x445d8f), rd32(0x446292));
+			RT(input_bits), RT(frame));
 	return r;
 }
 
@@ -404,7 +405,7 @@ void x86_probe(uint32_t pc)
 		if (vm)
 			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
 				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
-				rd8(0x435e7a + cpu.r[ESI]), rd32(0x446292), (unsigned long long)x86_icount);
+				rd8(0x435e7a + cpu.r[ESI]), RT(frame), (unsigned long long)x86_icount);
 		return;
 	}
 	if (pc == 0x4071bb) { /* script hit test 0x4071a4: edi = rectangle table */
@@ -412,7 +413,7 @@ void x86_probe(uint32_t pc)
 		return;
 	}
 	if (on)
-		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), rd32(0x446292), (unsigned long long)x86_icount);
+		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), RT(frame), (unsigned long long)x86_icount);
 }
 
 void x86_poll(void)
@@ -424,7 +425,7 @@ void x86_poll(void)
 		log = getenv("NANPA2_LOG") != NULL;
 	if (log && SDL_GetTicks() - last_log > 1000) {
 		last_log = SDL_GetTicks();
-		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, rd32(0x446292), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
+		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, RT(frame), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
 	}
 	x86_poll_countdown = 2000;
 	status_main();

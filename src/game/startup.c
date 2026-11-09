@@ -18,6 +18,7 @@
 #include "game/startup.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 /* import address table slots (the loaded image's .idata) */
 #define IAT_DDRAWCREATE 0x41b000u
@@ -57,7 +58,6 @@
 
 /* the game's globals */
 #define HWND_MAIN 0x4ab05cu
-#define HINSTANCE_G 0x4ac06cu
 #define CD_PREFIX 0x431030u    /* "X:\" of the CD found, or empty */
 #define DDRAW 0x4ac4f0u
 #define PALETTE_OBJ 0x4ac4f4u
@@ -71,18 +71,7 @@
 #define DESC_PITCH (SURFACE_DESC + 16)
 #define DESC_CAPS (SURFACE_DESC + 0x68)
 #define PALETTE_ENTRIES 0x4ac07cu /* 256 x 4 bytes */
-#define LETTERBOX 0x4ac068u     /* 1: the 640x480 image sits 40 lines down */
 #define FONTS 0x4ac070u         /* u32[3] */
-#define TIMER_ID 0x4ac500u
-#define FADE_ACTIVE 0x4ac504u
-#define ACTIVE 0x4ac4ecu        /* the timer runs the game only while active */
-#define PAUSED 0x4ac518u
-#define CURSOR_SHOWN 0x4ac510u
-#define CURSOR_X 0x4ac064u
-#define CURSOR_Y 0x4ac060u
-#define INPUT_BITS 0x445d8fu    /* u8: 1 up 2 down 4 left 8 right 0x10 ok 0x20 cancel 0x40 ctrl 0x80 end */
-#define MOUSE_X 0x4452e2u       /* u16 */
-#define MOUSE_Y 0x4452e4u       /* u16, 0-399 (rows of the game image) */
 
 #define CD_FMT 0x431188u        /* "%sSPEECH\A\A10930.WAV" */
 #define CD_FALLBACK_FILE 0x431174u /* "SPEECH\A\A10930.WAV" */
@@ -197,7 +186,7 @@ uint32_t game_display_init(void)
 	X86_COUNT(4);
 	IMPORT(IAT_SHOWCURSOR, 1);
 	/* DirectSound: the HLE 0x402ad0 (cdecl, the window) */
-	cdecl_call(0x402ad0, 1, (const uint32_t[]){ rd32(HWND_MAIN) });
+	cdecl_call(0x402ad0, 1, (const uint32_t[]){ SC(hwnd) });
 	X86_COUNT(2);
 	if (IMPORT(IAT_DDRAWCREATE, 0, DDRAW, 0) != 0) {
 		message_box(MSG_DD_ERROR, MSG_TITLE_ERROR);
@@ -206,10 +195,10 @@ uint32_t game_display_init(void)
 		X86_COUNT(5);
 		return 0;
 	}
-	uint32_t dd = rd32(DDRAW);
+	uint32_t dd = SC(ddraw);
 	X86_COUNT(2);
-	COM(dd, DD_SETCOOPERATIVELEVEL, rd32(HWND_MAIN), 0x11);
-	dd = rd32(DDRAW);
+	COM(dd, DD_SETCOOPERATIVELEVEL, SC(hwnd), 0x11);
+	dd = SC(ddraw);
 	if (COM(dd, DD_SETDISPLAYMODE, 640, 480, 8) != 0) {
 		message_box(MSG_MODE_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
@@ -218,12 +207,12 @@ uint32_t game_display_init(void)
 		return 0;
 	}
 	/* the screen: a primary surface */
-	wr32(LETTERBOX, 1);
+	SC_SET(letterbox, 1);
 	wr32(SURFACE_DESC, 0x6c);
 	wr32(DESC_FLAGS, 1);
 	wr32(DESC_CAPS, 0x200);
 	X86_COUNT(5);
-	dd = rd32(DDRAW);
+	dd = SC(ddraw);
 	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES, 0);
 	uint32_t screen = rd32(SURFACES);
 	COM1(screen, SURF_RESTORE);
@@ -240,9 +229,9 @@ uint32_t game_display_init(void)
 	for (uint32_t i = 0; i < 256; i++)
 		wr32(PALETTE_ENTRIES + 4 * i, 0);
 	X86_COUNT(5 + 256);
-	dd = rd32(DDRAW);
+	dd = SC(ddraw);
 	COM(dd, DD_CREATEPALETTE, 0x44, PALETTE_ENTRIES, PALETTE_OBJ, 0);
-	COM(rd32(SURFACES), SURF_SETPALETTE, rd32(PALETTE_OBJ));
+	COM(rd32(SURFACES), SURF_SETPALETTE, SC(palette_obj));
 	X86_COUNT(4);
 	/* three off-screen surfaces 640 x 400 (system memory, colour key 8) */
 	wr32(DESC_FLAGS, 7);
@@ -251,7 +240,7 @@ uint32_t game_display_init(void)
 	wr32(DESC_HEIGHT, 400);
 	X86_COUNT(5);
 	for (uint32_t i = 0; i < 3; i++) {
-		dd = rd32(DDRAW);
+		dd = SC(ddraw);
 		COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES + 4 + 4 * i, 0);
 		COM(rd32(SURFACES + 4 + 4 * i), SURF_SETCOLORKEY, 8, key);
 		wr32(PITCHES + 4 + 4 * i, 640);
@@ -259,7 +248,7 @@ uint32_t game_display_init(void)
 	}
 	/* the 640 x 480 scratch surface the text is drawn into */
 	wr32(DESC_HEIGHT, 480);
-	dd = rd32(DDRAW);
+	dd = SC(ddraw);
 	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SCRATCH_SURFACE, 0);
 	X86_COUNT(6);
 	/* fonts by size: 15, 24 and 32 pixels, Big5 */
@@ -271,7 +260,7 @@ uint32_t game_display_init(void)
 		X86_COUNT(7);
 	}
 	/* the 16 ms timer: the callback 0x4028c0 is the HLE */
-	wr32(TIMER_ID, IMPORT(IAT_TIMESETEVENT, 0x10, 0x10, 0x4028c0, 0, 1));
+	SC_SET(timer_id, IMPORT(IAT_TIMESETEVENT, 0x10, 0x10, 0x4028c0, 0, 1));
 	IMPORT(IAT_SHOWCURSOR, 0);
 	X86_COUNT(8);
 	cpu.r[ESP] = esp;
@@ -295,8 +284,8 @@ static void release_at(uint32_t slot)
 void game_shutdown(void)
 {
 	X86_COUNT(2);
-	if (rd32(TIMER_ID))
-		IMPORT(IAT_TIMEKILLEVENT, rd32(TIMER_ID));
+	if (SC(timer_id))
+		IMPORT(IAT_TIMEKILLEVENT, SC(timer_id));
 	for (int i = 2; i >= 0; i--)
 		IMPORT(IAT_DELETEOBJECT, rd32(FONTS + 4 * (uint32_t)i));
 	X86_COUNT(5);
@@ -342,7 +331,7 @@ uint32_t game_winmain(void)
 	push32(cpu.r[EDI]);
 	cpu.r[EDI] = 0;
 	X86_COUNT(5);
-	wr32(HINSTANCE_G, hinst);
+	SC_SET(hinstance, hinst);
 	/* the class: style 0, window procedure 0x4021c0, no extra bytes */
 	wr32(wc + 0, 0);
 	wr32(wc + 4, 0x4021c0);
@@ -363,7 +352,7 @@ uint32_t game_winmain(void)
 	uint32_t height = IMPORT(IAT_GETSYSMETRICS, 1);
 	uint32_t width = IMPORT(IAT_GETSYSMETRICS, 0);
 	wr32(HWND_MAIN, IMPORT(IAT_CREATEWINDOW, 0, WND_CLASS, WND_CLASS, 0x80000000u, 0, 0, width, height, 0, 0,
-	                       rd32(HINSTANCE_G), 0));
+	                       SC(hinstance), 0));
 	X86_COUNT(3);
 	game_cd_search();
 	if (!cpu.r[EAX]) {
@@ -379,8 +368,8 @@ uint32_t game_winmain(void)
 		X86_COUNT(1);
 		return winmain_return(0);
 	}
-	IMPORT(IAT_SHOWWINDOW, rd32(HWND_MAIN), 5);
-	IMPORT(IAT_UPDATEWINDOW, rd32(HWND_MAIN));
+	IMPORT(IAT_SHOWWINDOW, SC(hwnd), 5);
+	IMPORT(IAT_UPDATEWINDOW, SC(hwnd));
 	X86_COUNT(2);
 	push32(0x4021a3);
 	X86_COUNT(1);
@@ -426,7 +415,7 @@ static void voice_stop(void)
  * again). The cursor routines are native until the screen module is C. */
 static void paint(void)
 {
-	uint32_t dd = rd32(DDRAW);
+	uint32_t dd = SC(ddraw);
 	COM(dd, DD_WAITVBLANK, 1, 0);
 	X86_COUNT(2);
 	game_cursor_restore();
@@ -459,11 +448,11 @@ void game_wndproc(void)
 	X86_COUNT(5);
 	if (msg == 0x200) { /* WM_MOUSEMOVE */
 		uint32_t lp = LPARAM_ARG, x = lp & 0xffff, y = lp >> 16;
-		wr32(CURSOR_X, x);
-		wr16(MOUSE_X, x);
-		wr32(CURSOR_Y, y);
+		SC_SET(cursor_x, x);
+		SV_SET(mouse_x, x);
+		SC_SET(cursor_y, y);
 		X86_COUNT(15);
-		ecx = rd32(LETTERBOX);
+		ecx = SC(letterbox);
 		if (ecx) {
 			y = (y - 0x28) & 0xffff;
 			X86_COUNT(4);
@@ -477,9 +466,9 @@ void game_wndproc(void)
 				X86_COUNT(2);
 			}
 		}
-		wr16(MOUSE_Y, y);
+		SV_SET(mouse_y, y);
 		X86_COUNT(2);
-		if (rd32(CURSOR_SHOWN)) {
+		if (SC(cursor_on)) {
 			X86_COUNT(1);
 			paint();
 		}
@@ -492,13 +481,13 @@ void game_wndproc(void)
 		case 0x201: /* left button down: stop the voice, OK pressed */
 		case 0x204: { /* right button down: cancel pressed */
 			voice_stop();
-			wr8(INPUT_BITS, rd8(INPUT_BITS) | (msg == 0x201 ? 0x10 : 0x20));
+			RT_SET(input_bits, RT(input_bits) | (msg == 0x201 ? 0x10 : 0x20));
 			X86_COUNT(4);
 			goto done;
 		}
 		case 0x202:
 		case 0x205:
-			wr8(INPUT_BITS, rd8(INPUT_BITS) & ~(msg == 0x202 ? 0x10 : 0x20));
+			RT_SET(input_bits, RT(input_bits) & ~(msg == 0x202 ? 0x10 : 0x20));
 			X86_COUNT(4);
 			goto done;
 		}
@@ -511,13 +500,13 @@ void game_wndproc(void)
 			goto done;
 		if (wp == 0x70) { /* F1 */
 			X86_COUNT(5);
-			host_call(IAT_DESTROYWINDOW, 1, (const uint32_t[]){ rd32(HWND_MAIN) });
+			host_call(IAT_DESTROYWINDOW, 1, (const uint32_t[]){ SC(hwnd) });
 			goto done;
 		}
 		uint32_t bit = key_bit(wp);
 		X86_COUNT(5);
 		if (bit)
-			wr8(INPUT_BITS, rd8(INPUT_BITS) | bit);
+			RT_SET(input_bits, RT(input_bits) | bit);
 		goto done;
 	}
 	if (msg > 0x100) {
@@ -533,7 +522,7 @@ void game_wndproc(void)
 		if (bit == 0x10 || bit == 0x20)
 			voice_stop(); /* Enter, Space, Escape, Insert */
 		if (bit)
-			wr8(INPUT_BITS, rd8(INPUT_BITS) & ~bit);
+			RT_SET(input_bits, RT(input_bits) & ~bit);
 		goto done;
 	}
 	X86_COUNT(3);
@@ -547,8 +536,8 @@ void game_wndproc(void)
 	if (msg != 0x1c) /* WM_ACTIVATEAPP */
 		goto def;
 	if (WPARAM_ARG == 0) { /* deactivated: pause the sound, stop the game's clock */
-		wr32(PAUSED, 1);
-		wr32(ACTIVE, 0);
+		SC_SET(paused, 1);
+		SC_SET(active, 0);
 		X86_COUNT(5);
 		voice_stop();
 		X86_COUNT(1);
@@ -556,12 +545,12 @@ void game_wndproc(void)
 		goto done;
 	}
 	X86_COUNT(3);
-	if (rd32(PAUSED)) {
+	if (SC(paused)) {
 		X86_COUNT(1);
 		game_ncall(0x403250, 0); /* music resume (HLE) */
 	}
 	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ HWND_ARG });
-	wr32(ACTIVE, 1);
+	SC_SET(active, 1);
 	X86_COUNT(5);
 	goto done;
 def:

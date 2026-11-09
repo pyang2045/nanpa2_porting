@@ -20,15 +20,13 @@
  */
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define ANIM_SLOTS 0x4312ccu
 #define ANIM_SLOT_SIZE 24u
 #define ANIM_SLOT_COUNT 10u
 #define ANIM_DATA 0x4a62beu       /* the ANI file */
-#define ANIM_LAST_FRAME 0x4313bcu /* u32: the frame the slots last ran */
 #define ANIM_IDLE 0x4313c0u       /* script start of a reset slot */
-#define FRAME 0x446292u           /* u32: frames since start (60 Hz timer) */
-#define VM_FLAGS9 0x4452e0u       /* u8 @[9]: bit 1 stops the per-frame step */
 #define PALETTE_BASE 0x44530cu    /* u16[16]: the base colours */
 #define PALETTE_REST 0x445eaeu    /* u16[240]: the picture's colours */
 
@@ -204,18 +202,18 @@ void game_anim_run_slot(void)
 void game_anim_step(void)
 {
 	X86_COUNT(2);
-	if (rd8(VM_FLAGS9) & 2) {
+	if (SV(vflags) & 2) {
 		X86_COUNT(1);
 		return;
 	}
-	uint32_t frame = rd32(FRAME);
+	uint32_t frame = RT(frame);
 	cpu.r[EAX] = frame;
 	X86_COUNT(3);
-	if (frame == rd32(ANIM_LAST_FRAME)) {
+	if (frame == AN(last_frame)) {
 		X86_COUNT(1);
 		return;
 	}
-	wr32(ANIM_LAST_FRAME, frame);
+	AN_SET(last_frame, frame);
 	push32(cpu.r[ESI]);
 	X86_COUNT(3);
 	for (uint32_t n = ANIM_SLOT_COUNT; n; n--) {
@@ -351,12 +349,12 @@ uint32_t game_anim_control_piece(void)
  * itself), then `ret`. */
 uint32_t game_anim_wait_piece(void)
 {
-	uint32_t frame = rd32(FRAME);
+	uint32_t frame = RT(frame);
 	cpu.r[EAX] = frame;
 	X86_COUNT(3);
-	if (frame == rd32(ANIM_LAST_FRAME))
+	if (frame == AN(last_frame))
 		return 0x4035b5;
-	wr32(ANIM_LAST_FRAME, frame);
+	AN_SET(last_frame, frame);
 	X86_COUNT(2);
 	game_anim_run_slot();
 	X86_COUNT(2);

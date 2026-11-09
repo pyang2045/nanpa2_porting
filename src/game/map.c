@@ -19,6 +19,7 @@
  * AX as the native one does.
  */
 #include "game/map.h"
+#include "game/state.h"
 
 /* ---- the sub-ops */
 
@@ -264,7 +265,7 @@ static void op_stop_walk(void)
  * compared. */
 void game_map_area_trigger(void)
 {
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t areas = rd16(sel + SEG1 + M_AREAS);
 	uint32_t sprites = rd16(sel + SEG1 + M_SPRITES);
 	uint32_t s = ((((rd16(MAP_ARGS) & 0xffff) << 4) & 0xffff) + sprites) & 0xffff;
@@ -329,7 +330,7 @@ int game_map_collide(uint32_t s)
 	uint32_t dir = (rd8(sp + S_FRAME) >> 1) & 0xff;
 	set8l(EAX, dir);
 	wr8(MAP_DIR, dir);
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t base = rd16(SEG1 + sel + M_SPRITES);
 	uint32_t cx = rd16(sp + S_X), dx = rd16(sp + S_Y);
 	uint32_t bx = cpu.r[EBX];
@@ -443,7 +444,7 @@ fin:
  * sprite in the way, or 0xffff. */
 void game_map_collision(void)
 {
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t n16 = rd16(MAP_ARGS) << 4;
 	uint32_t s = (n16 & 0xffff0000u) | ((n16 + rd16(sel + SEG1 + M_SPRITES)) & 0xffff);
 	cpu.r[EDI] = sel;

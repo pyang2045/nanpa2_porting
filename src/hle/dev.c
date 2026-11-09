@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "explore.h"
+#include "game/state.h"
 #include "hle.h"
 #include "platform/present.h"
 #include "replay.h"
@@ -116,7 +117,7 @@ static uint32_t clock_now(void)
 		const char *c = getenv("NANPA2_INPUT_CLOCK");
 		frames = (c && !strcmp(c, "frames")) || replay_det();
 	}
-	return frames ? rd32(0x446292) * 16u : dev_now();
+	return frames ? RT(frame) * 16u : dev_now();
 }
 
 static void save_frame(const uint8_t *frame, const uint32_t pal[256], const char *path)
@@ -204,9 +205,8 @@ static void sync_check(const char *name, int vm, uint32_t off)
 			input[k].done = 1;
 		if (log_on())
 			fprintf(stderr, "dev: sync %s at %u ms frame %u (script RS %u RV %u RN %u)\n",
-				e->file, seg_start[e->seg], rd32(0x446292),
-				rd16(0x445298 + 2 * ('S' - 0x40)), rd16(0x445298 + 2 * ('V' - 0x40)),
-				rd16(0x445298 + 2 * ('N' - 0x40)));
+				e->file, seg_start[e->seg], RT(frame),
+				G.save.reg['S' - 0x40], G.save.reg['V' - 0x40], G.save.reg['N' - 0x40]);
 		return;
 	}
 }
@@ -248,7 +248,7 @@ void dev_hit_table(uint32_t table)
 	last_at = table;
 	last_len = len;
 	memcpy(last, x86_ptr(table, len), len);
-	fprintf(stderr, "hotspots at %06x frame %u:", table, rd32(0x446292));
+	fprintf(stderr, "hotspots at %06x frame %u:", table, RT(frame));
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t e = table + 10 * i;
 		fprintf(stderr, " %04x(%u,%u)-(%u,%u)", rd16(e), rd16(e + 2), rd16(e + 4),
@@ -272,8 +272,8 @@ static void click_test(void)
 	wr8(0x435e78u + BLOCK, 0x01);
 	wr8(0x435e78u + BLOCK + 1, 0x10);
 	wr8(0x435e78u + BLOCK + 2, 0x00);
-	wr16(0x445ce2, BLOCK);
-	wr16(0x445ce4, BLOCK);
+	RT_SET(click_handler[0], BLOCK);
+	RT_SET(click_handler[1], BLOCK);
 }
 
 void dev_inject(void)
@@ -293,7 +293,7 @@ void dev_inject(void)
 		e->done = 1;
 		if (log_on())
 			fprintf(stderr, "dev: %s %d,%d at %u ms frame %u\n", e->kind, e->x, e->y, now,
-				rd32(0x446292));
+				RT(frame));
 		uint32_t lp = ((uint32_t)e->y << 16) | (uint32_t)e->x;
 		if (!strcmp(e->kind, "move")) {
 			win32_post_ext(0x200, 0, lp);

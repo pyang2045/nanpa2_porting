@@ -68,6 +68,10 @@ and the block-by-block comparison of the two (`NANPA2_LOCKSTEP=1`, `src/x86/lock
 - `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
   minimp3, public domain).
 
+Refactor (docs/refactor.md): replay is the check for every step (`--record FILE`, `--replay FILE`,
+`NANPA2_DETERMINISTIC=1`); game state is moving into the structs of `src/game/state.h`; the diff harness,
+fuzz, lockstep and recomp are frozen.
+
 Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`

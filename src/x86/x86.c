@@ -286,3 +286,60 @@ void x86_free(uint32_t addr)
 	if (b + rd32(b) == heap_top)
 		heap_top = b;
 }
+
+/* ---------------------------------------------------------------- aliases */
+
+#define MAX_ALIAS 512
+static struct alias {
+	uint32_t addr, size;
+	uint8_t *ptr;
+} aliases[MAX_ALIAS];
+static int naliases;
+static uint16_t alias_tab[X86_ALIAS_HI - X86_ALIAS_LO]; /* alias number + 1 per byte */
+
+void x86_alias(uint32_t addr, void *obj, uint32_t size)
+{
+	if (naliases >= MAX_ALIAS || addr < X86_ALIAS_LO || addr + size > X86_ALIAS_HI || !size)
+		x86_trap(0, "bad alias");
+	for (uint32_t i = 0; i < size; i++)
+		if (alias_tab[addr - X86_ALIAS_LO + i])
+			x86_trap(0, "overlapping alias");
+	memcpy(obj, x86_mem + (addr - MEM_BASE), size);
+	aliases[naliases] = (struct alias){ addr, size, obj };
+	naliases++;
+	for (uint32_t i = 0; i < size; i++)
+		alias_tab[addr - X86_ALIAS_LO + i] = (uint16_t)naliases;
+}
+
+uint8_t *x86_alias_ptr(uint32_t a, uint32_t n)
+{
+	if (!n)
+		return x86_mem + (a - MEM_BASE);
+	uint32_t last = a + n - 1;
+	uint16_t t0 = a >= X86_ALIAS_LO && a < X86_ALIAS_HI ? alias_tab[a - X86_ALIAS_LO] : 0;
+	uint16_t t1 = last >= X86_ALIAS_LO && last < X86_ALIAS_HI ? alias_tab[last - X86_ALIAS_LO] : 0;
+	if (t0 && t0 == t1) {
+		const struct alias *al = &aliases[t0 - 1];
+		return al->ptr + (a - al->addr);
+	}
+	if (!t0 && !t1) {
+		/* no alias in between either */
+		for (int i = 0; i < naliases; i++)
+			if (aliases[i].addr < a + n && aliases[i].addr + aliases[i].size > a)
+				x86_trap(a, "memory access straddles an alias");
+		return x86_mem + (a - MEM_BASE);
+	}
+	x86_trap(a, "memory access straddles an alias");
+}
+
+void x86_read_virtual(uint32_t a, void *dst, uint32_t n)
+{
+	memcpy(dst, x86_mem + (a - MEM_BASE), n);
+	for (int i = 0; i < naliases; i++) {
+		uint32_t lo = aliases[i].addr > a ? aliases[i].addr : a;
+		uint32_t e1 = aliases[i].addr + aliases[i].size, e2 = a + n;
+		uint32_t hi = e1 < e2 ? e1 : e2;
+		if (lo < hi)
+			memcpy((uint8_t *)dst + (lo - a), aliases[i].ptr + (lo - aliases[i].addr), hi - lo);
+	}
+}

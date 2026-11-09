@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+#include "game/state.h"
 #include "x86/x86.h"
 
 /* MES script image (loaded by 0x401050 from the file named at
@@ -18,24 +19,18 @@
 #define VM_SCRIPT 0x435e78u
 #define VM_SCRIPT_NAME 0x444e78u
 
-/* 4-bit script flags, two per byte: flag n is in byte n/2, the low nibble
- * for even n, the high nibble for odd n. */
-#define VM_FLAGS 0x444e98u
-
-/* Registers '@' (0x40) to 'Z' (0x5a): 27 u16. Register '@' holds the
+/* The saved state (flags, registers, the word array @[i], the text window) is
+ * G.save (state.h): flags are 4-bit, two per byte, flag n in byte n/2 (low
+ * nibble for even n). Registers '@' (0x40) to 'Z' (0x5a): 27 u16. Register '@' holds the
  * segment-0 offset of the word array VM_ARRAY (set by 0x406395), so
  * expressions index the array through it. */
-#define VM_REGS 0x445298u
 #define VM_REG_COUNT 27
 #define VM_ARRAY 0x4452ceu
 
-/* Word 7 of that array (@[7]) selects the data segment that array
- * expressions and assignments use. */
-#define VM_SEGMENT_SELECT 0x4452dcu
-
-/* Segment base addresses (u32 each): 0 = the script image, 1 = 0x4462be,
- * 2 and 3 = 0x4562be (0x406395). */
-#define VM_SEGMENTS 0x44533cu
+/* @[7] (G.save.n.segment_select) selects the data segment that array
+ * expressions and assignments use. Segment base addresses (G.save.n.segment,
+ * u32 each): 0 = the script image, 1 = 0x4462be, 2 and 3 = 0x4562be
+ * (0x406395). */
 
 /* Seed of the script random number generator (u16). */
 #define VM_RANDOM_SEED 0x4313c4u
@@ -44,7 +39,6 @@
  * segment-0 offset of a work buffer, word 22 (@[22]) that of the menu item
  * list that op 04 14 fills. */
 #define VM_ARRAY0_BUFFER 0x445396u
-#define VM_MENU_LIST_PTR 0x4452fau
 #define VM_MENU_LIST 0x445d90u
 /* Segment bases 1-3. */
 #define VM_SEGMENT1 0x4462beu
@@ -63,9 +57,7 @@ enum { VM_ARG_EXPR = 1, VM_ARG_STRING = 2, VM_ARG_BLOCK = 3 };
 /* Click handler labels (op 04 20): 0 left button, 1 right; u16 offsets. */
 #define VM_CLICK_HANDLERS 0x445ce2u
 /* Text colour (op 18): u16, low nibble foreground, next nibble background. */
-#define VM_TEXT_COLOUR 0x4452f4u
 /* Segment that op 0d stores into: u32, @[7] or 0 for register '@'. */
-#define VM_STORE_SEGMENT 0x44629au
 
 /* Register S ('S' = 0x53, index 0x13): results of ops 19, 04 23, 04 26 and
  * menus. */
@@ -278,22 +270,22 @@ static inline uint32_t vm_script_byte(uint32_t pc)
 
 static inline uint32_t vm_reg(uint32_t r)
 {
-	return rd16(VM_REGS + 2u * r);
+	return G.save.reg[r];
 }
 
 static inline void vm_set_reg(uint32_t r, uint32_t v)
 {
-	wr16(VM_REGS + 2u * r, v);
+	G.save.reg[r] = (uint16_t)v;
 }
 
 static inline uint32_t vm_segment_base(uint32_t seg)
 {
-	return rd32(VM_SEGMENTS + 4u * seg);
+	return G.save.n.segment[seg];
 }
 
 static inline uint32_t vm_segment_select(void)
 {
-	return rd16(VM_SEGMENT_SELECT);
+	return SV(segment_select);
 }
 
 #endif

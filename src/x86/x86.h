@@ -70,12 +70,29 @@ extern uint8_t *x86_img_map;
 extern uint8_t x86_img_ctx;
 void x86_img_mark(uint32_t a, uint32_t n);
 
+/* State moved out of the emulated memory (docs/refactor.md, R1). A range of the
+ * data area that a C object holds is an alias: x86_ptr hands out the object's
+ * bytes for it, so the emulated code, the HLE layer and bulk copies see the
+ * same bytes at the same address while the C code names the fields. Within
+ * [X86_ALIAS_LO, X86_ALIAS_HI) only; an access must lie wholly in one alias
+ * or wholly outside all of them. */
+#define X86_ALIAS_LO 0x431000u
+#define X86_ALIAS_HI 0x4c0000u
+uint8_t *x86_alias_ptr(uint32_t a, uint32_t n);
+/* Make [addr, addr + size) the bytes of obj; obj takes the memory's current
+ * content. */
+void x86_alias(uint32_t addr, void *obj, uint32_t size);
+/* Copy n bytes of the emulated address space (aliases included) out */
+void x86_read_virtual(uint32_t a, void *dst, uint32_t n);
+
 static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 {
 	if (a < MEM_BASE || a + n > MEM_END || a + n < a)
 		x86_fault(a);
 	if (__builtin_expect(x86_img_map != 0, 0) && a - MEM_BASE < IMG_SIZE)
 		x86_img_mark(a, n);
+	if (a < X86_ALIAS_HI && a + n > X86_ALIAS_LO)
+		return x86_alias_ptr(a, n);
 	return x86_mem + (a - MEM_BASE);
 }
 

@@ -33,17 +33,13 @@
 #include "game/diff.h"
 #include "game/map.h"
 #include "game/vm.h"
+#include "game/state.h"
 
 #define PUMP 0x40609cu
 #define PUMP_DONE 0x4060a2u
 #define HLE_PUMP 0x401bf0u
 #define TAIL 0x40740fu      /* the return address of the handler's call of 0x403a70 */
 #define TAIL_PIECE 0x407410u /* after its `pop esi`: mov [S], ax; jmp 0x4060f9 */
-#define VM_TOP_ESP 0x445cdcu
-#define INPUT_BITS 0x445d8fu  /* u8: arrows 1 2 4 8, Enter / click 0x10, Esc / right click 0x20 */
-#define MOUSE_X 0x4452e2u     /* u16 */
-#define MOUSE_Y 0x4452e4u
-#define CURSOR_SHOWN 0x445ce0u
 #define SCROLLED 0x435572u    /* u8: the view scrolled in the player's step */
 #define APPROACH 0x435e61u
 
@@ -87,18 +83,18 @@ uint32_t game_pump_done(void)
 {
 	CNT(2);
 	if (!cpu.r[EAX]) {
-		cpu.r[ESP] = rd32(VM_TOP_ESP);
+		cpu.r[ESP] = RT(top_esp);
 		CNT(1);
 		return 0x40472f;
 	}
 	popal();
-	uint32_t bits = rd8(INPUT_BITS);
+	uint32_t bits = RT(input_bits);
 	uint32_t bl = (bits & 0x10) ? 1 : 0, bh = (bits & 0x20) ? 1 : 0;
 	bh <<= 1;
 	bl |= bh;
 	cpu.r[EBX] = bl | bh << 8;
-	set16(ECX, rd16(MOUSE_X));
-	set16(EDX, rd16(MOUSE_Y));
+	set16(ECX, SV(mouse_x));
+	set16(EDX, SV(mouse_y));
 	CNT(11);
 	return pop32();
 }
@@ -116,7 +112,7 @@ static uint32_t rc_begin(void) /* pushad; call 0x40609c */
  * the cell under it (0x405966), else stop the walk; popad, ret */
 uint32_t game_rc_pumped(void)
 {
-	uint32_t ebx = rd16(MAP_SEL), m = SEG1 + ebx;
+	uint32_t ebx = SV(map_sel), m = SEG1 + ebx;
 	cpu.r[EBX] = ebx;
 	CNT(1);
 	uint32_t ax = (rd16(m + M_SCREEN_X) << 4) & 0xffff;
@@ -179,7 +175,7 @@ uint32_t game_pl_keys(void)
 {
 	CNT(2);
 	if (!cpu.r[EAX]) {
-		cpu.r[ESP] = rd32(VM_TOP_ESP);
+		cpu.r[ESP] = RT(top_esp);
 		CNT(1);
 		return 0x40472f;
 	}
@@ -197,7 +193,7 @@ uint32_t game_pl_keys(void)
 		push32(cpu.r[ECX]);
 		set8l(EAX, 0);
 		CNT(4);
-		if (rd8(INPUT_BITS) & keys[k].mask) {
+		if (RT(input_bits) & keys[k].mask) {
 			keys[k].mover();
 			pl_moved();
 			CNT(2);
@@ -305,7 +301,7 @@ static uint32_t pl_sideways(uint32_t m, uint32_t sp)
  * against the player's on the screen, then the vertical margins first */
 uint32_t game_pl_click(void)
 {
-	uint32_t ebx = rd16(MAP_SEL), m = SEG1 + ebx;
+	uint32_t ebx = SV(map_sel), m = SEG1 + ebx;
 	cpu.r[EBX] = ebx;
 	uint32_t sp = SEG1 + cpu.r[ESI];
 	uint32_t ax = (rd16(sp + S_X) + rd16(m + M_SCREEN_X) - rd16(m + M_VIEW_X)) & 0xffff;
@@ -379,7 +375,7 @@ static uint32_t player_begin(void)
 	cpu.r[ECX] = rd16(sp + S_Y);
 	push32(cpu.r[ECX]);
 	CNT(9);
-	if (rd8(CURSOR_SHOWN) == 0)
+	if (RT(cursor_shown) == 0)
 		return pl_kb_begin();
 	pushal();
 	CNT(3);
@@ -431,7 +427,7 @@ static uint32_t ev_40530b(void)
 		return ev_405372();
 	}
 	/* 0x405340 */
-	cpu.r[EDI] = rd16(MAP_SEL);
+	cpu.r[EDI] = SV(map_sel);
 	cpu.r[ESI] = rd16(SEG1 + cpu.r[EDI] + M_SPRITES);
 	set16(EAX, rd8(SEG1 + cpu.r[ESI] + S_FRAME) >> 1);
 	CNT(7);
@@ -451,7 +447,7 @@ static uint32_t ev_405372(void)
 {
 	uint32_t saved = cpu.r[EAX];
 	push32(saved);
-	cpu.r[EDI] = rd16(MAP_SEL);
+	cpu.r[EDI] = SV(map_sel);
 	cpu.r[ESI] = rd16(SEG1 + cpu.r[EDI] + M_SPRITES);
 	set16(EAX, rd8(SEG1 + cpu.r[ESI] + S_FRAME) >> 1);
 	wr16(MAP_LAST_SPRITE, AX16);
@@ -504,7 +500,7 @@ static uint32_t ev_4052ed(void)
  * mouse on the player's cell? */
 uint32_t game_ev_pumped_b(void)
 {
-	uint32_t ebx = rd16(MAP_SEL), m = SEG1 + ebx;
+	uint32_t ebx = SV(map_sel), m = SEG1 + ebx;
 	cpu.r[EBX] = ebx;
 	cpu.r[ESI] = rd16(m + M_SPRITES);
 	uint32_t sp = SEG1 + cpu.r[ESI];
@@ -542,7 +538,7 @@ uint32_t game_ev_pumped_a(void)
 	CNT(3);
 	if (!(cpu.r[EBX] & 1)) {
 		set16(EBX, AX16);
-		set8h(EAX, rd8(INPUT_BITS));
+		set8h(EAX, RT(input_bits));
 		CNT(4);
 		if (((cpu.r[EAX] >> 8) & 0xff) == 0)
 			return ev_4052f1();
@@ -656,7 +652,7 @@ static uint32_t sprites_loop(void)
 
 static uint32_t sprites_begin(void)
 {
-	cpu.r[EDI] = rd16(MAP_SEL);
+	cpu.r[EDI] = SV(map_sel);
 	cpu.r[ESI] = rd16(SEG1 + cpu.r[EDI] + M_SPRITES);
 	CNT(2);
 	return sprites_loop();

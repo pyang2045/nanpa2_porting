@@ -12,6 +12,7 @@
 
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 enum {
 	TOK_END = 0x03,       /* end of expression */
@@ -63,25 +64,25 @@ int script_read_constant(uint32_t *pc, uint32_t *value)
 
 uint32_t script_flag(uint32_t n)
 {
-	uint32_t b = rd8(VM_FLAGS + (n >> 1));
+	uint32_t b = G.save.flags[n >> 1];
 	return n & 1 ? b >> 4 : b & 0xf;
 }
 
 void script_set_flag(uint32_t n, uint32_t v)
 {
-	uint32_t a = VM_FLAGS + (n >> 1);
+	uint8_t *a = &G.save.flags[n >> 1];
 	v &= 0xffff;
 	if (v > 15)
 		v = 15;
-	uint32_t b = rd8(a);
-	wr8(a, n & 1 ? (b & 0x0f) | v << 4 : (b & 0xf0) | v);
+	uint32_t b = *a;
+	*a = (uint8_t)(n & 1 ? (b & 0x0f) | v << 4 : (b & 0xf0) | v);
 }
 
 /* The 16-bit generator of 0x403999: seed = 5 * seed + 1. */
 static uint32_t next_random(uint32_t range)
 {
-	uint32_t seed = (rd16(VM_RANDOM_SEED) * 5 + 1) & 0xffff;
-	wr16(VM_RANDOM_SEED, seed);
+	uint32_t seed = (AN(random_seed) * 5 + 1) & 0xffff;
+	AN_SET(random_seed, seed);
 	range &= 0xffff;
 	if (!range)
 		x86_divide_error(); /* div bx */
