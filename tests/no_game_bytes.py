@@ -47,7 +47,7 @@ def standard_tables():
     return {t[o:o + WIN] for o in range(len(t) - WIN + 1)}
 
 
-def ramps(b):
+def ramps(b, minlen=WIN):
     """Byte ranges of b that are linear ramps: runs of 8-, 16- or 32-bit
     values whose steps differ by at most 1 (0, 4, 8, ... or i*1023/255
     rounded), at least WIN bytes long. Such tables are computed, not
@@ -64,7 +64,7 @@ def ramps(b):
                 if d is not None and lo is not None and min(lo, d) + 1 >= max(hi, d):
                     lo, hi = min(lo, d), max(hi, d)
                     continue
-                if (j - start) * e >= WIN and lo is not None:
+                if (j - start) * e >= minlen and lo is not None:
                     a = phase + start * e
                     marked[a:phase + j * e] = b'\1' * (phase + j * e - a)
                 start = j - 1
@@ -119,8 +119,10 @@ ALLOWED = (b'SPEECH\\A\\A10930.WAV', b'MUSIC\\%02d.MP3', b'MUSIC\\%02d.WAV', b'%
 def data_runs(secs):
     """Every 16-byte run of the exe's .data with at least 8 different byte values: tables, texts
     and code pointers authored by the game, short enough to be a string or a few words. A run
-    made of allowed file-name constants and zero padding is not counted."""
+    made of allowed file-name constants and zero padding, or inside a linear ramp (a computed
+    table such as 0, 4, 8, ..., which SDL holds too), is not counted."""
     b = dict(secs)['.data']
+    ramp = ramps(b, SHORT)  # computed, not authored (an MP3 library table shared with SDL)
     allowed = set()
     for a in ALLOWED:
         o = b.find(a)
@@ -130,7 +132,7 @@ def data_runs(secs):
     runs = set()
     for o in range(len(b) - SHORT + 1):
         w = b[o:o + SHORT]
-        if len(set(w)) >= SHORT_DISTINCT and not all(x in allowed or b[x] == 0 for x in range(o, o + SHORT)):
+        if len(set(w)) >= SHORT_DISTINCT and not all(ramp[o:o + SHORT]) and not all(x in allowed or b[x] == 0 for x in range(o, o + SHORT)):
             runs.add(w)
     return runs
 
