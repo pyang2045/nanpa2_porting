@@ -5,20 +5,18 @@
  *
  * WinMain registers the window class, opens a full-screen window, looks for
  * the game CD, plays the logo (the HLE 0x401e20), sets the display up, runs
- * the script VM (0x4060d4, a call exit: the VM runs natively, once, with no
- * host frame under it) and tears everything down when the VM ends.
+ * the script VM (game_vm_run) and tears everything down when the VM ends.
  *
  * Windows APIs and DirectDraw methods are called as the native code calls
- * them (game_ncall through the import table and the objects' vtables), so
+ * them (hle_invoke through the import table and the objects' vtables), so
  * src/hle serves them unchanged. Semantics: re-notes.md "Start-up" and
  * "Window procedure".
  */
-#include "game/file.h"
-#include "game/game.h"
+#include "game/ctl.h"
 #include "game/startup.h"
+#include "game/state.h"
 #include "game/vm.h"
 #include "x86/x86.h"
-#include "game/state.h"
 
 /* import address table slots (the loaded image's .idata) */
 #define IAT_DDRAWCREATE 0x41b000u
@@ -91,11 +89,8 @@
 
 static uint32_t stdcall(uint32_t fn, int n, const uint32_t *a)
 {
-	for (int i = n - 1; i >= 0; i--)
-		push32(a[i]);
 	X86_COUNT((uint64_t)n + 1);
-	game_ncall(fn, (uint32_t)n);
-	return cpu.r[EAX];
+	return hle_invoke(fn, n, a);
 }
 
 #define IMPORT(slot, ...) stdcall(rd32(slot), (int)(sizeof((uint32_t[]){ __VA_ARGS__ }) / 4), \
@@ -108,12 +103,8 @@ static uint32_t stdcall(uint32_t fn, int n, const uint32_t *a)
 /* a cdecl call of a routine in the C runtime replacement */
 static uint32_t cdecl_call(uint32_t addr, int n, const uint32_t *a)
 {
-	for (int i = n - 1; i >= 0; i--)
-		push32(a[i]);
 	X86_COUNT((uint64_t)n + 2); /* pushes, call, add esp */
-	game_ncall(addr, 0);
-	cpu.r[ESP] += 4u * (uint32_t)n;
-	return cpu.r[EAX];
+	return hle_invoke(addr, n, a);
 }
 
 /* ---- the CD search (0x402590) ---- */
@@ -121,7 +112,7 @@ static uint32_t cdecl_call(uint32_t addr, int n, const uint32_t *a)
 /* Look for the game CD: the first CD-ROM drive letter whose
  * SPEECH\A\A10930.WAV opens sets the prefix at CD_PREFIX; else the file is
  * tried in the current folder (prefix ""). Returns 1 if found. */
-uint32_t game_cd_search(void)
+static uint32_t cd_search(void)
 {
 	uint32_t esp = cpu.r[ESP];
 	cpu.r[ESP] -= 0x28;
@@ -153,14 +144,12 @@ uint32_t game_cd_search(void)
 		if (!found) {
 			X86_COUNT(5);
 			cpu.r[ESP] = esp;
-			cpu.r[EAX] = 0;
 			return 0;
 		}
 	}
 	cdecl_call(0x412d6e, 1, (const uint32_t[]){ found });
 	X86_COUNT(7);
 	cpu.r[ESP] = esp;
-	cpu.r[EAX] = 1;
 	return 1;
 }
 
@@ -172,7 +161,7 @@ static void message_box(uint32_t text, uint32_t title)
 }
 
 /* Returns 1, or 0 after a message box when DirectDraw cannot be set up. */
-uint32_t game_display_init(void)
+static uint32_t display_init(void)
 {
 	uint32_t esp = cpu.r[ESP];
 	cpu.r[ESP] -= 8; /* the colour key {8, 8} */
@@ -185,7 +174,6 @@ uint32_t game_display_init(void)
 	if (IMPORT(IAT_DDRAWCREATE, 0, DDRAW, 0) != 0) {
 		message_box(MSG_DD_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
-		cpu.r[EAX] = 0;
 		X86_COUNT(5);
 		return 0;
 	}
@@ -196,7 +184,6 @@ uint32_t game_display_init(void)
 	if (COM(dd, DD_SETDISPLAYMODE, 640, 480, 8) != 0) {
 		message_box(MSG_MODE_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
-		cpu.r[EAX] = 0;
 		X86_COUNT(5);
 		return 0;
 	}
@@ -258,7 +245,6 @@ uint32_t game_display_init(void)
 	IMPORT(IAT_SHOWCURSOR, 0);
 	X86_COUNT(8);
 	cpu.r[ESP] = esp;
-	cpu.r[EAX] = 1;
 	return 1;
 }
 
@@ -275,7 +261,7 @@ static void release_at(uint32_t slot)
 	}
 }
 
-void game_shutdown(void)
+static void shutdown(void)
 {
 	X86_COUNT(2);
 	if (SC(timer_id))
@@ -292,38 +278,25 @@ void game_shutdown(void)
 	release_at(DDRAW);
 	/* DirectSound: the HLE 0x402c70 */
 	X86_COUNT(1);
-	game_ncall(0x402c70, 0);
+	HLE0(0x402c70);
 	IMPORT(IAT_SHOWCURSOR, 1);
 	X86_COUNT(1);
 }
 
-/* ---- WinMain (0x402090) as two jump pieces around the VM ---- */
-
-/* `ret 0x10` of WinMain with result eax: the saved EDI, the 40-byte frame
- * and the 4 argument words go; returns the pc to go on at */
-static uint32_t winmain_return(uint32_t eax)
-{
-	cpu.r[EAX] = eax;
-	cpu.r[EDI] = pop32();
-	cpu.r[ESP] += 0x28;
-	uint32_t ra = pop32();
-	cpu.r[ESP] += 0x10;
-	X86_COUNT(4);
-	return ra;
-}
+/* ---- WinMain (0x402090) ---- */
 
 /* 0x402090: register the window class, create the window, find the CD,
- * play the logo (HLE), set the display up, show the window and enter the
- * script VM (call exit 0x4060d4, return address 0x4021a3). The frame is
- * the native one: the 40-byte WNDCLASS at the top and EDI saved below it,
- * 11 words that the continuation 0x4021a3 still has on the stack. */
-uint32_t game_winmain(void)
+ * play the logo (HLE), set the display up, show the window, run the script
+ * VM (0x4060d4) and shut down when it ends. Returns WinMain's result: -1 the
+ * class could not be registered, 0 no CD or no display, 1 the game ran.
+ * The emulated stack keeps the native frame (4 argument and return words, the
+ * 40-byte WNDCLASS, the saved EDI): the VM records its stack top
+ * (RT.top_esp, part of the data area) from it. */
+uint32_t game_main(uint32_t hinst)
 {
-	uint32_t hinst = rd32(cpu.r[ESP] + 4);
-	cpu.r[ESP] -= 0x28;
-	uint32_t wc = cpu.r[ESP];
-	push32(cpu.r[EDI]);
-	cpu.r[EDI] = 0;
+	uint32_t esp0 = cpu.r[ESP];
+	uint32_t wc = esp0 - 8 - 0x28;
+	cpu.r[ESP] = wc - 4;
 	X86_COUNT(5);
 	SC_SET(hinstance, hinst);
 	/* the class: style 0, window procedure 0x4021c0, no extra bytes */
@@ -338,9 +311,11 @@ uint32_t game_winmain(void)
 	wr32(wc + 32, 0);
 	wr32(wc + 36, WND_CLASS);
 	X86_COUNT(12);
+	uint32_t result;
 	if ((IMPORT(IAT_REGISTERCLASS, wc) & 0xffff) == 0) {
 		X86_COUNT(3);
-		return winmain_return(0xffffffffu);
+		result = 0xffffffffu;
+		goto leave;
 	}
 	X86_COUNT(10);
 	uint32_t height = IMPORT(IAT_GETSYSMETRICS, 1);
@@ -348,34 +323,42 @@ uint32_t game_winmain(void)
 	wr32(HWND_MAIN, IMPORT(IAT_CREATEWINDOW, 0, WND_CLASS, WND_CLASS, 0x80000000u, 0, 0, width, height, 0, 0,
 	                       SC(hinstance), 0));
 	X86_COUNT(3);
-	game_cd_search();
-	if (!cpu.r[EAX]) {
+	if (!cd_search()) {
 		message_box(MSG_NO_CD, MSG_NO_CD_TITLE);
 		X86_COUNT(3);
-		return winmain_return(0);
+		result = 0;
+		goto leave;
 	}
 	X86_COUNT(3);
 	cdecl_call(0x401e20, 1, (const uint32_t[]){ LOGO_ARG }); /* the logo player (HLE) */
-	game_display_init();
+	uint32_t ok = display_init();
 	X86_COUNT(2);
-	if (!cpu.r[EAX]) {
+	if (!ok) {
 		X86_COUNT(1);
-		return winmain_return(0);
+		result = 0;
+		goto leave;
 	}
 	IMPORT(IAT_SHOWWINDOW, SC(hwnd), 5);
 	IMPORT(IAT_UPDATEWINDOW, SC(hwnd));
 	X86_COUNT(2);
-	push32(0x4021a3);
+	X86_COUNT(1); /* call */
+	game_vm_run();
+	shutdown();
 	X86_COUNT(1);
-	return 0x4060d4;
+	result = 1;
+leave:
+	X86_COUNT(4); /* pop edi, add esp, ret 0x10 */
+	cpu.r[ESP] = esp0;
+	return result;
 }
 
-/* 0x4021a3: the VM has ended: shut down, return 1 */
-uint32_t game_winmain_done(void)
+/* Temporary seam: run the script VM (0x4060d4, still pieces of register-level
+ * code) from WinMain's frame and return when it ends, by its quit or its end.
+ * The VM's final `ret` finds the sentinel where WinMain's return address
+ * (0x4021a3) was. */
+void game_vm_run(void)
 {
-	game_shutdown();
-	X86_COUNT(1);
-	return winmain_return(1);
+	x86_call(0x4060d4, 0, NULL);
 }
 
 /* ---- the window procedure (0x4021c0) ---- */
@@ -401,7 +384,7 @@ static uint32_t key_bit(uint32_t vk)
 static void voice_stop(void)
 {
 	X86_COUNT(1);
-	game_ncall(0x403440, 0);
+	HLE0(0x403440);
 }
 
 /* 0x402570: after the pointer moved with the cursor drawn: wait for the
@@ -417,33 +400,26 @@ static void paint(void)
 	game_cursor_draw();
 }
 
-/* Under the harness's second run (the C after the original) the calls that
- * change what the host does -- PostQuitMessage, DestroyWindow -- were made
- * already by the original and must not repeat. */
 static void host_call(uint32_t slot, int n, const uint32_t *a)
 {
 	stdcall(rd32(slot), n, a);
 }
 
-/* stdcall (hwnd, msg, wparam, lparam); `ret 0x10` pops the arguments. A
- * called unit: its caller is the HLE message pump (x86_call). */
-void game_wndproc(void)
+/* The window procedure, stdcall (hwnd, msg, wparam, lparam): returns the
+ * result for the message. Called by the HLE message pump (win32.c), which
+ * keeps the CPU registers across it as x86_call did. The native registers
+ * it leaves (ECX per path, EDX = 0) were never read. */
+uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
-	/* the arguments are read where the original reads them (the harness
-	 * checks that); ECX ends as the original leaves it, per path */
-#define HWND_ARG rd32(cpu.r[ESP])
-#define WPARAM_ARG rd32(cpu.r[ESP] + 8)
-#define LPARAM_ARG rd32(cpu.r[ESP] + 12)
-	uint32_t msg = rd32(cpu.r[ESP] + 4), result = 0, ecx = cpu.r[ECX];
+	uint32_t result = 0;
 	X86_COUNT(5);
 	if (msg == 0x200) { /* WM_MOUSEMOVE */
-		uint32_t lp = LPARAM_ARG, x = lp & 0xffff, y = lp >> 16;
+		uint32_t x = lparam & 0xffff, y = lparam >> 16;
 		SC_SET(cursor_x, x);
 		SV_SET(mouse_x, x);
 		SC_SET(cursor_y, y);
 		X86_COUNT(15);
-		ecx = SC(letterbox);
-		if (ecx) {
+		if (SC(letterbox)) {
 			y = (y - 0x28) & 0xffff;
 			X86_COUNT(4);
 			if ((int16_t)y < 0) {
@@ -466,7 +442,6 @@ void game_wndproc(void)
 	}
 	if (msg > 0x200) { /* mouse buttons */
 		X86_COUNT(5);
-		ecx = msg - 0x201;
 		switch (msg) {
 		case 0x201: /* left button down: stop the voice, OK pressed */
 		case 0x204: { /* right button down: cancel pressed */
@@ -485,15 +460,14 @@ void game_wndproc(void)
 	}
 	if (msg == 0x100) { /* WM_KEYDOWN */
 		X86_COUNT(5);
-		uint32_t wp = ecx = WPARAM_ARG;
-		if (wp - 0xd > 0x63)
+		if (wparam - 0xd > 0x63)
 			goto done;
-		if (wp == 0x70) { /* F1 */
+		if (wparam == 0x70) { /* F1 */
 			X86_COUNT(5);
 			host_call(IAT_DESTROYWINDOW, 1, (const uint32_t[]){ SC(hwnd) });
 			goto done;
 		}
-		uint32_t bit = key_bit(wp);
+		uint32_t bit = key_bit(wparam);
 		X86_COUNT(5);
 		if (bit)
 			RT_SET(input_bits, RT(input_bits) | bit);
@@ -504,10 +478,9 @@ void game_wndproc(void)
 		if (msg != 0x101)
 			goto def;
 		/* WM_KEYUP */
-		uint32_t wp = ecx = WPARAM_ARG;
-		if (wp - 0xd > 0x20)
+		if (wparam - 0xd > 0x20)
 			goto done;
-		uint32_t bit = key_bit(wp);
+		uint32_t bit = key_bit(wparam);
 		X86_COUNT(8);
 		if (bit == 0x10 || bit == 0x20)
 			voice_stop(); /* Enter, Space, Escape, Insert */
@@ -516,41 +489,35 @@ void game_wndproc(void)
 		goto done;
 	}
 	X86_COUNT(3);
-	ecx = msg - 2;
 	if (msg == 2) { /* WM_DESTROY */
 		host_call(IAT_POSTQUIT, 1, (const uint32_t[]){ 0 });
 		X86_COUNT(2);
 		goto done;
 	}
-	ecx = msg - 0x1c;
 	if (msg != 0x1c) /* WM_ACTIVATEAPP */
 		goto def;
-	if (WPARAM_ARG == 0) { /* deactivated: pause the sound, stop the game's clock */
+	if (wparam == 0) { /* deactivated: pause the sound, stop the game's clock */
 		SC_SET(paused, 1);
 		SC_SET(active, 0);
 		X86_COUNT(5);
 		voice_stop();
 		X86_COUNT(1);
-		game_ncall(0x403220, 0); /* music pause (HLE) */
+		HLE0(0x403220); /* music pause (HLE) */
 		goto done;
 	}
 	X86_COUNT(3);
 	if (SC(paused)) {
 		X86_COUNT(1);
-		game_ncall(0x403250, 0); /* music resume (HLE) */
+		HLE0(0x403250); /* music resume (HLE) */
 	}
-	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ HWND_ARG });
+	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ hwnd });
 	SC_SET(active, 1);
 	X86_COUNT(5);
 	goto done;
 def:
 	X86_COUNT(5);
-	ecx = LPARAM_ARG;
-	result = stdcall(rd32(IAT_DEFWINDOWPROC), 4, (const uint32_t[]){ HWND_ARG, msg, WPARAM_ARG, ecx });
+	result = stdcall(rd32(IAT_DEFWINDOWPROC), 4, (const uint32_t[]){ hwnd, msg, wparam, lparam });
 done:
-	cpu.r[EAX] = result;
-	cpu.r[ECX] = ecx;
-	cpu.r[EDX] = 0;
 	X86_COUNT(3);
-	cpu.r[ESP] += 0x10;
+	return result;
 }

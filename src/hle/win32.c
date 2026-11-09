@@ -10,6 +10,7 @@
 #include "dev.h"
 #include "status.h"
 #include "platform/present.h"
+#include "game/startup.h"
 #include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
@@ -312,7 +313,10 @@ static uint32_t dispatch(const struct msg *m)
 	if (!win32_wndproc)
 		return 0;
 	uint32_t args[4] = { HWND_MAIN, m->msg, m->wparam, m->lparam };
-	uint32_t r = x86_call(win32_wndproc, 4, args);
+	/* the window procedure leaves the CPU as it found it, as x86_call did */
+	struct cpu saved = cpu;
+	uint32_t r = game_wndproc(args[0], args[1], args[2], args[3]);
+	cpu = saved;
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
 			RT(input_bits), RT(frame));

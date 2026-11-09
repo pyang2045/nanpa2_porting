@@ -802,7 +802,7 @@ void game_picture_load(void)
 		push32(PICTURE);
 		push32(PICTURE_NAME);
 		X86_COUNT(6);
-		game_file_load(PICTURE_NAME, PICTURE);
+		game_file_load_at(PICTURE_NAME, PICTURE);
 		cpu.r[ESP] += 8;
 	}
 	uint32_t esi = PICTURE;
@@ -814,7 +814,7 @@ void game_picture_load(void)
 	if (!(SV(vflags) & 1)) {
 		cpu.r[EAX] = esi + 8;
 		X86_COUNT(2);
-		game_palette_copy(cpu.r[EAX]);
+		game_palette_copy_at(cpu.r[EAX]);
 	}
 	esi += 0x208;
 	uint32_t surf = SV(surface_select);

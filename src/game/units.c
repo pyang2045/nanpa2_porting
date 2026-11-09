@@ -37,10 +37,6 @@
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
  * at each function. */
 const struct game_unit game_units[] = {
-	/* Stage 5B startup/input/file */
-	CALL_SYS(0x401000, "file_open", game_file_open_regs, FILE_SCRATCH),
-	CALL_SYS(0x401050, "file_load", game_file_load_regs, FILE_SCRATCH),
-	CALL_SYS(0x401160, "file_save", game_file_save_regs, FILE_SCRATCH),
 	/* Stage 5B (src/game/screen.c): the units that native code still calls */
 	CALL_SYS(0x401190, "surface_lock", game_lock_regs, 0),
 	CALL_SYS(0x4011f0, "cursor_restore", game_cursor_restore_regs, 0),
@@ -50,16 +46,6 @@ const struct game_unit game_units[] = {
 	/* Stage 6: the dissolve wipe, pieces around its message pump (wipe.c) */
 	PIECE(0x401a50, "wipe", game_wipe, 0, 0, 0, 1, NULL),
 	PIECE(0x401b90, "wipe_pumped", game_wipe_pumped, 0, 0x12, 0, 1, NULL),
-	/* Stage 5B startup/input/file; WinMain's pieces run uncompared (game.c) */
-	PIECE(0x402090, "winmain", game_winmain, REG_BIT(ECX) | REG_BIT(EDX), 0, 0, 1, NULL),
-	PIECE(0x4021a3, "winmain_done", game_winmain_done, REG_BIT(ECX) | REG_BIT(EDX), 11, 0, 1, NULL),
-	CALL_SYS(0x4021c0, "wndproc", game_wndproc, REG_BIT(ECX) | REG_BIT(EDX)),
-	PIECE(0x403510, "anim_control", game_anim_control_piece, 0, 0, 0, 1, NULL),
-	SPIN(0x4035b5, "anim_wait", game_anim_wait_piece, 0),
-	CALL_SYS(0x403624, "anim_step", game_anim_step, 0),
-	CALL_SYS(0x403661, "anim_run_slot", game_anim_run_slot, 0),
-	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
-	CALL(0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0),
 	/* Stage 5A (src/game/map*.c) */
 	CALL(0x403b28, "map_fill_grid", game_map_fill_grid,
 		REG_BIT(EAX) | REG_BIT(EBX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
@@ -109,7 +95,6 @@ const struct game_unit game_units[] = {
 	PIECE(0x406383, "vm_big5_next", game_vm_big5_next, AT_LOOP, 0, 0, 0, NULL),
 	CALL(0x406395, "vm_init", game_vm_init_regs, REG_BIT(EAX), 0),
 	CALL(0x4063ee, "text_advance", game_text_advance, 0, 0),
-	CALL(0x406455, "script_set_flag", game_set_flag_regs, 0, 0),
 	JUMP(0x406491, "op_0a_set_flags", game_op_set_flags, AT_LOOP),
 	JUMP(0x4064b5, "op_0b_set_flags_expr", game_op_set_flags_expr, AT_LOOP),
 	JUMP(0x4064d9, "op_0c_set_reg", game_op_set_reg, AT_LOOP),
@@ -176,7 +161,6 @@ const struct game_unit game_units[] = {
 	JUMP_SYS(0x406cea, "op_041b_masked_rect", game_op_masked_rect, NULL),
 	JUMP_SYS(0x406d8b, "op_041c_load_file", game_op_load_file, NULL),
 	CALL(0x406dc4, "vm_string_arg", game_string_arg_regs, 0, 0),
-	CALL(0x406dff, "anim_reset", game_anim_reset, 0, 0),
 	JUMP_SYS(0x406e11, "op_041d_picture", game_op_picture, NULL),
 	JUMP_SYS(0x406f06, "op_0416_palette", game_op_palette, NULL),
 	SPIN(0x406f41, "palette_wait", game_palette_wait_piece, AT_LOOP),
@@ -204,7 +188,6 @@ const struct game_unit game_units[] = {
 	CALL(0x40741b, "vm_parse_args", game_parse_args_regs, REG_BIT(EDX), 0),
 	PIECE(0x4074d5, "input_test", game_input_test, 0, 0, 0, 0, NULL),
 	PIECE(0x4074db, "input_tested", game_input_tested, 0, 1, 1, 0, NULL),
-	CALL(0x40752c, "palette_copy", game_palette_copy_regs, 0, 0),
 	PIECE(0x4075c6, "wait_frames", game_wait_frames, 0, 0, 0, 0, NULL),
 	PIECE(0x4075d7, "wait_frames_pumped", game_wait_frames_pumped, 0, 1, 0, 1, NULL),
 };

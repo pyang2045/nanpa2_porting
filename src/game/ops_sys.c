@@ -389,7 +389,7 @@ uint32_t game_op_load_file(void)
 	push32(eax);
 	push32(STRING_BUF);
 	X86_COUNT(9);
-	game_file_load(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
+	game_file_load_at(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
 	drop(2);
 	return loop_at(0x406dbf);
 }
@@ -434,20 +434,16 @@ uint32_t game_op_voice(void)
 	return loop_at(0x4073e9);
 }
 
-/* 1a n, slot, a, b: animation slot control 0x403510 (EAX sub-op, EBX
- * slot, ECX, EDX), a call exit (0x4070b1, return 0x4070b6): the control
- * is the jump unit game_anim_control_piece, which for sub-op 4 goes on in
- * the wait loop 0x4035b5 until the slot has stopped. */
+/* 1a n, slot, a, b: animation slot control 0x403510 (sub-op n, the slot and
+ * two operands), run directly (anim.c): sub-op 4 waits in its loop until the
+ * slot has stopped (that loop does not pump). Goes on at 0x4070b6. */
 uint32_t game_op_anim(void)
 {
 	parse();
 	push32(cpu.r[ESI]);
-	cpu.r[EBX] = rd16(ARG(1));
-	cpu.r[ECX] = rd16(ARG(2));
-	cpu.r[EDX] = rd16(ARG(3));
-	push32(0x4070b6);
 	X86_COUNT(5);
-	return 0x403510;
+	game_anim_control(cpu.r[EAX], rd16(ARG(1)), rd16(ARG(2)), rd16(ARG(3)));
+	return 0x4070b6;
 }
 
 uint32_t game_op_anim_done(void) /* 0x4070b6 */

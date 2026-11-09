@@ -246,7 +246,7 @@ static void load(uint32_t name, uint32_t dst)
 	push32(dst);
 	push32(name);
 	X86_COUNT(2);
-	game_file_load(name, dst);
+	game_file_load_at(name, dst);
 	cpu.r[ESP] += 8;
 	X86_COUNT(1);
 }
@@ -338,7 +338,7 @@ uint32_t game_op_flag_file(void)
 		push32(MES_NAME);
 		push32(FLAG_NAME);
 		X86_COUNT(3);
-		game_file_save(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4), rd32(cpu.r[ESP] + 8));
+		game_file_save_at(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4), rd32(cpu.r[ESP] + 8));
 		cpu.r[ESP] += 12;
 		X86_COUNT(1);
 		return loop_at(0x40719f);

@@ -253,15 +253,17 @@ void game_text_advance(void);           /* 0x4063ee */
 void game_text_newline(void);           /* 0x406415 */
 void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
 
+/* Temporary seam (startup.c): run the script VM, still register-level pieces
+ * entered at 0x4060d4, until it ends. The orchestrator replaces it. */
+void game_vm_run(void);
+
 /* ---- src/game/anim.c ---- */
 void game_anim_step(void);              /* 0x403624 */
-void game_anim_run_slot(void);          /* 0x403661, ESI = slot offset */
-void game_anim_control_regs(void);      /* 0x403510, EAX sub-op, EBX slot */
-uint32_t game_anim_control_piece(void); /* 0x403510 as a jump unit (any sub-op) */
-uint32_t game_anim_wait_piece(void);    /* 0x4035b5: sub-op 4's wait loop */
+/* 0x403510 (and the wait loop 0x4035b5 of sub-op 4): sub-op, slot, operands */
+void game_anim_control(uint32_t op, uint32_t n, uint32_t a, uint32_t b);
 void game_anim_reset(void);             /* 0x406dff */
-void game_palette_copy(uint32_t src);   /* 0x40752c */
-void game_palette_copy_regs(void);
+void game_palette_copy(const uint16_t *src); /* 0x40752c */
+void game_palette_copy_at(uint32_t src);     /* the same, by guest address */
 
 static inline uint32_t vm_script_byte(uint32_t pc)
 {

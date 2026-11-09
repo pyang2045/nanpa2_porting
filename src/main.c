@@ -48,6 +48,7 @@
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "hle/logo.h"
+#include "game/startup.h"
 #include "game/state.h"
 #include "hle/replay.h"
 #include "hle/status.h"
@@ -225,7 +226,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	uint32_t hinstance = MEM_BASE;
 	uint64_t t0 = SDL_GetPerformanceCounter();
 	x86_unaliased_snapshot();
-	x86_call(0x402090, 1, &hinstance);
+	game_main(hinstance);
 	if (x86_unaliased_check() && atoi(getenv("NANPA2_DATA_CHECK")) >= 2)
 		return 4;
 	replay_finish();

@@ -89,11 +89,8 @@ HLE_OVERRIDE(0x4075f0, "GP4/ANI decompressor (src/lzh.c)")
 HLE_OVERRIDE(0x402cb0, "play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)")
 HLE_OVERRIDE(0x403360, "play voice (SPEECH%s through DirectSound)")
 
-/* Reimplemented game logic (src/game/expr.c; game_units in src/game/units.c
- * holds the C side) */
-HLE_GAME_OVERRIDE(0x4037fc, "script expression evaluator (src/game/expr.c)")
-HLE_GAME_OVERRIDE(0x4039f7, "script constant reader (src/game/expr.c)")
-HLE_GAME_OVERRIDE(0x406455, "script flag write (src/game/expr.c)")
+/* Reimplemented game logic (src/game/vm.c, ops_vm.c; game_units in
+ * src/game/units.c holds the C side) */
 HLE_GAME_OVERRIDE(0x4061d4, "VM skip block (src/game/vm.c)")
 HLE_GAME_OVERRIDE(0x406395, "VM init (src/game/vm.c)")
 HLE_GAME_OVERRIDE(0x4068e1, "VM menu item (src/game/vm.c)")
@@ -213,16 +210,11 @@ HLE_GAME_CALL_EXIT(0x40683b, "op 04 13: test right again (0x4074d5)")
 HLE_GAME_CALL_EXIT(0x4069f7, "op 15: run the digits as a script (0x4060f9)")
 HLE_GAME_CALL_EXIT(0x40704a, "op 04 1f: run the called file (0x4060f9)")
 
-/* Stage 4: the text, the animation slots and the palette copy
- * (src/game/text.c, anim.c); 0x403510 leaves sub-op 4 (run a slot to its
- * end, spinning on the frame counter) to the original */
+/* Stage 4: the text (src/game/text.c); the animation slots (anim.c) are
+ * C functions that nothing native calls any more */
 HLE_GAME_OVERRIDE(0x401900, "draw one character (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x403624, "animation step, once a frame (src/game/anim.c)")
-HLE_GAME_OVERRIDE(0x403661, "run one animation slot (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x4063ee, "text cursor advance (src/game/text.c)")
 HLE_GAME_OVERRIDE(0x406b24, "clear the text window (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x406dff, "reset the animation slots (src/game/anim.c)")
-HLE_GAME_OVERRIDE(0x40752c, "copy a picture palette (src/game/anim.c)")
 
 /* Stage 4: the VM loop and the waits (src/game/loop.c), split at the calls
  * that pump messages, wait or run a block like the handlers above. They
@@ -374,14 +366,9 @@ HLE_GAME_DEAD(0x405ed0, "map: flood case 6")
 HLE_GAME_DEAD(0x405f24, "map: flood case 7")
 HLE_GAME_DEAD(0x405fb6, "map: approach cells")
 
-/* Stage 5B (src/game/anim.c, ops_sys.c): the slot control 0x403510 is a
- * jump unit entered by the call of op 1a (call exit 0x4070b6); sub-op 4
- * goes on in the wait loop 0x4035b5, a piece that returns itself while it
- * waits (game_jump polls for it, as the native backward jump does) */
-HLE_GAME_JUMP(0x403510, "animation slot control (src/game/anim.c)")
-HLE_GAME_JUMP(0x4035b5, "animation slot wait loop (src/game/anim.c)")
+/* op 1a (src/game/ops_sys.c) runs the slot control (anim.c) directly and
+ * goes on at 0x4070b6 */
 HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
-HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
 /* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
 HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
 
@@ -392,23 +379,6 @@ HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette
 HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
-
-/* Stage 5B startup/input/file (src/game/file.c): the file routines, called
- * by the C pieces directly and by native code (the map module, WinMain) */
-HLE_GAME_OVERRIDE(0x401000, "open a game file (src/game/file.c)")
-HLE_GAME_OVERRIDE(0x401050, "load a game file (src/game/file.c)")
-HLE_GAME_OVERRIDE(0x401160, "save a file (src/game/file.c)")
-
-/* Stage 5B startup/input/file (src/game/startup.c): WinMain is a jump unit
- * split at its call of the script VM (call exit 0x4021a3, then the
- * shutdown); the window procedure is entered by the HLE message pump */
-HLE_GAME_JUMP(0x402090, "WinMain (src/game/startup.c)")
-HLE_GAME_JUMP(0x4021a3, "WinMain: after the script VM (src/game/startup.c)")
-HLE_GAME_CALL_EXIT(0x4021a3, "WinMain: the script VM (0x4060d4)")
-HLE_GAME_OVERRIDE(0x4021c0, "window procedure (src/game/startup.c)")
-/* the logo's window procedure: installed (SetWindowLongA) only by the logo
- * player 0x401e20, an HLE override, so nothing enters it */
-HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
 
 /* Stage 6: the dissolve wipe (src/game/wipe.c): op 19 sub-op 4 calls it as a
  * call exit (return 0x40738b), it pumps messages in between (0x401b90) */
