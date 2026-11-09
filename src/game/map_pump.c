@@ -30,7 +30,6 @@
  */
 #include <string.h>
 
-#include "game/diff.h"
 #include "game/map.h"
 #include "game/vm.h"
 #include "game/state.h"
@@ -631,8 +630,6 @@ static uint32_t sprites_loop(void)
 		if (rd8(SEG1 + cpu.r[ESI]) == 0xff) {
 			CNT(1);
 			uint32_t ra = pop32();
-			if (ra == 0x403a86) /* sub-op 7 itself (12 and 5 have frames of their own): S = a leftover AX */
-				diff_ax_unspecified = 1;
 			return go(ra);
 		}
 		uint32_t esi = cpu.r[ESI];

@@ -203,9 +203,6 @@ static int run_game(const char *game, const char *exe, const char *font)
 		return 1;
 	}
 	state_init();
-#ifdef NANPA2_HAVE_RECOMP
-	x86_lockstep_init();
-#endif
 	SDL_Log("CPU: %s", x86_backend_name());
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");

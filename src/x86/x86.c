@@ -84,9 +84,6 @@ int x86_stop_at(uint32_t pc)
 	if (stop) {
 		x86_stop_pc = pc;
 		x86_stop_esp = 0;
-		/* lockstep: the shadow of the last block predicted this pc,
-		 * not the sentinel x86_exec reports on return */
-		X86_LOCKSTEP_POINT(LS_RET, pc);
 	}
 	return stop;
 }
@@ -221,7 +218,6 @@ int x86_load_image(const char *exe_path)
 
 uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args)
 {
-	X86_LOCKSTEP_POINT(LS_NEST, addr);
 	struct cpu saved = cpu;
 	for (int i = nargs - 1; i >= 0; i--)
 		push32(args[i]);

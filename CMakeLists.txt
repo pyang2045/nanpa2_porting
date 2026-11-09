@@ -9,48 +9,19 @@ endif()
 
 find_package(SDL2 REQUIRED)
 
-# How the game code of nanpa2.exe runs (src/x86/x86.h):
-#   interp  the interpreter (src/x86/interp.c) decodes the player's own
-#           nanpa2.exe from the game folder at run time. The build needs
-#           neither the exe nor capstone, and the binary holds nothing of
-#           the game: the build to share.
-#   recomp  tools/recomp.py lifts the game code of your nanpa2.exe to C at
-#           build time (build/gen/recomp.c, never committed). Development and
-#           reference only; never share the binary. It holds the interpreter
-#           too: NANPA2_INTERP=1 runs that instead, NANPA2_LOCKSTEP=1 checks
-#           the two against each other block by block (src/x86/lockstep.c).
-set(NANPA2_BACKEND "interp" CACHE STRING "Game code backend: interp or recomp")
-set_property(CACHE NANPA2_BACKEND PROPERTY STRINGS interp recomp)
-if(NOT NANPA2_BACKEND MATCHES "^(interp|recomp)$")
-  message(FATAL_ERROR "NANPA2_BACKEND is interp or recomp, not '${NANPA2_BACKEND}'")
-endif()
-
-# Python: the tests, and for recomp tools/recomp.py with capstone
+# Game code: the C engine (src/game) runs on the emulated address space of
+# src/x86 (docs/refactor.md). The interpreter (src/x86/interp.c) still
+# dispatches the units by native address until R2 is finished; it decodes no
+# game code any more (the game code is all C), so the build needs neither the
+# exe nor capstone and the binary holds nothing of the game.
+# Python: for the tests.
+find_package(Python3 COMPONENTS Interpreter)
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
   set(_py "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
-elseif(NANPA2_BACKEND STREQUAL "recomp")
-  find_package(Python3 REQUIRED COMPONENTS Interpreter)
-  set(_py "${Python3_EXECUTABLE}")
 else()
-  find_package(Python3 COMPONENTS Interpreter)
   set(_py "${Python3_EXECUTABLE}")
 endif()
-set(NANPA2_PYTHON "${_py}" CACHE FILEPATH "Python (with capstone for recomp)")
-
-set(BACKEND_SOURCES)
-if(NANPA2_BACKEND STREQUAL "recomp")
-  set(NANPA2_EXE "${CMAKE_SOURCE_DIR}/game/nanpa2.exe" CACHE FILEPATH "nanpa2.exe to lift")
-  set(GEN_C "${CMAKE_BINARY_DIR}/gen/recomp.c")
-  add_custom_command(
-    OUTPUT "${GEN_C}"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/gen"
-    COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tools/recomp.py" "${NANPA2_EXE}" "${GEN_C}"
-    DEPENDS "${CMAKE_SOURCE_DIR}/tools/recomp.py" "${CMAKE_SOURCE_DIR}/src/hle/overrides.h"
-      "${NANPA2_EXE}"
-    COMMENT "Lifting nanpa2.exe to C"
-    VERBATIM)
-  set(BACKEND_SOURCES "${GEN_C}" src/x86/lockstep.c)
-endif()
+set(NANPA2_PYTHON "${_py}" CACHE FILEPATH "Python for the tests")
 
 # Game logic reimplemented in C (docs/reimpl.md), without SDL or HLE
 # dependencies, so the differential replay links it alone.
@@ -71,12 +42,9 @@ set(GAME_SOURCES
   src/game/map_path.c
   src/game/map_sprite.c
   src/game/map_pump.c
-  src/game/map_fuzz.c
   src/game/screen.c
   src/game/wipe.c
   src/game/units.c
-  src/game/trace.c
-  src/game/diff.c
   src/game/state_view.c
   src/game/state.c
 )
@@ -105,7 +73,6 @@ set(SOURCES
   src/hle/status.c
   ${GAME_SOURCES}
   src/game/game.c
-  ${BACKEND_SOURCES}
 )
 
 option(NANPA2_SDL_RENDERER "Use the SDL_Renderer presenter on macOS too" OFF)
@@ -155,19 +122,8 @@ endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
   # the interpreter runs the whole game: optimized in Debug builds too
-  set_source_files_properties(src/x86/interp.c src/x86/lockstep.c PROPERTIES COMPILE_OPTIONS "-O2")
-  if(NANPA2_BACKEND STREQUAL "recomp")
-    # generated code: labels and comparisons it never uses; its memory
-    # writes are logged for the lockstep check (X86_WTRACK)
-    set_source_files_properties("${GEN_C}" PROPERTIES COMPILE_OPTIONS
-      "-Wno-unused-label;-Wno-unused-value;-Wno-unused-variable;-Wno-parentheses-equality;-O1")
-  endif()
+  set_source_files_properties(src/x86/interp.c PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
-if(NANPA2_BACKEND STREQUAL "recomp")
-  target_compile_definitions(nanpa2 PRIVATE NANPA2_HAVE_RECOMP)
-  set_property(SOURCE "${GEN_C}" APPEND PROPERTY COMPILE_DEFINITIONS X86_WTRACK)
-endif()
-
 # macOS app bundle: build/同級生２.app with SDL inside (tools/bundle_macos.sh).
 # It holds no game data (the game folder is found or asked for at run time,
 # see src/launch.c). Built with NANPA2_BACKEND=interp it holds nothing of the
@@ -186,7 +142,6 @@ if(APPLE)
   add_custom_target(nanpa2_app ${_app_all}
     COMMAND /bin/sh "${CMAKE_SOURCE_DIR}/tools/bundle_macos.sh"
       "${NANPA2_APP_DIR}" $<TARGET_FILE:nanpa2> "${CMAKE_BINARY_DIR}/Info.plist"
-      "${NANPA2_BACKEND}"
     DEPENDS nanpa2 "${CMAKE_SOURCE_DIR}/tools/bundle_macos.sh" "${CMAKE_BINARY_DIR}/Info.plist"
     COMMENT "Bundling ${NANPA2_APP_NAME}.app"
     VERBATIM)
@@ -194,14 +149,6 @@ endif()
 
 add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
 target_include_directories(decode_all PRIVATE src)
-
-# Differential replay: runs the reimplemented units on call records of the
-# lifted originals (tests/diff_replay.c, docs/reimpl.md).
-add_executable(diff_replay tests/diff_replay.c src/x86/x86.c ${GAME_SOURCES})
-target_include_directories(diff_replay PRIVATE src)
-if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
-  target_compile_options(diff_replay PRIVATE -Wall -Wextra -Wno-unused-parameter)
-endif()
 
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
@@ -224,44 +171,6 @@ set_tests_properties(selftest PROPERTIES TIMEOUT 30
 add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
 set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
 
-# Differential tests of the reimplemented game logic (docs/reimpl.md). FROZEN
-# since the refactor (docs/refactor.md): they compare emulated memory with the
-# lifted original, and moved state (src/game/state.h) is no longer there. Off
-# by default; on, they fail by design. Replay (replay_det) is the check now.
-option(NANPA2_FROZEN_TESTS "Build the frozen differential and lockstep tests" OFF)
-if(NANPA2_FROZEN_TESTS)
-# diffcapture: a headless exploration run from a new game (seed 31) with
-# NANPA2_DIFF on, so every call of a reimplemented unit is compared with
-# the lifted original online and recorded in build/diff/ctest (game memory:
-# stays in the build folder). diffreplay: replays every record under
-# build/diff and build/diff/ctest (put records of longer runs in build/diff)
-# without the game; skipped when there are none.
-set(DIFF_DIR "${CMAKE_BINARY_DIR}/diff")
-add_test(NAME diffcapture_dir COMMAND ${CMAKE_COMMAND} -E
-  rm -rf "${DIFF_DIR}/ctest" "${CMAKE_BINARY_DIR}/diff-saves")
-add_test(NAME diffcapture_mkdir COMMAND ${CMAKE_COMMAND} -E
-  make_directory "${DIFF_DIR}/ctest" "${CMAKE_BINARY_DIR}/diff-saves")
-set_tests_properties(diffcapture_dir PROPERTIES FIXTURES_SETUP diff_dirs)
-set_tests_properties(diffcapture_mkdir PROPERTIES FIXTURES_SETUP diff_dirs DEPENDS diffcapture_dir)
-add_test(NAME diffcapture COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1
-  "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/diff-saves" "NANPA2_DIFF_DIR=${DIFF_DIR}/ctest"
-  NANPA2_EXPLORE=31 NANPA2_EXPLORE_FRAMES=20000 NANPA2_TURBO=8
-  $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
-set_tests_properties(diffcapture PROPERTIES TIMEOUT 240
-  FIXTURES_REQUIRED diff_dirs FIXTURES_SETUP diff_records
-  PASS_REGULAR_EXPRESSION "diff: 004064d9 op_0c_set_reg calls [1-9]"
-  FAIL_REGULAR_EXPRESSION "MISMATCH|x86 trap|WARNING:")
-add_test(NAME diffreplay COMMAND diff_replay "${DIFF_DIR}" "${DIFF_DIR}/ctest")
-set_tests_properties(diffreplay PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
-  FIXTURES_REQUIRED diff_records)
-endif()
-
-# Start-up (about 10 s, headless): the HLE call trace of the C start-up equals
-# that of the original WinMain and shutdown run as an oracle (tests/start_trace.py).
-add_test(NAME start_trace COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/start_trace.py"
-  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/start-trace")
-set_tests_properties(start_trace PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
-
 # Deterministic mode and replay (about 40 s, headless; tests/replay_det.py): a
 # recording made at test time from the game data, twice (identical), then
 # replayed against its checkpoints, and two tampered recordings must diverge.
@@ -275,7 +184,6 @@ add_test(NAME wavcheck COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/wav
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/wavcheck")
 set_tests_properties(wavcheck PROPERTIES TIMEOUT 30)
 
-if(NANPA2_BACKEND STREQUAL "interp")
   # No bytes of nanpa2.exe in the binary or the .app (if built): every 64-byte
   # run of the exe's sections is looked for (tests/no_game_bytes.py). Needs
   # the exe in the game folder to compare with; skipped without it.
@@ -292,12 +200,4 @@ if(NANPA2_BACKEND STREQUAL "interp")
   add_test(NAME asset_only COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/asset_only.py"
     $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/asset-only")
   set_tests_properties(asset_only PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
-elseif(NANPA2_FROZEN_TESTS)
-  # Lockstep (FROZEN, docs/refactor.md; about 30 s, headless): the interpreter shadows every block of
-  # the recompiled code from launch to the title (src/x86/lockstep.c).
-  add_test(NAME lockstep COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1 NANPA2_LOCKSTEP=1
-    NANPA2_INPUT=quit,20000 "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/selftest-saves"
-    $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
-  set_tests_properties(lockstep PROPERTIES TIMEOUT 90 FIXTURES_REQUIRED selftest_dir
-    PASS_REGULAR_EXPRESSION "no divergence" FAIL_REGULAR_EXPRESSION "DIVERGENCE|x86 trap")
-endif()
+

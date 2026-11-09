@@ -418,7 +418,6 @@ void x86_probe(uint32_t pc)
 
 void x86_poll(void)
 {
-	X86_LOCKSTEP_POINT(LS_POLL, x86_poll_pc); /* before the timer writes memory */
 	static uint32_t last_log;
 	static int log = -1;
 	if (log < 0)

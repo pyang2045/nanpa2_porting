@@ -129,7 +129,6 @@ static uint32_t do_sprintf(uint32_t dst, uint32_t fmt, uint32_t argp)
 			out[n++] = *t;
 	}
 	out[n] = 0;
-	X86_TRACE(dst, (uint32_t)n + 1, 1); /* differential tests undo it */
 	memcpy(x86_ptr(dst, (uint32_t)n + 1), out, n + 1);
 	return (uint32_t)n;
 }
@@ -176,8 +175,6 @@ int crt_call(uint32_t addr)
 	case 0x412deb: { /* fread(buf, size, n, fp) */
 		FILE *f = file_get(hle_arg(3));
 		uint32_t total = hle_arg(1) * hle_arg(2);
-		if (f && total)
-			X86_TRACE(hle_arg(0), total, 1); /* differential tests undo it */
 		size_t got = f && total ? fread(x86_ptr(hle_arg(0), total), 1, total, f) : 0;
 		cpu.r[EAX] = hle_arg(1) ? (uint32_t)got / hle_arg(1) : 0;
 		return 1;

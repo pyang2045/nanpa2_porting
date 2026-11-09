@@ -305,13 +305,8 @@ static int ddraw_method(uint32_t m)
 		nargs = 4;
 		break;
 	case 22: /* WaitForVerticalBlank(flags, event) */
-		/* not while the differential harness holds the timer off
-		 * (x86_poll_countdown near INT_MAX, src/game/game.c): the two
-		 * runs it compares must see the same ticks */
-		if (x86_poll_countdown < 0x40000000) {
-			win32_run_timer();
-			ddraw_present(0);
-		}
+		win32_run_timer();
+		ddraw_present(0);
 		nargs = 3;
 		break;
 	default:

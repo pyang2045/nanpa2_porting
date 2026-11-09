@@ -242,7 +242,6 @@ static void override_call(uint32_t addr)
 		unsigned char *out = lzh_decode(x86_ptr(src, cap), cap, &n);
 		if (!out)
 			x86_trap(addr, "corrupt GP4/ANI data");
-		X86_TRACE(dst, (uint32_t)n, 1); /* differential tests undo it */
 		memcpy(x86_ptr(dst, (uint32_t)n), out, n);
 		/* emulated CPU time of the native decoder: lifting it and counting
 		 * gave about 70 instructions per input byte + 1.2 per output byte
@@ -259,7 +258,6 @@ static void override_call(uint32_t addr)
 
 uint32_t hle_jump(uint32_t addr)
 {
-	X86_LOCKSTEP_POINT(LS_HLE, addr);
 	uint32_t pc;
 	if (game_jump(addr, &pc))
 		return pc;
@@ -275,10 +273,14 @@ uint32_t hle_jump(uint32_t addr)
 static void hle_trace(uint32_t addr)
 {
 	static int on = -1;
-	if (on < 0)
-		on = getenv("NANPA2_HLETRACE") != NULL;
+	if (on < 0) {
+		const char *e = getenv("NANPA2_HLETRACE");
+		on = !e ? 0 : !strcmp(e, "2") ? 2 : 1; /* 2: with the instruction count */
+	}
 	if (!on)
 		return;
+	if (on == 2)
+		fprintf(stderr, "ic %llu ", (unsigned long long)x86_icount);
 	fprintf(stderr, "hle %08x", addr);
 	int n = 1; /* arguments known: imports have their count, others show the first */
 	if (addr >= THUNK_IMPORT && addr < THUNK_COM) {
@@ -297,7 +299,6 @@ static void hle_trace(uint32_t addr)
 
 void hle_call(uint32_t addr)
 {
-	X86_LOCKSTEP_POINT(LS_HLE, addr);
 	hle_trace(addr);
 	pop32(); /* return address: the caller continues there */
 	if (addr >= THUNK_COM && addr < THUNK_END) {

@@ -393,31 +393,12 @@ void x86_interp(uint32_t pc)
 	i_run(pc, 0, 0);
 }
 
-/* The backend switch; here rather than in x86.c, which diff_replay links
- * with its own x86_exec. */
-#ifdef NANPA2_HAVE_RECOMP
-int x86_use_interp;
-#else
-int x86_use_interp = 1;
-#endif
-
 const char *x86_backend_name(void)
 {
-#ifdef NANPA2_HAVE_RECOMP
-	if (x86_lockstep_on)
-		return "lockstep";
-#endif
-	return x86_use_interp ? "interp" : "recomp";
+	return "interp";
 }
 
 void x86_exec(uint32_t pc)
 {
-#ifdef NANPA2_HAVE_RECOMP
-	if (!x86_use_interp) {
-		x86_exec_recomp(pc);
-		X86_LOCKSTEP_POINT(LS_RET, X86_RET_SENTINEL);
-		return;
-	}
-#endif
 	x86_interp(pc);
 }

@@ -102,28 +102,12 @@ static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 	return x86_mem + (a - MEM_BASE);
 }
 
-/* Differential tests (src/game/trace.c): while x86_trace_on is set every
- * access through rd*()/wr*() is reported before it happens. */
-extern int x86_trace_on;
-void x86_trace_access(uint32_t a, uint32_t n, int write);
-#define X86_TRACE(a, n, w) do { if (x86_trace_on) x86_trace_access((a), (n), (w)); } while (0)
-
-/* Lockstep (src/x86/lockstep.c): the recompiled code is built with
- * X86_WTRACK so that its memory writes inside a basic block are logged. */
-#ifdef X86_WTRACK
-extern int x86_wtrack_on;
-void x86_wtrack(uint32_t a, uint32_t n);
-#define X86_WT(a, n) do { if (x86_wtrack_on) x86_wtrack((a), (n)); } while (0)
-#else
-#define X86_WT(a, n) ((void)0)
-#endif
-
-static inline uint32_t rd8(uint32_t a) { X86_TRACE(a, 1, 0); return *x86_ptr(a, 1); }
-static inline uint32_t rd16(uint32_t a) { uint16_t v; X86_TRACE(a, 2, 0); memcpy(&v, x86_ptr(a, 2), 2); return v; }
-static inline uint32_t rd32(uint32_t a) { uint32_t v; X86_TRACE(a, 4, 0); memcpy(&v, x86_ptr(a, 4), 4); return v; }
-static inline void wr8(uint32_t a, uint32_t v) { X86_TRACE(a, 1, 1); X86_WT(a, 1); *x86_ptr(a, 1) = (uint8_t)v; }
-static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; X86_TRACE(a, 2, 1); X86_WT(a, 2); memcpy(x86_ptr(a, 2), &t, 2); }
-static inline void wr32(uint32_t a, uint32_t v) { X86_TRACE(a, 4, 1); X86_WT(a, 4); memcpy(x86_ptr(a, 4), &v, 4); }
+static inline uint32_t rd8(uint32_t a) { return *x86_ptr(a, 1); }
+static inline uint32_t rd16(uint32_t a) { uint16_t v; memcpy(&v, x86_ptr(a, 2), 2); return v; }
+static inline uint32_t rd32(uint32_t a) { uint32_t v; memcpy(&v, x86_ptr(a, 4), 4); return v; }
+static inline void wr8(uint32_t a, uint32_t v) { *x86_ptr(a, 1) = (uint8_t)v; }
+static inline void wr16(uint32_t a, uint32_t v) { uint16_t t = (uint16_t)v; memcpy(x86_ptr(a, 2), &t, 2); }
+static inline void wr32(uint32_t a, uint32_t v) { memcpy(x86_ptr(a, 4), &v, 4); }
 
 static inline void set16(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffff0000u) | (v & 0xffffu); }
 static inline void set8l(int r, uint32_t v) { cpu.r[r] = (cpu.r[r] & 0xffffff00u) | (v & 0xffu); }
@@ -511,10 +495,9 @@ static inline void str_movs(int sz, int rep)
 		cpu.r[ESI] += STR_STEP(sz); cpu.r[EDI] += STR_STEP(sz);
 		return;
 	}
-	if (!cpu.df && cpu.r[ECX] && !x86_trace_on) {
+	if (!cpu.df && cpu.r[ECX]) {
 		uint32_t n = cpu.r[ECX] * (uint32_t)sz;
 		uint8_t *d = x86_ptr(cpu.r[EDI], n), *s = x86_ptr(cpu.r[ESI], n);
-		X86_WT(cpu.r[EDI], n);
 		/* byte-forward copy: overlapping moves replicate as on x86 */
 		if (d > s && d < s + n)
 			for (uint32_t i = 0; i < n; i++) d[i] = s[i];
@@ -627,24 +610,6 @@ void x86_poll(void);
 extern uint64_t x86_icount;
 #define X86_COUNT(n) (x86_icount += (n))
 
-/* Lockstep (recomp builds, NANPA2_LOCKSTEP=1): the interpreter shadows each
- * basic block of the recompiled code and the results are compared at the
- * next block start, HLE call, poll or return (lockstep.c). The generated
- * code starts every block with X86_BLOCK(block address, instructions). */
-/* LS_NEST: x86_call from the host while a block runs (a probe calling
- * game code): that block's check is dropped. */
-enum { LS_BLOCK, LS_HLE, LS_POLL, LS_RET, LS_NEST };
-#ifdef NANPA2_HAVE_RECOMP
-extern int x86_lockstep_on;
-void x86_lockstep_block(uint32_t pc, uint32_t n);
-void x86_lockstep_point(int kind, uint32_t pc);
-void x86_lockstep_init(void);
-#define X86_BLOCK(pc, n) do { if (x86_lockstep_on) x86_lockstep_block((pc), (n)); X86_COUNT(n); } while (0)
-#define X86_LOCKSTEP_POINT(kind, pc) do { if (x86_lockstep_on) x86_lockstep_point((kind), (pc)); } while (0)
-#else
-#define X86_BLOCK(pc, n) X86_COUNT(n)
-#define X86_LOCKSTEP_POINT(kind, pc) ((void)0)
-#endif
 /* Instructions per second; 0 = unthrottled. */
 void x86_set_speed(double ips);
 void x86_throttle(void);

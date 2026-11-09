@@ -86,12 +86,6 @@
 #define MSG_TITLE_ERROR 0x4311e0u
 #define LOGO_ARG 0x431134u
 
-int game_replay_pass;
-
-int game_replaying(void)
-{
-	return game_replay_pass;
-}
 
 /* ---- calls into imports and COM objects */
 
@@ -428,10 +422,6 @@ static void paint(void)
  * already by the original and must not repeat. */
 static void host_call(uint32_t slot, int n, const uint32_t *a)
 {
-	if (game_replaying()) {
-		X86_COUNT((uint64_t)n + 1);
-		return;
-	}
 	stdcall(rd32(slot), n, a);
 }
 

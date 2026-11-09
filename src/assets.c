@@ -15,18 +15,13 @@
 /* the modes that run the original code need the exe (the oracle) */
 static const char *exe_mode(void)
 {
-#ifdef NANPA2_HAVE_RECOMP
-	return "the recomp build";
-#else
-	static const char *const names[] = { "NANPA2_DIFF", "NANPA2_DIFF_DIR", "NANPA2_FUZZ", "NANPA2_LOCKSTEP",
-					     "NANPA2_INTERP", "NANPA2_START_ORACLE" };
+	static const char *const names[] = { "NANPA2_INTERP" };
 	for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
 		const char *e = getenv(names[i]);
 		if (e && *e && strcmp(e, "0"))
 			return names[i];
 	}
 	return NULL;
-#endif
 }
 
 static int exists(const char *path)

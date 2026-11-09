@@ -11,9 +11,4 @@ uint32_t game_winmain(void);       /* 0x402090, a jump unit */
 uint32_t game_winmain_done(void);  /* 0x4021a3 */
 void game_wndproc(void);           /* 0x4021c0 */
 
-/* 1 while the harness runs the reimplementation after the original (their
- * effects on the host happened once already) */
-int game_replaying(void);
-extern int game_replay_pass; /* set by game.c around that run */
-
 #endif
