@@ -30,8 +30,6 @@
 #define AT_LOOP 0
 #define AFTER_BLOCK 0
 #define AT_FETCH 0
-#define MAP_MOVER_SCRATCH 0
-#define MAP_TAIL_SCRATCH 0
 
 /* Sorted by address. Keep in step with HLE_GAME_OVERRIDE (CALL) and
  * HLE_GAME_JUMP (JUMP) in src/hle/overrides.h; the contracts are documented
@@ -55,39 +53,6 @@ const struct game_unit game_units[] = {
 	CALL_SYS(0x403661, "anim_run_slot", game_anim_run_slot, 0),
 	CALL(0x4037fc, "script_eval", game_eval_regs, REG_BIT(EBX) | REG_BIT(EDX), 0),
 	CALL(0x4039f7, "script_read_constant", game_read_constant_regs, 0, 0),
-	/* Stage 5A (src/game/map*.c) */
-	CALL(0x403b28, "map_fill_grid", game_map_fill_grid,
-		REG_BIT(EAX) | REG_BIT(EBX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
-	CALL(0x403bd2, "map_overlay_sprites", game_map_overlay_sprites,
-		REG_BIT(EAX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 0),
-	CALL_SYS(0x403d45, "map_redraw_changed", game_map_redraw_changed,
-		REG_BIT(EAX) | REG_BIT(ESI) | REG_BIT(EDI)),
-	CALL(0x403eff, "map_cell_draw", game_map_cell_draw, 0, 0),
-	CALL(0x4040f0, "map_cell_clear_bit3", game_map_cell_clear_bit3, 0, 0),
-	CHAIN(0x40448b, "map_player_pumped_a", game_pl_pumped_a),
-	CHAIN(0x4044a9, "map_player_pumped_b", game_pl_pumped_b),
-	CHAIN(0x4044b7, "map_player_click", game_pl_click),
-	CHAIN(0x4045eb, "map_player_keys", game_pl_keys),
-	CALL_AL(0x404731, "map_move_up", game_map_move_up, MAP_MOVER_SCRATCH),
-	CALL_AL(0x404937, "map_move_down", game_map_move_down, MAP_MOVER_SCRATCH),
-	CALL_AL(0x404a9a, "map_move_left", game_map_move_left, MAP_MOVER_SCRATCH),
-	CALL_AL(0x404c9f, "map_move_right", game_map_move_right, MAP_MOVER_SCRATCH),
-	CALL(0x404f8c, "map_area_trigger", game_map_area_trigger,
-		REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(ESI) | REG_BIT(EDI), 0),
-	CALL(0x40500e, "map_collision", game_map_collision, REG_BIT(ESI) | REG_BIT(EDI), 0),
-	CHAIN(0x4051e3, "map_frame_pumped", game_s12_pumped_a),
-	CHAIN(0x40520f, "map_frame_released", game_s12_released),
-	CHAIN(0x405233, "map_event_pumped_a", game_ev_pumped_a),
-	CHAIN(0x405273, "map_event_pumped_b", game_ev_pumped_b),
-	CHAIN(0x40539f, "map_event_released", game_ev_released),
-	CHAIN(0x40559d, "map_rclick_pumped", game_rc_pumped),
-	CALL(0x405691, "map_walk_step", game_map_walk_step,
-		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX), 0),
-	CALL(0x405966, "map_plan_walk", game_map_plan_walk,
-		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX) | REG_BIT(EBX) | REG_BIT(EDI), 0),
-	/* Stage 6: the map's pump (0x40609c: pushad and the pump; 0x4060a2: its result) */
-	{ 0x40609c, "map_pump", NULL, game_pump, 0 },
-	{ 0x4060a2, "map_pump_done", NULL, game_pump_done, 0 },
 	PIECE(0x4060d4, "vm_entry", game_vm_entry, AT_LOOP, -1, 0, 1, NULL),
 	CALL(0x406455, "script_set_flag", game_set_flag_regs, 0, 0),
 	JUMP_SYS(0x406842, "op_0414_menu_items", game_op_menu_items, NULL),
@@ -109,11 +74,8 @@ const struct game_unit game_units[] = {
 	RESUME_SYS(0x40738b, "op_19_wipe_done", game_op_wipe_done, AT_LOOP, 3),
 	JUMP_SYS(0x4073a5, "op_0424_music", game_op_music, NULL),
 	JUMP_SYS(0x4073cd, "op_0425_voice", game_op_voice, NULL),
-	/* Stage 6 (src/game/map_pump.c): the handler runs the chain down to the first
-	 * pump, the pump sites' return addresses are the pieces. At the handler's tail
-	 * only AX (S) is live; at a pump every register is. */
+	/* the map (src/game/map_pump.c): the handler runs direct C code through ctl_piece */
 	{ 0x4073ee, "op_0426_map", NULL, game_op_map, 0 },
-	RESUME(0x407410, "op_0426_map_done", game_op_map_done, AT_LOOP, 0),
 	CALL(0x40752c, "palette_copy", game_palette_copy_regs, 0, 0),
 };
 const int game_unit_count = (int)(sizeof game_units / sizeof game_units[0]);
