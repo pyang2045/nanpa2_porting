@@ -40,7 +40,7 @@ So the script VM 0x4060d4 owns all opcode handlers reached through its jump tabl
 (3,765 bytes). About a third of the functions are hand-written assembly with register
 arguments.
 
-## The asset: running without nanpa2.exe (src/x86/asset.c, src/assets.c)
+## The asset: running without nanpa2.exe (historical: src/x86/asset.c, src/assets.c; both are gone, see docs/refactor.md "No asset")
 
 After Stage 6 no native game instruction runs (`NANPA2_NATIVE_REPORT=1`: 0), yet the interp build
 still loaded the whole exe, because the C reads the exe's initialized data at its native addresses

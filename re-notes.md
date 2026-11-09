@@ -717,7 +717,7 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
   after any direct jump (jmp, jcc, loop) to addr, which recomp.py allows only from inside
   that body (check_oracles); calls and indirect transfers to addr still reach the override.
 
-### nanpa2.dat: the exe's built-in data without its code (src/asset.c)
+### nanpa2.dat: the exe's built-in data without its code (historical: src/asset.c, removed; no longer read)
 
 Little-endian. Header 48 bytes: `"N2AS"`; u32 version 3 (1 also kept the header page and .rdata, 2 the whole initialised .data; both still read); u32 PE TimeDateStamp 0x39697c6a; u32
 SizeOfImage 0xc1000; u32 size of the source exe; u32 range count; u64 FNV-1a of the source exe;

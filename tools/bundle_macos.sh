@@ -12,8 +12,7 @@
 # signed ad hoc (install_name_tool breaks the signatures), and
 # LSMinimumSystemVersion is set to the highest minos of the files.
 #
-# No game data goes in; the game folder, with nanpa2.exe or the nanpa2.dat made
-# from it, is found at run time (src/launch.c, src/assets.c). The binary holds nothing of the
+# No game data goes in; the game folder is found at run time (src/launch.c). The binary holds nothing of the
 # game (ctest no_game_bytes).
 set -eu
 

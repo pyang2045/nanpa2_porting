@@ -1,9 +1,7 @@
 /*
  * 同級生２ (nanpa2.exe, Taiwan release) on SDL2.
  *
- *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
- *   nanpa2 --make-assets [--game DIR] [--exe PATH]     cut nanpa2.dat (the built-in data
- *          [--out FILE]                                 of nanpa2.exe) in the game folder
+ *   nanpa2 [--game DIR] [--font PATH]                  play
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
  *          [--crt-size WxH]                             ... at another size
@@ -34,16 +32,14 @@
  * folder picker.
  *
  * Playing runs the game's C reimplementation (src/game) on the platform API
- * (src/platform: files, surfaces, text, window, sound), with the built-in data
- * of the player's nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe
- * once). Nothing of the exe's code runs.
+ * (src/platform: files, surfaces, text, window, sound). The game state starts from
+ * values defined in code (game/state.c): neither nanpa2.exe nor nanpa2.dat is read.
  */
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "assets.h"
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
@@ -58,7 +54,6 @@
 #include "dev/replay.h"
 #include "dev/status.h"
 #include "launch.h"
-#include "asset.h"
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -198,17 +193,9 @@ static int game_speed_set;
 
 static SDL_Window *game_window;
 
-static int run_game(const char *game, const char *exe, const char *font)
+static int run_game(const char *game, const char *font)
 {
-	char err[1400];
-	if (!assets_open(exe, err, sizeof err)) {
-		fprintf(stderr, "%s\n", err);
-		return 1;
-	}
-	if (!state_init()) {
-		fprintf(stderr, "no game data image\n");
-		return 1;
-	}
+	state_init();
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
@@ -237,9 +224,8 @@ static int run_game(const char *game, const char *exe, const char *font)
 
 int main(int argc, char **argv)
 {
-	const char *game = NULL, *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
-	const char *crt_shot = NULL, *view_bmp = NULL, *asset_out = NULL;
-	int make_assets = 0;
+	const char *game = NULL, *view = NULL, *shot = NULL, *font = NULL;
+	const char *crt_shot = NULL, *view_bmp = NULL;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	double speed = 1.0;
@@ -255,12 +241,6 @@ int main(int argc, char **argv)
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
-		else if (!strcmp(argv[i], "--exe") && i + 1 < argc)
-			exe = argv[++i];
-		else if (!strcmp(argv[i], "--make-assets"))
-			make_assets = 1;
-		else if (!strcmp(argv[i], "--out") && i + 1 < argc)
-			asset_out = argv[++i];
 		else if (!strcmp(argv[i], "--font") && i + 1 < argc)
 			font = argv[++i];
 		else if (!strcmp(argv[i], "--view")) {
@@ -303,22 +283,12 @@ int main(int argc, char **argv)
 	 * boxes and the picker only for a launch someone watches */
 	if (!view_bmp) {
 		int interactive = !getenv("NANPA2_HEADLESS") && !getenv("NANPA2_INPUT") && !shot && !crt_shot;
-		int play = !viewer && logo_frame_n < 0;
-		game = launch_game_dir(game, (play || make_assets) && !exe, interactive && !make_assets);
+		game = launch_game_dir(game, interactive);
 		if (!game)
 			return 1;
 	} else if (!game)
 		game = "game";
 	fsys_set_root(game);
-	if (make_assets) {
-		char path[1200], err[1400];
-		if (!assets_make(exe, asset_out, path, sizeof path, err, sizeof err)) {
-			fprintf(stderr, "%s\n", err);
-			return 1;
-		}
-		printf("made %s\n", path);
-		return 0;
-	}
 
 	int cur = 0;
 	if (logo_frame_n >= 0) {
@@ -416,7 +386,7 @@ int main(int argc, char **argv)
 		game_speed = speed;
 		game_speed_set = speed_set;
 		game_window = win;
-		rc = run_game(game, exe, font);
+		rc = run_game(game, font);
 		status_shutdown();
 	} else {
 		for (int running = 1; running;) {

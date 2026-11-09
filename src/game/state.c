@@ -2,7 +2,6 @@
 
 #include <string.h>
 
-#include "asset.h"
 
 struct game_state G;
 
@@ -54,20 +53,12 @@ static void state_defaults(void)
 	memcpy(G.rt.flag_name, "flag0\0\r\n$", 9);
 	/* 0x44628e: the palette fade length */
 	G.rt.fade_steps = 8;
+	/* 0x445c71: the 7 bytes of the exe's data there are read by no script (checked over the golden
+	 * replays and the exploration bot), so they start as zero like the rest of the block */
 }
 
-int state_init(void)
+void state_init(void)
 {
-	const uint8_t *image = asset_image();
-	if (!image)
-		return 0;
 	memset(&G, 0, sizeof G);
 	state_defaults();
-	/* the game's own text, which the source does not hold, from the asset */
-	for (unsigned i = 0; i < asset_content_n; i++) {
-		uint32_t lo = asset_content[i].lo, hi = asset_content[i].hi;
-		memcpy((uint8_t *)&G + (lo - DATA_BASE), image + (lo - IMAGE_BASE), hi - lo);
-	}
-	asset_release();
-	return 1;
 }

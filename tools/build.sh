@@ -17,8 +17,7 @@
 # SDL2 (and Python 3 for the tests), nothing else. It runs on 64-bit
 # little-endian hosts (state.h refuses to build otherwise). The binary and the
 # .app hold nothing of the game (ctest no_game_bytes): the player supplies the
-# game folder, and nanpa2.dat is cut from the player's nanpa2.exe at the first
-# launch. Missing tools are named with the install command for this system;
+# game folder (no nanpa2.exe needed). Missing tools are named with the install command for this system;
 # nothing is installed with sudo. Re-running reuses the build folder.
 set -eu
 

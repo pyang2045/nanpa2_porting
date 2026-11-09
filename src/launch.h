@@ -16,13 +16,13 @@ int launch_in_bundle(void);
  * nanpa2.previous.log), or always to NANPA2_LOG_FILE if set. Call first. */
 void launch_log_init(int argc, char **argv);
 
-/* The game folder (the CD contents, plus nanpa2.exe when need_exe), first
+/* The game folder (the CD contents, with FLAG0..FLAG6), first
  * that validates of: cli (--game), NANPA2_GAME_DIR, the path remembered in
  * <pref>/game-folder.txt, next to the executable or the .app (and in a
  * "game" folder there, up a few levels), ./game; then, if interactive, a
  * folder picker whose choice is remembered. cli and NANPA2_GAME_DIR are
  * final: if they fail, so does this. NULL: not found; the reason went to
  * stderr and, if interactive, a message box. */
-const char *launch_game_dir(const char *cli, int need_exe, int interactive);
+const char *launch_game_dir(const char *cli, int interactive);
 
 #endif

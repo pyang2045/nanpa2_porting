@@ -1360,3 +1360,15 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
 - `no_game_bytes` 16-byte check: it also failed on the app's libSDL3.dylib, which holds the 16-bit ramp 0, 4, 8, ...
   that the exe's MP3 library data has (.data 0x4a7c46). Linear ramps (computed tables) are now left out of the 16-byte
   check as they are of the 64-byte one; our own binaries are still scanned for every other run.
+
+## 2026-11-09: no asset: the engine needs neither nanpa2.exe nor nanpa2.dat
+
+- The no-CD box (0x402090) shows our own wording ("Game CD not found." / "找不到遊戲光碟。", title 同級生２, UTF-8;
+  `win_message_box` prints it and, for a watched launch, shows an SDL box); nothing reads 0x431140-0x431160.
+- The 7 bytes at 0x445c71 start as zero. A probe on every `g_ptr` access of 0x445c70-0x445c78 logged none over
+  the four goldens and an exploration-bot sweep (see the summary below); no script touches it.
+- Removed: `src/asset.[ch]`, `src/assets.[ch]`, `--make-assets`, `--exe`, `NANPA2_LOAD_EXE`, ctest `asset_only`
+  (a nanpa2.dat of any version in the folder is simply not opened). `launch.c` accepts a folder with DATA/01.GP4.
+  New ctest `standalone` (tests/standalone.py).
+- The four goldens (`li.*`, `raw.clock`) match twice (271/331/33/161) in a folder of symlinks with no exe and no
+  nanpa2.dat; the FLAG files they write are byte-identical to the previous build's on the same inputs (16 of 16).

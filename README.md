@@ -20,8 +20,8 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 The engine is plain C on SDL2: the game logic (`src/game`) runs on its own state and calls a small platform
 API (`src/platform`: files, surfaces, text, window, sound); no instruction of `nanpa2.exe` runs and
-nothing emulates the PC it was written for (see "Architecture"). What it still reads from the exe is its
-built-in data, which comes from `nanpa2.dat` (see "Game data"). The build needs a C11 compiler, CMake, Ninja
+nothing emulates the PC it was written for (see "Architecture"). Nothing is read from the exe: the start
+values of the game state are defined in code (see "Game data"). The build needs a C11 compiler, CMake, Ninja
 and SDL2 (Python 3 for the tests), nothing else, and the binary and `.app` hold nothing of the game (ctest
 `no_game_bytes`): this is the build to share, like xsystem4, the player supplies the game files. The engine
 assumes a 64-bit little-endian host (`src/game/state.h` refuses to build otherwise); the game state and the
@@ -80,7 +80,7 @@ src/platform/  the platform API and its host implementation (SDL2): files.h (the
                the cursor), sound.h (music, voices), logo, clock (pacing), present (Metal or SDL_Renderer)
 src/dev/       dev tools: record and replay (state checkpoints), the exploration bot, scripted input,
                the live status file
-src/           asset.c (nanpa2.dat), assets.c, trap.c, lzh.c and gp4.c (GP4/ANI pictures), fsys.c, launch.c, main.c
+src/           trap.c, lzh.c and gp4.c (GP4/ANI pictures), fsys.c, launch.c, main.c
 ```
 
 The refactor that led here (the original code run in an interpreter, then reimplemented in C on an
@@ -89,19 +89,13 @@ architecture summary and how the save files stay byte-compatible.
 
 ## Game data
 
-Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` from
-`data1.cab` there (`unshield x data1.cab`). See `game/README.md`.
+Copy the CD contents into `game/` and extract `FLAG0`..`FLAG6` from `data1.cab` there
+(`unshield x data1.cab`). See `game/README.md`.
 
-`nanpa2.exe` is needed **once**. The engine reimplements the game code in C but still reads the
-exe's built-in data (tables, strings, the start values of the globals); the first launch cuts those ranges (about 120 bytes: the game's own messages, no code) out of your
-exe into `nanpa2.dat`, in the game folder, or in the save folder if the game folder is not
-writable. `nanpa2 --make-assets [--game DIR] [--exe PATH] [--out FILE]` does it by hand. From
-then on the game runs from `nanpa2.dat` and the exe may be deleted; keep the file with the
-game folder (or in the save folder). `nanpa2.dat` is made on your machine from your copy, is
-never committed or shipped, and is checked at each start (a damaged or foreign file is
-refused; with the exe present it is made again). Without both `nanpa2.dat` and `nanpa2.exe`
-the game says so and stops. `--exe` and `NANPA2_LOAD_EXE=1` load the data from the whole
-exe instead (the asset test compares the two) and say so if it is missing.
+Neither `nanpa2.exe` nor any file made from it is needed: the engine reimplements the game code in C and
+defines the start values of its game state in code (`src/game/state.c`). (Earlier versions cut a
+`nanpa2.dat` from the exe at the first launch; a `nanpa2.dat` or `nanpa2.exe` left in the folder is
+ignored. The ctest `standalone` runs the game with neither.)
 
 ## Run
 
@@ -118,7 +112,7 @@ still accepted.
 Without `--game` the game folder is looked up in this order: `NANPA2_GAME_DIR`; the folder
 remembered from an earlier choice; next to the executable or the `.app`, or in a `game` folder
 there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the repository's
-`game/`); `./game`. If none of them has `DATA/` and `nanpa2.dat` or `nanpa2.exe`, a folder picker opens
+`game/`); `./game`. If none of them has `DATA/`, a folder picker opens
 (macOS) and the choice is remembered in `game-folder.txt` in the save folder
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.

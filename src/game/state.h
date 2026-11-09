@@ -6,8 +6,7 @@
  * the scripts land where they did natively, and the FLAG file and the checkpoints
  * see the bytes they always did. The comments give the native address of each field,
  * and an address is also an index into G (game/gmem.h). Code names the field. G is
- * initialised by code (state.c state_defaults) except for a few ranges of the game's own text, which
- * come from the asset (state_init), and is the only game state.
+ * initialised by code (state.c state_init) and is the only game state.
  */
 #ifndef NANPA2_GAME_STATE_H
 #define NANPA2_GAME_STATE_H
@@ -343,16 +342,11 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
 struct data_head {
 	uint8_t pad_000[0x30];          /* 0x431000 native function pointers (dead) */
 	char cd_prefix[4];              /* 0x431030 drive of the game's CD, "X:\\"; "" when it is the folder */
-	uint8_t pad_034[0x140 - 0x34];  /* 0x431034 the native file-name formats ("%s%s", ".GP4", "DATA\\%s", "FLAG",
-	                                 * "MUSIC\\%02d.WAV", "SPEECH\\...") and the MCI and error texts: the C holds
-	                                 * its own formats and nothing reads these */
-	char msg_no_cd[0x18];           /* 0x431140 the message of the no-CD box (game text, from the asset) */
-	char msg_no_cd_title[8];        /* 0x431158 its title (game text, from the asset) */
-	uint8_t pad_160[0x4312ccu - 0x431160u]; /* 0x431160 window class and title, more texts: not read */
+	uint8_t pad_034[0x4312ccu - 0x431034u]; /* 0x431034 the native file-name formats, window class and
+	                                 * title, MCI, error and message texts: the C holds its own
+	                                 * formats and messages and nothing reads these */
 };
 _Static_assert(offsetof(struct data_head, cd_prefix) == 0x30, "cd_prefix");
-_Static_assert(offsetof(struct data_head, msg_no_cd) == 0x140, "msg_no_cd");
-_Static_assert(offsetof(struct data_head, msg_no_cd_title) == 0x158, "msg_no_cd_title");
 _Static_assert(sizeof(struct data_head) == 0x4312ccu - 0x431000u, "data_head");
 struct game_state {
 	struct data_head head;               /* 0x431000 .data head */
@@ -387,9 +381,8 @@ GS_CHECK(cursor_bits, CBITS_BASE);
 _Static_assert(sizeof(struct game_state) == DATA_END - DATA_BASE, "game_state covers 0x431000-0x4c0000");
 extern struct game_state G;
 
-/* After the asset is loaded (asset.h): G is set to its start values (in code) and the ranges of game
- * text (asset_content) are copied from the image, which is then released. 1 ok. */
-int state_init(void);
+/* Set G to its start values (defined in code, state.c) */
+void state_init(void);
 
 /* Field access with the width and zero extension of rd8/rd16/wr8/wr16 */
 #define SV(f) ((uint32_t)G.save.n.f)
