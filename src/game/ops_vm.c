@@ -17,6 +17,7 @@
  * Semantics: re-notes.md "Script opcodes".
  */
 #include "game/ctl.h"
+#include "platform/clock.h"
 #include "game/file.h"
 #include "game/state_view.h"
 #include "game/vm.h"
@@ -389,8 +390,12 @@ int vm_op_menu(void)
 					continue;
 				break;
 			}
+			if (k == 1)
+				clock_lat("menu_rclick");
 			vm_pc = rd16(menu_inputs[k].handler);
 			vm_run_block();
+			if (k == 1)
+				clock_lat("menu_rclick_done");
 			if (SV(input_enable) & 1) {
 				break;
 			}

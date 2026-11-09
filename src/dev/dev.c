@@ -308,6 +308,8 @@ void dev_inject(void)
 		} else if (!strcmp(e->kind, "up")) {
 			win_post_ext(0x202, 0, lp);
 		} else if (!strcmp(e->kind, "rclick")) {
+			if (getenv("NANPA2_LATLOG"))
+				fprintf(stderr, "RP frame %u seg%d.%d scripted\n", RT(frame), e->seg, e->y);
 			win_post_ext(0x200, 0, lp);
 			win_post_ext(0x204, 2, lp);
 		} else if (!strcmp(e->kind, "rup")) {

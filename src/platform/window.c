@@ -50,6 +50,8 @@ void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
 
 void win_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
+	if (msg == WM_RBUTTONDOWN)
+		clock_lat("post");
 	if (hook_external(msg, wparam, lparam))
 		win_post(msg, wparam, lparam);
 }
@@ -187,8 +189,9 @@ static void collect_events(void)
 			uint32_t lp = mouse_lparam(ev.button.x, ev.button.y);
 			if (ev.button.button == SDL_BUTTON_LEFT)
 				win_post_ext(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
-			else if (ev.button.button == SDL_BUTTON_RIGHT)
+			else if (ev.button.button == SDL_BUTTON_RIGHT) {
 				win_post_ext(down ? WM_RBUTTONDOWN : WM_RBUTTONUP, 0, lp);
+			}
 			break;
 		}
 		case SDL_KEYDOWN:
@@ -228,6 +231,8 @@ static int pop_message(struct msg *m)
 
 static uint32_t dispatch(const struct msg *m)
 {
+	if (m->msg == WM_RBUTTONDOWN)
+		clock_lat("dispatch");
 	if (!handlers.wndproc)
 		return 0;
 	uint32_t r = handlers.wndproc(HWND_MAIN, m->msg, m->wparam, m->lparam);
@@ -265,8 +270,10 @@ void win_run_timer(void)
 		timer_next += 16;
 		n++;
 	}
-	if (now >= timer_next)
+	if (now >= timer_next) {
+		clock_lat("tick_drop");
 		timer_next = now + 16; /* fell far behind: drop ticks */
+	}
 }
 
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */

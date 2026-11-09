@@ -1384,3 +1384,30 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
   includes a `dev/` header, game code includes no SDL. All headers already stood alone.
 - Four goldens (`li.*`, `raw.clock`) match: 271/331/33/161 checkpoints. Removed the "Left" item about
   `files.c` in `docs/refactor.md`.
+
+## 2026-11-09: right-click latency investigation (no pacing change)
+
+Report: the right-click menu sometimes appears late. Measured headless in real time (R3 pacing, speed 1)
+with the new dev hooks: `NANPA2_LATLOG=1` (`clock_lat`: microsecond "L" lines at the right button post,
+dispatch, VM handler start/end, every present, every throttle sleep of 10 ms or more, dropped timer ticks),
+`NANPA2_RPROBE=1|STATE` (the exploration bot posts a right click held 9 frames every 40-160 frames and logs
+the state) and `rclick` events in `NANPA2_INPUT` (now also log `RP`, keyed by their Y).
+- Host path, 205 bot clicks plus 46 scripted (40.MES scene, 41.MES text): SDL/scripted post -> WM_RBUTTONDOWN
+  dispatch median 0.0-0.1 ms, max 0.2 ms; -> the script handler running 0.1-0.4 ms; -> the next present
+  (every 16 ms at the pump) median 10 ms, p95 17 ms; -> present after the menu block has drawn median 27 ms,
+  p95 34 ms. Nothing in this path sleeps or batches.
+- What waits is the original's own structure, and the C code matches it: the VM tests the buttons once per
+  opcode (0x4060f9: 0x40611f left, 0x40612f right), so text (one opcode per character plus the `0x4075c6`
+  frame wait) answers within a character; the wait for a click (0x406acc) reads only input 0, so a right
+  click during a click wait is ignored (70 of 77 probes in that state ran no handler); a click handler
+  (0x406143) first waits for both buttons to be released, so a script-level menu opens at release; a
+  `04 13` menu loop (0x406671) tests inputs once per pass of its frame block, so its latency is that block's
+  length. Frame-block and text lengths are the script's.
+- The only host-side stall seen: the R3 throttle pays decode/dissolve charges in one `SDL_Delay`: 12-160 ms
+  (median 51 ms, 38 in 3 x 9000 frames of bot play), all at picture loads, where the original's VM is also
+  busy. Events wait in SDL and are read afterwards, so no click is lost and no menu is later than the load.
+  Per-glyph charges (0.2 ms a byte + 0.09 ms cell) are slept in 2 ms or longer pieces, never 10 ms or more
+  during text. Timer ticks dropped (more than 8 behind): 2 in 3 x 144 s.
+- No pacing constants, waits or throttle changed; goldens unchanged (`li.*`, `raw.clock`). A windowed run
+  could not be measured here (headless only); the Metal presenter's `nextDrawable` wait is in the status
+  file (`worst_wait_ms`) for a real instance.
