@@ -23,6 +23,7 @@
  * flood, 0x405fb6 approach, 0x405691 step, 0x405542 sub-op 30.
  */
 #include "game/map.h"
+#include "game/state.h"
 
 #define PATH_GRID 0x435e62u      /* u16: copy of the walk grid's offset (written, never read) */
 #define PATH_FROM_CELL 0x435e64u /* u16: the sprite's cell in the grid */
@@ -331,7 +332,7 @@ void game_map_plan_walk(void)
 		X86_COUNT(2);
 		return;
 	}
-	uint32_t m = SEG1 + rd16(MAP_SEL);
+	uint32_t m = SEG1 + SV(map_sel);
 	wr16(PATH_FROM_X, rd16(sp + S_X));
 	wr16(PATH_FROM_Y, rd16(sp + S_Y));
 	wr16(PATH_GOAL_X, gx);
@@ -458,7 +459,7 @@ void game_map_walk_step(void)
 {
 	uint32_t s = cpu.r[ESI];
 	uint32_t sp = SEG1 + s;
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t m = SEG1 + sel;
 	uint32_t mw = rd16(m + M_MAP_W);
 	uint32_t c = (((mw * rd16(sp + S_Y)) & 0xffff) + rd16(sp + S_X) + rd16(MAP_WALK_BASE)) & 0xffff;
@@ -507,7 +508,7 @@ void game_map_walk_step(void)
  * -(flag * 0x101 + 1). */
 uint32_t game_map_op_walk(void)
 {
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t n16 = rd16(MAP_ARGS) << 4;
 	uint32_t s = ((n16) + rd16(SEG1 + sel + M_SPRITES)) & 0xffff;
 	uint32_t sp = SEG1 + s;

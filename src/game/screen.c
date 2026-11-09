@@ -18,6 +18,7 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define PAL_BASE 0x44530cu     /* u16[16]: 0x0GRB, one nibble per channel */
 #define PAL_PICTURE 0x445eaeu  /* u16[240]: 5:5:5, red in bits 10-14 */
@@ -25,9 +26,6 @@
 #define PAL_ENTRIES 0x4ac07cu  /* PALETTEENTRY[256]: red, green, blue, flags */
 #define PAL_DELTAS 0x4ab060u   /* i32[256][3]: target - displayed, per channel */
 #define PAL_START 0x4aac58u    /* the entries as the fade started */
-#define PAL_FADING 0x4ac504u   /* u32: a fade is running */
-#define PAL_OBJECT 0x4ac4f4u   /* the DirectDraw palette object */
-#define VM_FLAGS9 0x4452e0u    /* u8 @[9]: bit 4 keeps the palette tables as they are */
 #define PAL_BASE_N 16u
 #define PAL_PICTURE_N 240u
 
@@ -36,7 +34,7 @@
 static void palette_copy_tables(int save)
 {
 	X86_COUNT(2);
-	if (rd8(VM_FLAGS9) & 0x10) {
+	if (SV(vflags) & 0x10) {
 		X86_COUNT(1);
 		return;
 	}
@@ -99,7 +97,7 @@ void game_palette_upload(void)
 		wr8(e + 1, (w >> 2) & 0xf8);
 		wr8(e + 2, (w & 0x1f) << 3);
 	}
-	uint32_t obj = rd32(PAL_OBJECT);
+	uint32_t obj = SC(palette_obj);
 	push32(PAL_ENTRIES);
 	push32(0x100);
 	push32(0);
@@ -135,7 +133,7 @@ void game_fade_start(void)
 	}
 	for (uint32_t i = 0; i < 0x100; i++)
 		wr32(PAL_START + 4 * i, rd32(PAL_ENTRIES + 4 * i));
-	wr32(PAL_FADING, 1);
+	SC_SET(fade_active, 1);
 	cpu.r[ECX] = 0; /* rep movsd */
 	cpu.r[EDX] = rd8(PAL_ENTRIES + 4 * 255 + 2);
 	X86_COUNT(6 + 26 * PAL_BASE_N + 3 + 27 * PAL_PICTURE_N + 4 + 1 + 0x100 + 4);
@@ -145,7 +143,7 @@ void game_fade_start(void)
 uint32_t game_fade_active(void)
 {
 	X86_COUNT(2);
-	cpu.r[EAX] = rd32(PAL_FADING);
+	cpu.r[EAX] = SC(fade_active);
 	return cpu.r[EAX];
 }
 
@@ -172,16 +170,7 @@ uint32_t game_fade_active(void)
  */
 #define SURFACES 0x44629eu    /* u32[]: surface objects, [0] the screen */
 #define PITCHES 0x4462aeu     /* u32[]: their pitches */
-#define SCRATCH_SURFACE 0x4ab058u
 #define LOCK_DESC 0x4ac480u   /* DDSURFACEDESC of the last Lock */
-#define LOCK_PTR 0x4ac4a4u    /* its lpSurface */
-#define SCREEN_SHIFT 0x4ac068u
-#define CURSOR_SHOWN 0x4ac510u
-#define CURSOR_X 0x4ac064u
-#define CURSOR_Y 0x4ac060u
-#define CURSOR_FRAME 0x4ac514u
-#define CURSOR_SAVED_X 0x4aac54u
-#define CURSOR_SAVED_Y 0x4aac50u
 #define CURSOR_SAVED 0x4abc60u /* 32 rows of 32 bytes */
 #define CURSOR_BITS 0x4be900u
 #define IAT_SETCURSORPOS 0x41b12cu
@@ -224,7 +213,7 @@ static void com_unlock(uint32_t surf)
  * clip at the screen's edge). Out: EAX 0, EDX the screen's vtable. */
 void game_cursor_restore(void)
 {
-	uint32_t x = rd32(CURSOR_SAVED_X), y = rd32(CURSOR_SAVED_Y), w, h;
+	uint32_t x = SC(cursor_saved_x), y = SC(cursor_saved_y), w, h;
 	X86_COUNT(7);
 	if ((int32_t)x > 0x260) {
 		w = 0x280 - x;
@@ -244,7 +233,7 @@ void game_cursor_restore(void)
 	uint32_t screen = rd32(SURFACES);
 	com_lock(screen);
 	X86_COUNT(8);
-	uint32_t pitch = rd32(PITCHES), row = rd32(LOCK_PTR) + pitch * y + x;
+	uint32_t pitch = rd32(PITCHES), row = SC(lock_ptr) + pitch * y + x;
 	X86_COUNT(8);
 	if ((int32_t)h > 0) {
 		X86_COUNT(5);
@@ -265,7 +254,7 @@ void game_cursor_restore(void)
 /* 0x4012e0: save the pixels under the cursor and draw it at its place. */
 void game_cursor_draw(void)
 {
-	uint32_t x = rd32(CURSOR_X), y = rd32(CURSOR_Y), w, h;
+	uint32_t x = SC(cursor_x), y = SC(cursor_y), w, h;
 	X86_COUNT(8);
 	if ((int32_t)x > 0x260) {
 		w = 0x280 - x;
@@ -282,12 +271,12 @@ void game_cursor_draw(void)
 		h = 0x20;
 		X86_COUNT(1);
 	}
-	uint32_t frame = rd32(CURSOR_FRAME);
+	uint32_t frame = SC(cursor_frame);
 	uint32_t plane1 = CURSOR_BITS + (frame << 8), plane2 = CURSOR_BITS + 0x80 + (frame << 8);
 	uint32_t screen = rd32(SURFACES);
 	com_lock(screen);
 	X86_COUNT(15);
-	uint32_t pitch = rd32(PITCHES), top = rd32(LOCK_PTR) + pitch * y + x;
+	uint32_t pitch = rd32(PITCHES), top = SC(lock_ptr) + pitch * y + x;
 	X86_COUNT(9);
 	if ((int32_t)h > 0) {
 		X86_COUNT(3);
@@ -320,10 +309,10 @@ void game_cursor_draw(void)
 	}
 	X86_COUNT(5);
 	com_unlock(screen);
-	cpu.r[EAX] = rd32(CURSOR_X);
-	cpu.r[ECX] = rd32(CURSOR_Y);
-	wr32(CURSOR_SAVED_X, cpu.r[EAX]);
-	wr32(CURSOR_SAVED_Y, cpu.r[ECX]);
+	cpu.r[EAX] = SC(cursor_x);
+	cpu.r[ECX] = SC(cursor_y);
+	SC_SET(cursor_saved_x, cpu.r[EAX]);
+	SC_SET(cursor_saved_y, cpu.r[ECX]);
 	cpu.r[EDX] = rd32(screen);
 	X86_COUNT(11);
 }
@@ -332,12 +321,12 @@ void game_cursor_draw(void)
  * off, if that changes anything). */
 void game_cursor_show(void)
 {
-	cpu.r[EAX] = rd32(CURSOR_SHOWN);
+	cpu.r[EAX] = SC(cursor_on);
 	X86_COUNT(3);
 	if (!cpu.r[EAX]) {
 		X86_COUNT(1);
 		game_cursor_draw();
-		wr32(CURSOR_SHOWN, 1);
+		SC_SET(cursor_on, 1);
 		X86_COUNT(2);
 		return;
 	}
@@ -346,12 +335,12 @@ void game_cursor_show(void)
 
 void game_cursor_hide(void)
 {
-	cpu.r[EAX] = rd32(CURSOR_SHOWN);
+	cpu.r[EAX] = SC(cursor_on);
 	X86_COUNT(3);
 	if (cpu.r[EAX]) {
 		X86_COUNT(1);
 		game_cursor_restore();
-		wr32(CURSOR_SHOWN, 0);
+		SC_SET(cursor_on, 0);
 		X86_COUNT(1);
 	}
 	X86_COUNT(1);
@@ -363,7 +352,7 @@ void game_cursor_setpos(void)
 {
 	uint32_t sp = cpu.r[ESP];
 	X86_COUNT(3);
-	if (rd32(SCREEN_SHIFT)) {
+	if (SC(letterbox)) {
 		wr32(sp + 4, rd32(sp + 4) + SHIFT_LINES);
 		X86_COUNT(1);
 	}
@@ -384,7 +373,7 @@ uint32_t game_surface_lock(uint32_t surf)
 	uint32_t screen = rd32(SURFACES);
 	X86_COUNT(5);
 	if (surf == screen) {
-		cpu.r[EAX] = rd32(CURSOR_SHOWN);
+		cpu.r[EAX] = SC(cursor_on);
 		X86_COUNT(3);
 		if (cpu.r[EAX]) {
 			X86_COUNT(1);
@@ -394,11 +383,11 @@ uint32_t game_surface_lock(uint32_t surf)
 	com_lock(surf);
 	X86_COUNT(7);
 	screen = rd32(SURFACES);
-	uint32_t p = rd32(LOCK_PTR);
+	uint32_t p = SC(lock_ptr);
 	cpu.r[ECX] = screen;
 	X86_COUNT(5);
 	if (surf == screen) {
-		cpu.r[ECX] = rd32(SCREEN_SHIFT);
+		cpu.r[ECX] = SC(letterbox);
 		X86_COUNT(3);
 		if (cpu.r[ECX]) {
 			cpu.r[ECX] = rd32(PITCHES) * 5; /* lea ecx, [ecx + 4*ecx] */
@@ -424,7 +413,7 @@ void game_surface_unlock(uint32_t surf)
 		X86_COUNT(1);
 		return;
 	}
-	cpu.r[EAX] = rd32(CURSOR_SHOWN);
+	cpu.r[EAX] = SC(cursor_on);
 	X86_COUNT(3);
 	if (!cpu.r[EAX]) {
 		X86_COUNT(1);
@@ -471,7 +460,7 @@ static uint32_t surface_at(uint32_t i)
  * between them for the routine's own moves) */
 static void cursor_off(int n)
 {
-	cpu.r[EAX] = rd32(CURSOR_SHOWN);
+	cpu.r[EAX] = SC(cursor_on);
 	X86_COUNT(3 + n);
 	if (cpu.r[EAX]) {
 		X86_COUNT(1);
@@ -481,7 +470,7 @@ static void cursor_off(int n)
 
 static void cursor_on(int n)
 {
-	cpu.r[EAX] = rd32(CURSOR_SHOWN);
+	cpu.r[EAX] = SC(cursor_on);
 	X86_COUNT(3 + n);
 	if (cpu.r[EAX]) {
 		X86_COUNT(1);
@@ -520,7 +509,7 @@ void game_blit_copy(void)
 	X86_COUNT(23);
 	if (src == 0) {
 		X86_COUNT(2);
-		if (rd32(SCREEN_SHIFT)) {
+		if (SC(letterbox)) {
 			top += SHIFT_LINES;
 			bottom += SHIFT_LINES;
 			X86_COUNT(5);
@@ -529,7 +518,7 @@ void game_blit_copy(void)
 	X86_COUNT(2);
 	if (dst == 0) {
 		X86_COUNT(2);
-		if (rd32(SCREEN_SHIFT)) {
+		if (SC(letterbox)) {
 			wr32(slot_y, rd32(slot_y) + SHIFT_LINES);
 			X86_COUNT(1);
 		}
@@ -563,7 +552,7 @@ void game_blit_masked(void)
 		X86_COUNT(14);
 		if (src == 0) {
 			X86_COUNT(2);
-			shift = rd32(SCREEN_SHIFT) != 0;
+			shift = SC(letterbox) != 0;
 			if (shift) {
 				top += SHIFT_LINES;
 				bottom += SHIFT_LINES;
@@ -572,7 +561,7 @@ void game_blit_masked(void)
 		}
 		if (src != 0 || shift) {
 			X86_COUNT(2);
-			if (rd32(SCREEN_SHIFT)) {
+			if (SC(letterbox)) {
 				wr32(slot_y, rd32(slot_y) + SHIFT_LINES);
 				X86_COUNT(1);
 			}
@@ -655,7 +644,7 @@ void game_blit_swap(void)
 	X86_COUNT(38);
 	if (src == 0) {
 		X86_COUNT(2);
-		if (rd32(SCREEN_SHIFT)) {
+		if (SC(letterbox)) {
 			top += SHIFT_LINES;
 			bottom += SHIFT_LINES;
 			X86_COUNT(5);
@@ -664,7 +653,7 @@ void game_blit_swap(void)
 	X86_COUNT(2);
 	if (dst == 0) {
 		X86_COUNT(2);
-		if (rd32(SCREEN_SHIFT)) {
+		if (SC(letterbox)) {
 			dtop += SHIFT_LINES;
 			dbottom += SHIFT_LINES;
 			X86_COUNT(5);
@@ -676,7 +665,7 @@ void game_blit_swap(void)
 	put_rect(r2, dx, dtop, dx + w, dbottom);
 	put_rect(r3, 0, 0, w, h);
 	cursor_off(-1); /* cmp [cursor], edi; je */
-	uint32_t scratch = rd32(SCRATCH_SURFACE), sobj = surface_at(src), dobj = surface_at(dst);
+	uint32_t scratch = SC(scratch_surface), sobj = surface_at(src), dobj = surface_at(dst);
 	X86_COUNT(11);
 	bltfast(scratch, 0, 0, sobj, r1, BLITFAST_WAIT);
 	X86_COUNT(13);
@@ -699,7 +688,7 @@ void game_fill_rect(void)
 	X86_COUNT(15);
 	if (surf == 0) {
 		X86_COUNT(3);
-		if (rd32(SCREEN_SHIFT)) {
+		if (SC(letterbox)) {
 			top += SHIFT_LINES;
 			bottom += SHIFT_LINES;
 			X86_COUNT(5);
@@ -797,7 +786,6 @@ void game_cursor_restore_regs(void) { game_cursor_restore(); }
 #define PICTURE 0x4662beu
 #define PICTURE_NAME 0x445d26u
 #define PICTURE_RECT 0x44538au /* u16 x / 8 ... y, w / 8, h (4 x u16, 0x44538a-0x445390) */
-#define SURFACE_PICK 0x4452dau
 
 void game_picture_load(void)
 {
@@ -816,26 +804,26 @@ void game_picture_load(void)
 		cpu.r[ESP] += 8;
 	}
 	uint32_t esi = PICTURE;
-	wr16(PICTURE_RECT, rd16(esi) >> 3);
-	wr16(PICTURE_RECT + 2, rd16(esi + 2));
-	wr16(PICTURE_RECT + 4, rd16(esi + 4) >> 3);
-	wr16(PICTURE_RECT + 6, rd16(esi + 6));
+	SV_SET(pic_rect[0], rd16(esi) >> 3);
+	SV_SET(pic_rect[1], rd16(esi + 2));
+	SV_SET(pic_rect[2], rd16(esi + 4) >> 3);
+	SV_SET(pic_rect[3], rd16(esi + 6));
 	X86_COUNT(15);
-	if (!(rd8(VM_FLAGS9) & 1)) {
+	if (!(SV(vflags) & 1)) {
 		cpu.r[EAX] = esi + 8;
 		X86_COUNT(2);
 		game_palette_copy(cpu.r[EAX]);
 	}
 	esi += 0x208;
-	uint32_t surf = rd16(SURFACE_PICK);
+	uint32_t surf = SV(surface_select);
 	push32(rd32(SURFACES + 4 * surf));
 	game_lock_regs();
 	cpu.r[ESP] += 4;
 	uint32_t dst = cpu.r[EAX];
 	uint32_t pitch = rd32(PITCHES + 4 * surf);
 	cpu.r[EBX] = pitch;
-	dst += rd16(PICTURE_RECT + 2) * pitch + (rd16(PICTURE_RECT) << 3);
-	uint32_t rows = rd16(PICTURE_RECT + 6), dwords = rd16(PICTURE_RECT + 4) << 1;
+	dst += SV(pic_rect[1]) * pitch + (SV(pic_rect[0]) << 3);
+	uint32_t rows = SV(pic_rect[3]), dwords = SV(pic_rect[2]) << 1;
 	X86_COUNT(18);
 	cpu.r[EDX] = rows;
 	cpu.r[ECX] = dwords;

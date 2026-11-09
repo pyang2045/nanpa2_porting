@@ -115,6 +115,23 @@ there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the 
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
 
+### Recording and replay (development)
+
+```sh
+./build/nanpa2 --game game --record play.rec        # play (or script) and record
+./build/nanpa2 --game game --replay play.rec        # replay, compare every checkpoint
+tools/replay_diff.py a.rec b.rec                    # compare two recordings
+```
+
+`--record FILE` (`NANPA2_RECORD`) and `--replay FILE` (`NANPA2_REPLAY`) switch on the
+deterministic mode (`--deterministic`, `NANPA2_DETERMINISTIC=1`): the game clock follows the
+emulated CPU (25 MIPS) instead of the host, so two runs of the same input are identical. A
+recording holds the input messages by game tick and a hash of the game state every
+`NANPA2_CP_TICKS` ticks (250); a replay needs the save folder as it was at the start and stops
+at the first checkpoint that differs (exit code 3, naming the key). `NANPA2_REPLAY_CHECK=li`
+compares only the layout independent keys. Recordings hold derived game state: keep them out of
+the repository. Details: docs/refactor.md.
+
 ### Text font
 
 The game draws its text in MingLiU (細明體) at 15, 24 and 32 pixels. The port reads a font

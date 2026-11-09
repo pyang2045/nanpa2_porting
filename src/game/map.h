@@ -17,9 +17,9 @@
 
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define SEG1 0x4462beu       /* script segment 1: the map data lives here */
-#define MAP_SEL 0x4452d8u    /* u16 @[5]: offset of M in segment 1 */
 #define MAP_ARGS 0x43555eu   /* u16[6]: arguments 1..6 of the 04 26 sub-op */
 #define MAP_WALK_BASE 0x435574u /* u16: segment offset of the walk grid */
 #define MAP_AUTOWALK 0x435573u  /* u8: 0xff while the player follows the walk grid */
@@ -93,7 +93,7 @@ enum {
 
 static inline uint32_t map_base(void)
 {
-	return SEG1 + rd16(MAP_SEL);
+	return SEG1 + SV(map_sel);
 }
 
 /* ---- map.c: sub-ops and the area / collision tests ---- */

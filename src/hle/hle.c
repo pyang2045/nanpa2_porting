@@ -9,6 +9,7 @@
 #include "logo.h"
 #include "lzh.h"
 #include "x86/interp.h"
+#include "game/state.h"
 
 #define MAX_IMPORTS 256
 
@@ -124,43 +125,43 @@ uint32_t com_new(int iface, int nmethods, uint32_t extra_bytes)
 void hle_timer_callback(void)
 {
 	static uint32_t step_logged_start = 0xffffffffu;
-	if (!rd32(0x4ac4ec))
+	if (!SC(active))
 		return;
-	if (rd32(0x4ac504)) {
-		if (step_logged_start != rd32(0x446292) && rd32(0x4ac508) == 0 && rd32(0x4ac50c) == 0)
+	if (SC(fade_active)) {
+		if (step_logged_start != RT(frame) && SC(fade_step) == 0 && SC(fade_wait) == 0)
 			x86_probe(0x4028c0); /* fade starts (probe log) */
-		step_logged_start = rd32(0x446292);
-		uint32_t wait = rd32(0x4ac50c) + 1;
-		wr32(0x4ac50c, wait);
-		if ((int32_t)wait >= (int32_t)rd32(0x44628e)) {
-			wr32(0x4ac50c, 0);
+		step_logged_start = RT(frame);
+		uint32_t wait = SC(fade_wait) + 1;
+		SC_SET(fade_wait, wait);
+		if ((int32_t)wait >= (int32_t)RT(fade_steps)) {
+			SC_SET(fade_wait, 0);
 			float k;
 			uint32_t kbits = rd32(0x41b188);
 			memcpy(&k, &kbits, 4);
-			double f = (double)(int32_t)rd32(0x4ac508) * k;
+			double f = (double)(int32_t)SC(fade_step) * k;
 			for (uint32_t i = 0; i < 256; i++) {
 				for (uint32_t c = 0; c < 3; c++) {
-					int32_t delta = (int32_t)rd32(0x4ab060 + 12 * i + 4 * c);
-					double v = delta * f + rd8(0x4aac58 + 4 * i + c);
-					wr8(0x4ac07c + 4 * i + c, (uint32_t)(int32_t)v); /* _ftol truncates */
+					int32_t delta = G.sc.pal_delta[i][c];
+					double v = delta * f + G.sc.pal_start[4 * i + c];
+					G.sc.pal_entries[4 * i + c] = (uint8_t)(int32_t)v; /* _ftol truncates */
 				}
 			}
 			ddraw_set_entries(0, 256, 0x4ac07c);
 		}
-		uint32_t step = rd32(0x4ac508) + 1;
-		wr32(0x4ac508, step);
+		uint32_t step = SC(fade_step) + 1;
+		SC_SET(fade_step, step);
 		if ((int32_t)step > 16) {
-			wr32(0x4ac50c, 0);
-			wr32(0x4ac508, 0);
-			wr32(0x4ac504, 0);
+			SC_SET(fade_wait, 0);
+			SC_SET(fade_step, 0);
+			SC_SET(fade_active, 0);
 			x86_probe(0x4028c1); /* fade ends (probe log) */
 		}
 	}
-	uint32_t frame = rd32(0x446292) + 1;
-	wr32(0x446292, frame);
-	if (rd32(0x4ac510) && (int32_t)frame % 30 == 0) {
-		wr32(0x4ac514, rd32(0x4ac514) ^ 1);
-		win32_post_message(0x200, 0, (rd32(0x4ac060) << 16) + rd32(0x4ac064));
+	uint32_t frame = RT(frame) + 1;
+	RT_SET(frame, frame);
+	if (SC(cursor_on) && (int32_t)frame % 30 == 0) {
+		SC_SET(cursor_frame, SC(cursor_frame) ^ 1);
+		win32_post_message(0x200, 0, (SC(cursor_y) << 16) + SC(cursor_x));
 	}
 }
 

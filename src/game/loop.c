@@ -30,21 +30,14 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define PUMP 0x401bf0u        /* message pump: EAX = 0 on WM_QUIT */
 #define LOAD_FILE 0x401050u   /* cdecl (name, buffer) */
 #define VM_END 0x40638du      /* mov esp, [VM_TOP_ESP]; pop ebp; ret */
 #define VM_UNWOUND 0x406393u  /* after that mov: where an oracle stops */
 #define VM_TOP_ESP 0x445cdcu  /* ESP of the top-level VM (after its push ebp) */
-#define CLICK_BUSY 0x445ce1u  /* u8: a click handler's block is running */
-#define INPUTS 0x445d8fu      /* u8: buttons and keys down (re-notes.md "Input") */
 #define INPUT_SKIP 0x40u      /* Ctrl: no waiting for clicks */
-#define VM_FLAGS9 0x4452e0u   /* u8 @[9]: bit 2 turns the click handlers off */
-#define TEXT_DELAY 0x4452deu  /* u16 @[8]: frames (x4) after each character */
-#define TEXT_SIZE 0x4452f6u   /* u8: Big5 font size */
-#define TEXT_X 0x4452f0u
-#define TEXT_Y 0x4452f2u
-#define FRAME 0x446292u
 #define BIG5_NEWLINE 0xa1beu
 
 #define RUN_BLOCK 0x4061cdu
@@ -66,7 +59,7 @@ static uint32_t call_exit(uint32_t target, uint32_t ra)
  * runs natively */
 static uint32_t quit(void)
 {
-	cpu.r[ESP] = rd32(VM_TOP_ESP);
+	cpu.r[ESP] = RT(top_esp);
 	X86_COUNT(1);
 	return VM_UNWOUND;
 }
@@ -79,7 +72,7 @@ static uint32_t quit(void)
 uint32_t game_vm_entry(void)
 {
 	push32(cpu.r[EBP]);
-	wr32(VM_TOP_ESP, cpu.r[ESP]);
+	RT_SET(top_esp, cpu.r[ESP]);
 	X86_COUNT(3);
 	game_vm_init_regs();
 	push32(VM_SCRIPT);
@@ -111,10 +104,10 @@ uint32_t game_vm_pumped(void)
 	X86_COUNT(1);
 	game_anim_step();
 	X86_COUNT(2);
-	if (rd8(VM_FLAGS9) & 4)
+	if (SV(vflags) & 4)
 		return fetch();
 	X86_COUNT(2);
-	if (rd8(CLICK_BUSY))
+	if (RT(click_busy))
 		return fetch();
 	set8l(EAX, 0);
 	X86_COUNT(1);
@@ -189,7 +182,7 @@ uint32_t game_vm_click_up1(void)
 		return click_wait();
 	}
 	push32(cpu.r[ESI]);
-	wr8(CLICK_BUSY, 0xff);
+	RT_SET(click_busy, 0xff);
 	cpu.r[ESI] = cpu.r[EDI];
 	X86_COUNT(3);
 	return call_exit(RUN_BLOCK, 0x406164);
@@ -198,7 +191,7 @@ uint32_t game_vm_click_up1(void)
 /* 0x406164: the handler's block is done */
 uint32_t game_vm_click_done(void)
 {
-	wr8(CLICK_BUSY, 0);
+	RT_SET(click_busy, 0);
 	cpu.r[ESI] = pop32();
 	X86_COUNT(3); /* mov [busy], pop esi, jmp 0x4060f9 */
 	X86_POLL(0x40616c);
@@ -232,7 +225,7 @@ static uint32_t block_end(void)
 	cpu.r[ESI]++;
 	cpu.r[EAX] = cpu.r[ESP];
 	X86_COUNT(4);
-	if (cpu.r[ESP] == rd32(VM_TOP_ESP))
+	if (cpu.r[ESP] == RT(top_esp))
 		return VM_END;
 	set8l(EAX, 0);
 	X86_COUNT(2);
@@ -252,7 +245,7 @@ static uint32_t block_open(void)
  * advance; a jump there from the native code ends a piece too) */
 static uint32_t char_delay(uint32_t ra)
 {
-	cpu.r[ECX] = rd16(TEXT_DELAY);
+	cpu.r[ECX] = SV(text_delay);
 	X86_COUNT(3);
 	if (!cpu.r[ECX])
 		return ra;
@@ -263,12 +256,12 @@ static uint32_t char_delay(uint32_t ra)
  * it), fg = its low nibble */
 static uint32_t colour_bg(void)
 {
-	return rd16(VM_TEXT_COLOUR) >> 4;
+	return SV(text_colour) >> 4;
 }
 
 static uint32_t colour_fg(void)
 {
-	return rd16(VM_TEXT_COLOUR) & 0xf;
+	return SV(text_colour) & 0xf;
 }
 
 /* 0x4062bf: the next byte of a 06 string: 06 ends it, any other is one
@@ -282,7 +275,7 @@ static uint32_t string_char(void)
 		X86_POLL(0x4062c8);
 		return VM_LOOP;
 	}
-	uint32_t bg = colour_bg(), fg = colour_fg(), y = rd16(TEXT_Y), x = rd16(TEXT_X) << 3;
+	uint32_t bg = colour_bg(), fg = colour_fg(), y = SV(text_y), x = SV(text_x) << 3;
 	cpu.r[EDX] = x;
 	cpu.r[EAX] = c;
 	X86_COUNT(15);
@@ -307,8 +300,8 @@ static uint32_t big5_char(void)
 		X86_POLL(0x406331);
 		return VM_LOOP;
 	}
-	uint32_t bg = colour_bg(), fg = colour_fg(), size = rd8(TEXT_SIZE), y = rd16(TEXT_Y),
-	         x = rd16(TEXT_X) << 3;
+	uint32_t bg = colour_bg(), fg = colour_fg(), size = SV(text_size), y = SV(text_y),
+	         x = SV(text_x) << 3;
 	cpu.r[EDX] = x;
 	cpu.r[EAX] = c;
 	X86_COUNT(16);
@@ -440,7 +433,7 @@ uint32_t game_input_tested(void)
 	uint32_t k = cpu.r[EAX] & 0xff;
 	X86_COUNT(1 + 2 * (k < 6 ? k + 1 : 6));
 	if (k < 6) {
-		f_logic(rd8(INPUTS) & bit[k], 8);
+		f_logic(RT(input_bits) & bit[k], 8);
 		X86_COUNT(2);
 	} else {
 		f_sub(k, 5, 0, 8); /* the last `cmp al, 5` */
@@ -455,7 +448,7 @@ uint32_t game_input_tested(void)
 uint32_t game_wait_frames(void)
 {
 	cpu.r[ECX] = (cpu.r[ECX] >> 2) + 1;
-	cpu.r[EAX] = rd32(FRAME) + cpu.r[ECX];
+	cpu.r[EAX] = RT(frame) + cpu.r[ECX];
 	push32(cpu.r[EAX]);
 	X86_COUNT(5);
 	return call_exit(PUMP, 0x4075d7);
@@ -470,7 +463,7 @@ uint32_t game_wait_frames_pumped(void)
 	X86_COUNT(1);
 	game_anim_step();
 	cpu.r[EAX] = pop32();
-	f_sub(cpu.r[EAX], rd32(FRAME), 0, 32);
+	f_sub(cpu.r[EAX], RT(frame), 0, 32);
 	X86_COUNT(3);
 	if (!cpu.cf && !cpu.zf) { /* ja: not there yet */
 		X86_POLL(0x4075eb);
@@ -486,7 +479,7 @@ uint32_t game_wait_frames_pumped(void)
  * wait a frame and test the button (the piece at ra) */
 static uint32_t click_wait_round(uint32_t ra)
 {
-	set8l(EAX, f_logic(rd8(INPUTS) & INPUT_SKIP, 8));
+	set8l(EAX, f_logic(RT(input_bits) & INPUT_SKIP, 8));
 	X86_COUNT(3);
 	if (cpu.r[EAX] & 0xff) {
 		X86_COUNT(1);

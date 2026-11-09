@@ -36,11 +36,10 @@
  */
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define SURFACES 0x44629eu /* u32[]: surface objects */
 #define PITCHES 0x4462aeu  /* u32[]: their pitches */
-#define FRAME 0x446292u    /* u32: frames since start */
-#define INPUT 0x445d8fu    /* u8: input bits */
 #define PUMP 0x401bf0u
 #define WIPE_PUMPED 0x401b90u
 
@@ -117,7 +116,7 @@ pass: /* 0x401ad5 */
 	{
 		uint32_t bit = rd8(F_BIT(e));
 		uint32_t m = rd8(MASKB(e) + r[EBX]) | bit;
-		uint32_t frame = rd32(FRAME);
+		uint32_t frame = RT(frame);
 		r[EAX] = r[EBX] * rd32(F_PITCH0(e));
 		r[ESI] = r[EBX] * rd32(F_PITCH1(e));
 		wr32(F_FRAME(e), frame);
@@ -173,7 +172,7 @@ pass: /* 0x401ad5 */
 		if (r[EAX])
 			goto tail;
 		/* wait for two frames since the pass started */
-		r[EAX] = rd32(FRAME);
+		r[EAX] = RT(frame);
 		r[ESI] = rd32(F_FRAME(e));
 		r[EAX] -= r[ESI];
 		X86_COUNT(5);
@@ -186,12 +185,12 @@ pass: /* 0x401ad5 */
 
 pumped: /* 0x401b90: after the pump (ESP = E - 0x48) */
 	X86_COUNT(2);
-	if (rd8(INPUT) & 0x30) {
+	if (RT(input_bits) & 0x30) {
 		wr32(F_CANCEL(e), 1);
 		X86_COUNT(1);
 		goto tail;
 	}
-	r[ECX] = rd32(FRAME) - r[ESI];
+	r[ECX] = RT(frame) - r[ESI];
 	X86_COUNT(4);
 	if ((int32_t)r[ECX] < 2) {
 		X86_POLL(0x401ba4);

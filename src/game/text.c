@@ -13,20 +13,11 @@
  */
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
-#define TEXT_LEFT 0x4452e8u   /* u16 columns: the text window */
-#define TEXT_TOP 0x4452eau    /* u16 rows */
-#define TEXT_RIGHT 0x4452ecu
-#define TEXT_BOTTOM 0x4452eeu
-#define TEXT_X 0x4452f0u      /* u16: cursor column */
-#define TEXT_Y 0x4452f2u      /* u16: cursor row */
-#define TEXT_LINE 0x4452f8u   /* u8: line height in rows */
-#define TEXT_ADVANCE 0x4452f9u /* u8: character width in columns */
-#define SURFACE_SELECT 0x4452dau /* u16 @[6]: the surface rect ops draw on */
 
 #define SURFACES 0x44629eu     /* u32[]: surface objects, [0] the screen */
 #define PITCHES 0x4462aeu      /* u32[]: their pitches */
-#define SCRATCH 0x4ab058u      /* u32: the 640x480 scratch surface object */
 #define SCRATCH_PITCH 0x280u
 #define FONTS 0x4ac070u        /* u32[4]: font handles by size */
 
@@ -79,7 +70,7 @@ void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t 
 	}
 	size &= 3;
 	uint32_t n = 8 * size + 16;
-	uint32_t scratch = rd32(SCRATCH), vtbl = rd32(scratch);
+	uint32_t scratch = SC(scratch_surface), vtbl = rd32(scratch);
 	cpu.r[ESP] = dc_at;
 
 	/* the glyph, white on black, at (0, 0) of the scratch surface */
@@ -170,19 +161,19 @@ void game_draw_char_regs(void)
  * last value compared, the line height). */
 void game_text_newline(void)
 {
-	uint32_t h = rd8(TEXT_LINE);
-	wr16(TEXT_X, rd16(TEXT_LEFT));
-	uint32_t y = (rd16(TEXT_Y) + h) & 0xffff;
-	wr16(TEXT_Y, y);
+	uint32_t h = SV(text_line);
+	SV_SET(text_x, SV(text_left));
+	uint32_t y = (SV(text_y) + h) & 0xffff;
+	SV_SET(text_y, y);
 	set16(EBX, h);
 	set16(EAX, y + h - 2);
 	X86_COUNT(10);
-	if ((cpu.r[EAX] & 0xffff) < rd16(TEXT_BOTTOM)) {
+	if ((cpu.r[EAX] & 0xffff) < SV(text_bottom)) {
 		X86_COUNT(1);
 		return;
 	}
-	set16(EAX, rd16(TEXT_TOP));
-	wr16(TEXT_Y, cpu.r[EAX]);
+	set16(EAX, SV(text_top));
+	SV_SET(text_y, cpu.r[EAX]);
 	X86_COUNT(3);
 }
 
@@ -190,13 +181,13 @@ void game_text_newline(void)
  * next one would not fit. */
 void game_text_advance(void)
 {
-	uint32_t w = rd8(TEXT_ADVANCE);
-	uint32_t x = (rd16(TEXT_X) + w) & 0xffff;
-	wr16(TEXT_X, x);
+	uint32_t w = SV(text_advance);
+	uint32_t x = (SV(text_x) + w) & 0xffff;
+	SV_SET(text_x, x);
 	set16(EBX, w);
 	set16(EAX, x + w - 2);
 	X86_COUNT(8);
-	if ((cpu.r[EAX] & 0xffff) < rd16(TEXT_RIGHT)) {
+	if ((cpu.r[EAX] & 0xffff) < SV(text_right)) {
 		X86_COUNT(1);
 		return;
 	}
@@ -208,19 +199,19 @@ void game_text_advance(void)
  * fill leaves them. */
 void game_clear_text_window(void)
 {
-	uint32_t a = rd16(SURFACE_SELECT);
+	uint32_t a = SV(surface_select);
 	push32(a);
 	push32(cpu.r[EBX]);
-	a = (a & 0xffff0000u) | ((rd16(TEXT_BOTTOM) - rd16(TEXT_TOP) + 1) & 0xffff);
+	a = (a & 0xffff0000u) | ((SV(text_bottom) - SV(text_top) + 1) & 0xffff);
 	push32(a);
-	a = ((a & 0xffff0000u) | ((rd16(TEXT_RIGHT) - rd16(TEXT_LEFT) + 1) & 0xffff)) << 3;
+	a = ((a & 0xffff0000u) | ((SV(text_right) - SV(text_left) + 1) & 0xffff)) << 3;
 	push32(a);
-	uint32_t top = rd16(TEXT_TOP), left = rd16(TEXT_LEFT);
+	uint32_t top = SV(text_top), left = SV(text_left);
 	a = (a & 0xffff0000u) | top;
-	wr16(TEXT_Y, top);
+	SV_SET(text_y, top);
 	push32(a);
 	a = ((a & 0xffff0000u) | left) << 3;
-	wr16(TEXT_X, left);
+	SV_SET(text_x, left);
 	push32(a);
 	cpu.r[EAX] = a;
 	X86_COUNT(20);

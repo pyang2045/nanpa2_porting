@@ -21,6 +21,7 @@
 #include "game/map.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 /* ---- the native handler's register-level steps */
 
@@ -67,12 +68,6 @@ static uint32_t loop_at(uint32_t native_pc)
 
 /* argument values (0x445d06 + 2i) */
 #define ARG(i) (VM_ARG_VALUES + 2u * (i))
-#define CURSOR_SHOWN 0x445ce0u   /* u8: the game cursor is drawn (ext 15) */
-#define SURFACE_SELECT 0x4452dau /* u16 @[6]: surface the text window and rect ops use */
-#define FRAME 0x446292u          /* u32: frames since start (timer, 60 Hz) */
-#define STOPWATCH 0x446296u      /* u32: frame of the last op 19 2 x 0 */
-#define FADE_STEPS 0x44628eu     /* u32: palette fade length (ext 16 mode 3 sets 1) */
-#define VM_FLAGS9 0x4452e0u      /* u8 @[9]: bit 0 keep palette on picture load */
 #define STRING_BUF 0x445d26u     /* file names for ext 1c, 1d, 25 */
 
 /* The rectangle arguments x0 y0 x1 y1 (args 0-3, x in units of 8 pixels)
@@ -99,7 +94,7 @@ static uint32_t push_rect(uint32_t eax)
 uint32_t game_op_clear_text(void)
 {
 	uint32_t a = parse();
-	cpu.r[EBX] = rd16(VM_TEXT_COLOUR);
+	cpu.r[EBX] = SV(text_colour);
 	if (cpu.r[ECX])
 		cpu.r[EBX] = cpu.r[EAX] = a << 4;
 	X86_COUNT(5);
@@ -112,9 +107,9 @@ uint32_t game_op_clear_text(void)
 static uint32_t colour_rect(void (*fn)(void), uint32_t exit_pc)
 {
 	parse();
-	uint32_t eax = rd16(SURFACE_SELECT);
+	uint32_t eax = SV(surface_select);
 	push32(eax);
-	eax = ax_(eax, rd16(VM_TEXT_COLOUR));
+	eax = ax_(eax, SV(text_colour));
 	push32(eax);
 	push_rect(eax);
 	X86_COUNT(20);
@@ -181,13 +176,13 @@ uint32_t game_op_masked_rect(void)
 	}
 	uint32_t eax = 0x102;
 	push32(eax);
-	eax = ax_(eax, rd16(0x445390));
+	eax = ax_(eax, SV(pic_rect[3]));
 	push32(eax);
-	eax = ax_(eax, rd16(0x44538e)) << 3;
+	eax = ax_(eax, SV(pic_rect[2])) << 3;
 	push32(eax);
-	eax = ax_(eax, rd16(0x44538c));
+	eax = ax_(eax, SV(pic_rect[1]));
 	push32(eax);
-	uint32_t ecx = ax_(cpu.r[ECX], rd16(0x44538a)) << 3;
+	uint32_t ecx = ax_(cpu.r[ECX], SV(pic_rect[0])) << 3;
 	push32(ecx);
 	push32(eax);
 	push32(ecx);
@@ -207,9 +202,6 @@ uint32_t game_op_masked_rect(void)
  * step 0x4068e1 is game_menu_item_regs; its AL is the item's guard value
  * (low byte), -1 at the list's end. */
 #define MENU_START 0x445e0cu
-#define MENU_ROWS 0x445300u  /* u16: rows the table holds */
-#define MENU_SKIP 0x4452feu  /* u8: visible items to skip (scroll) */
-#define MENU_COUNT 0x445302u /* u16: visible items (n = 1) */
 
 static void menu_item(void)
 {
@@ -234,20 +226,20 @@ uint32_t game_op_menu_items(void)
 				n++;
 			X86_POLL(al ? 0x4068d2 : 0x4068cf);
 		}
-		wr16(MENU_COUNT, n);
+		SV_SET(menu_count, n);
 		cpu.r[ECX] = n;
 		cpu.r[ESI] = esi;
 		X86_COUNT(3);
 		return loop_at(0x4068dc);
 	}
-	uint32_t rows = rd16(MENU_ROWS);
-	uint32_t table = VM_SCRIPT + rd16(VM_MENU_LIST_PTR);
+	uint32_t rows = SV(menu_rows);
+	uint32_t table = VM_SCRIPT + SV(menu_list_ptr);
 	for (uint32_t i = 0; i < rows; i++)
 		wr32(table + 4 * i, 0);
 	X86_COUNT(9 + rows);
 	cpu.r[EAX] = 0;
-	uint8_t left = (uint8_t)rd8(MENU_ROWS), skip = (uint8_t)rd8(MENU_SKIP);
-	uint32_t item = 0, edi = VM_SCRIPT + rd16(VM_MENU_LIST_PTR);
+	uint8_t left = (uint8_t)SV(menu_rows), skip = (uint8_t)SV(menu_skip);
+	uint32_t item = 0, edi = VM_SCRIPT + SV(menu_list_ptr);
 	cpu.r[ESI] = rd16(MENU_START);
 	for (;;) {
 		item++;
@@ -290,18 +282,18 @@ uint32_t game_op_cursor(void)
 	switch (a) {
 	case 0:
 		X86_COUNT(3);
-		if (rd8(CURSOR_SHOWN))
+		if (RT(cursor_shown))
 			return loop_at(0x40693d);
 		game_cursor_show();
-		wr8(CURSOR_SHOWN, 1);
+		RT_SET(cursor_shown, 1);
 		X86_COUNT(1);
 		return loop_at(0x40694f);
 	case 1:
 		X86_COUNT(3);
-		if (!rd8(CURSOR_SHOWN))
+		if (!RT(cursor_shown))
 			return loop_at(0x40695b);
 		game_cursor_hide();
-		wr8(CURSOR_SHOWN, 0);
+		RT_SET(cursor_shown, 0);
 		X86_COUNT(1);
 		return loop_at(0x40696d);
 	case 2:
@@ -360,7 +352,7 @@ uint32_t game_op_palette(void)
 		game_palette_fill(cpu.r[EAX]);
 	}
 	if (a == 3) {
-		wr32(FADE_STEPS, 1);
+		RT_SET(fade_steps, 1);
 		X86_COUNT(2);
 		game_fade_start();
 		return 0x406f41;
@@ -478,7 +470,7 @@ uint32_t game_op_anim_done(void) /* 0x4070b6 */
  *   5 a: S = a. */
 static uint32_t misc_restore(void)
 {
-	uint32_t esi = rd32(VM_SEGMENTS + 12), edi = 0x4a62be;
+	uint32_t esi = G.save.n.segment[3], edi = 0x4a62be;
 	uint32_t n = rd16(esi);
 	esi += 2;
 	for (uint32_t i = 0; i < n; i++)
@@ -489,9 +481,9 @@ static uint32_t misc_restore(void)
 	X86_COUNT(15 + n + ecx);
 	for (uint32_t i = 0; i < ecx; i++)
 		wr8(edi--, rd8(esi--));
-	uint32_t edx = ax_(cpu.r[EDX], rd16(SURFACE_SELECT));
-	wr16(SURFACE_SELECT, 1);
-	wr8(VM_FLAGS9, rd8(VM_FLAGS9) | 1);
+	uint32_t edx = ax_(cpu.r[EDX], SV(surface_select));
+	SV_SET(surface_select, 1);
+	SV_SET(vflags, SV(vflags) | 1);
 	cpu.r[EAX] = w;
 	cpu.r[ESI] = esi;
 	cpu.r[EDI] = edi;
@@ -501,8 +493,8 @@ static uint32_t misc_restore(void)
 	X86_COUNT(7);
 	game_picture_load();
 	cpu.r[EDX] = pop32();
-	wr8(VM_FLAGS9, rd8(VM_FLAGS9) & 0xfe);
-	wr16(SURFACE_SELECT, cpu.r[EDX]);
+	SV_SET(vflags, SV(vflags) & 0xfe);
+	SV_SET(surface_select, cpu.r[EDX]);
 	X86_COUNT(4);
 	return cpu.r[EAX];
 }
@@ -593,7 +585,7 @@ uint32_t game_op_misc(void)
 		} else if (a == 0) {
 			X86_COUNT(2);
 			if (rd16(ARG(2)) == 1) {
-				eax = rd32(FRAME) - rd32(STOPWATCH);
+				eax = RT(frame) - RT(stopwatch);
 				X86_COUNT(3);
 			} else {
 				cpu.r[EAX] = eax;
@@ -606,11 +598,11 @@ uint32_t game_op_misc(void)
 			cpu.r[EBX] = b;
 			X86_COUNT(2);
 			if (b == 0) {
-				eax = rd32(FRAME);
-				wr32(STOPWATCH, eax);
+				eax = RT(frame);
+				RT_SET(stopwatch, eax);
 				X86_COUNT(3);
 			} else if (b == 1) {
-				eax = rd32(FADE_STEPS);
+				eax = RT(fade_steps);
 				X86_COUNT(2);
 			} else if (b == 2) {
 				X86_COUNT(1);

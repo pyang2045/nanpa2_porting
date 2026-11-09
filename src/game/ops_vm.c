@@ -28,6 +28,7 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
+#include "game/state.h"
 
 #define RUN_BLOCK 0x4061cdu  /* inc esi; call 0x4060f9: the block at ESI (its 01) */
 #define WAIT_CLICK 0x406acc  /* wait for a click or Enter, pressed then released */
@@ -205,7 +206,7 @@ uint32_t game_op_wait(void)
 
 uint32_t game_op_wait_clear(void)
 {
-	cpu.r[EBX] = rd16(VM_TEXT_COLOUR);
+	cpu.r[EBX] = SV(text_colour);
 	X86_COUNT(2);
 	game_clear_text_window(); /* 0x406b24: draws, no waiting */
 	return loop_at(0x406607);
@@ -264,10 +265,7 @@ static void movsd(uint32_t n, uint32_t esi, uint32_t edi)
 }
 
 #define MES_NAME 0x444e78u   /* name of the running MES file (32 bytes) */
-#define CLICK_BUSY 0x445ce1u /* u8: a click handler block is running */
-#define VM_TOP_ESP 0x445cdcu /* ESP of the top-level VM (0x4060d5) */
 #define FLAG_NAME 0x445d86u  /* "FLAGn" (n at 0x445d8a) */
-#define VM_FLAGS9 0x4452e0u  /* u8 @[9]: bits 5-6 survive a FLAG load */
 
 /* 04 1e and the end of 04 21 0: load the MES file named at MES_NAME over
  * the script, reset the animation slots and the click handlers, and
@@ -276,12 +274,12 @@ static uint32_t restart(void)
 {
 	load(MES_NAME, VM_SCRIPT);
 	game_anim_reset();
-	wr8(CLICK_BUSY, 0);
+	RT_SET(click_busy, 0);
 	wr16(VM_CLICK_HANDLERS, 0);
 	wr16(VM_CLICK_HANDLERS + 2, 0);
 	cpu.r[ESI] = rd16(VM_SCRIPT);
 	uint32_t esp = cpu.r[ESP];
-	cpu.r[ESP] = rd32(VM_TOP_ESP);
+	cpu.r[ESP] = RT(top_esp);
 	X86_COUNT(6);
 	/* from a nested VM the stack drops back: that leaves the handler at
 	 * 0x406fc8 (`jmp 0x4060f9`, where the oracle stops, x86_stop_at) */
@@ -307,15 +305,15 @@ uint32_t game_op_jump_mes(void)
  * the VM setup (0x406395). */
 static void flag_load(void)
 {
-	uint32_t keep = rd8(VM_FLAGS9) & 0x60;
+	uint32_t keep = SV(vflags) & 0x60;
 	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | keep;
 	push32(cpu.r[EAX]);
 	X86_COUNT(3);
 	load(FLAG_NAME, MES_NAME);
 	cpu.r[EAX] = pop32();
-	uint32_t f = (rd8(VM_FLAGS9) & 0x9f) | (cpu.r[EAX] & 0xff);
+	uint32_t f = (SV(vflags) & 0x9f) | (cpu.r[EAX] & 0xff);
 	cpu.r[EAX] = (cpu.r[EAX] & 0xffff00ffu) | f << 8;
-	wr8(VM_FLAGS9, f);
+	SV_SET(vflags, f);
 	X86_COUNT(5);
 	game_vm_init_regs();
 	X86_COUNT(1);
@@ -410,7 +408,6 @@ void game_format_number_regs(void)
 }
 
 #define NUMBER_TEXT 0x445ce6u   /* 0x4069fd writes the digits here */
-#define NUMBER_FORMAT 0x4452f7u /* u8: low nibble digits, high nibble ASCII */
 
 /* 15 v: print v as text: format it (0x4069fd), then run the digits as a
  * script (a nested VM at NUMBER_TEXT, which draws them like any text)
@@ -418,7 +415,7 @@ void game_format_number_regs(void)
 uint32_t game_op_print_number(void)
 {
 	game_parse_args_regs();
-	uint32_t f = rd8(NUMBER_FORMAT);
+	uint32_t f = SV(number_format);
 	cpu.r[EDX] = (cpu.r[EDX] & 0xffff0000u) | (f & 0xf0) << 8 | (f & 0x0f);
 	X86_COUNT(5);
 	game_format_number_regs();
@@ -453,13 +450,13 @@ uint32_t game_op_call_mes(void)
 	game_string_arg_regs();
 	X86_COUNT(8);
 	load(MES_NAME, VM_SCRIPT);
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | rd8(CLICK_BUSY);
+	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | RT(click_busy);
 	push32(cpu.r[EAX]);
 	cpu.r[EAX] = (cpu.r[EAX] & ~0xffffu) | rd16(VM_CLICK_HANDLERS);
 	push32(cpu.r[EAX]);
 	cpu.r[EAX] = (cpu.r[EAX] & ~0xffffu) | rd16(VM_CLICK_HANDLERS + 2);
 	push32(cpu.r[EAX]);
-	wr8(CLICK_BUSY, 0);
+	RT_SET(click_busy, 0);
 	wr16(VM_CLICK_HANDLERS, 0);
 	wr16(VM_CLICK_HANDLERS + 2, 0);
 	cpu.r[ESI] = rd16(VM_SCRIPT);
@@ -478,7 +475,7 @@ uint32_t game_op_call_mes_done(void)
 	cpu.r[EAX] = pop32();
 	wr16(VM_CLICK_HANDLERS, cpu.r[EAX]);
 	cpu.r[EAX] = pop32();
-	wr8(CLICK_BUSY, cpu.r[EAX]);
+	RT_SET(click_busy, cpu.r[EAX]);
 	X86_COUNT(6);
 	movsd((cpu.r[ECX] & 0xffff0000u) | 0x1e, SAVED_LABELS, VM_LABELS);
 	movsd(8, SAVED_NAME, MES_NAME);
@@ -501,8 +498,6 @@ uint32_t game_op_call_mes_done(void)
  * meanwhile for k = 5). The pieces after each call are jump units; all of
  * them run with the statement's ESI pushed. */
 #define MENU_BLOCK 0x445e0cu /* u16: the menu's block */
-#define MENU_RUN 0x445304u   /* u16: the loop runs while set (scripts clear it) */
-#define MENU_INPUTS 0x4452e1u
 #define MENU_INIT 0x445e08u  /* label 38 */
 #define MENU_FRAME 0x445e0au /* label 39 */
 #define PUMP 0x401bf0u
@@ -534,7 +529,7 @@ uint32_t game_op_menu(void)
 		X86_COUNT(2);
 	}
 	wr16(MENU_BLOCK, cpu.r[EAX]);
-	wr16(MENU_RUN, 1);
+	SV_SET(menu_run, 1);
 	push32(cpu.r[ESI]);
 	cpu.r[ESI] = rd16(MENU_INIT);
 	X86_COUNT(5);
@@ -555,7 +550,7 @@ static uint32_t menu_scan(int k)
 {
 	for (; k < 6; k++) {
 		X86_COUNT(2);
-		if (rd8(MENU_INPUTS) & menu_inputs[k].bit) {
+		if (SV(input_enable) & menu_inputs[k].bit) {
 			cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | (uint32_t)k;
 			X86_COUNT(1);
 			return call_exit(INPUT_TEST, menu_inputs[k].ra_test);
@@ -582,13 +577,13 @@ uint32_t game_op_menu_pumped(void) /* 0x4066bd */
 {
 	X86_COUNT(2);
 	if (!cpu.r[EAX]) { /* WM_QUIT: 0x40638d, mov esp, [0x445cdc] */
-		cpu.r[ESP] = rd32(VM_TOP_ESP);
+		cpu.r[ESP] = RT(top_esp);
 		X86_COUNT(1);
 		return 0x406393;
 	}
 	game_anim_step();
 	X86_COUNT(2);
-	if (!rd16(MENU_RUN)) {
+	if (!SV(menu_run)) {
 		cpu.r[ESI] = pop32();
 		X86_COUNT(1);
 		return loop_at(0x4066d5);
@@ -618,7 +613,7 @@ static uint32_t menu_tested(int k)
 static uint32_t menu_handled(int k)
 {
 	X86_COUNT(2);
-	if (rd8(MENU_INPUTS) & 1)
+	if (SV(input_enable) & 1)
 		return menu_pump(menu_inputs[k].pc_pump_after_block);
 	return menu_wait(k);
 }

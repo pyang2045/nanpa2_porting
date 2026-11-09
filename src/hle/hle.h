@@ -57,6 +57,10 @@ void win32_init(void);
 uint32_t win32_import(const char *dll, const char *name, int *nargs, int *known);
 int win32_call_import(int id);
 void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam);
+/* the same for a message from outside the game (host, scripted input, the bot):
+ * recorded by --record, dropped while replaying (replay.h) */
+void win32_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam);
+uint32_t win32_timer_ticks(void); /* timer callbacks run so far */
 int win32_pump(void);        /* native 0x401bf0: 0 on quit */
 void win32_run_timer(void);  /* run due 16 ms ticks (native timer thread) */
 int win32_timer_running(void); /* timeSetEvent seen, not killed */
@@ -77,6 +81,8 @@ void crt_init(const char *game_dir, const char *save_dir);
 uint32_t ddraw_create(void);
 int ddraw_com_call(uint32_t iface, uint32_t method);
 void ddraw_present(int force);
+/* the primary surface as 640x480 palette indices and the palette as 0x00RRGGBB; 0 if none */
+int ddraw_snapshot(uint8_t *frame, uint32_t pal[256]);
 void ddraw_set_entries(uint32_t start, uint32_t count, uint32_t entries);
 int ddraw_surface_info(uint32_t hdc, uint32_t *pixels, int *pitch, int *w, int *h);
 

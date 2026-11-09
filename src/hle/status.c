@@ -36,6 +36,7 @@
 #include "hle.h"
 #include "platform/desktop.h"
 #include "platform/present.h"
+#include "game/state.h"
 
 #ifdef _WIN32
 #define environ _environ /* stdlib.h */
@@ -275,7 +276,7 @@ static void write_status(void)
 	s = snap;
 	SDL_UnlockMutex(lock);
 	now = SDL_GetTicks(); /* not before the snapshot (s.tick <= now) */
-	uint32_t frame = rd32(0x446292), active = rd32(0x4ac4ec), pc = x86_poll_pc;
+	uint32_t frame = RT(frame), active = SC(active), pc = x86_poll_pc;
 	watchdog(&s, now, frame, active, pc);
 	if (!warning[0])
 		last_key[0] = 0; /* a cause that clears and comes back is logged again */

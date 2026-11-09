@@ -30,9 +30,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "game/state.h"
 #include "hle.h"
 
-#define FRAME() rd32(0x446292)
+#define FRAME() RT(frame)
 #define SCRIPT 0x435e78u
 #define WM_MOUSEMOVE 0x200
 #define WM_LBUTTONDOWN 0x201
@@ -196,12 +197,20 @@ static uint32_t skip_expr(uint32_t p)
  * 0x4313c4, which is put back). */
 static uint32_t eval(uint32_t p)
 {
-	uint16_t seed = rd16(0x4313c4);
+	uint16_t seed = AN(random_seed);
 	uint32_t esi = cpu.r[ESI];
+	/* the bot's own work is not the game's: not its instruction count (the
+	 * game clock in deterministic mode) nor its poll countdown, or a replay,
+	 * which has no bot, would run on another clock than the recording */
+	uint64_t icount = x86_icount;
+	int countdown = x86_poll_countdown;
+	x86_poll_countdown = 0x7fffffff; /* no timer tick inside */
 	cpu.r[ESI] = p;
 	uint32_t v = x86_call(0x4037fc, 0, NULL) & 0xffff;
 	cpu.r[ESI] = esi;
-	wr16(0x4313c4, seed);
+	x86_icount = icount;
+	x86_poll_countdown = countdown;
+	AN_SET(random_seed, seed);
 	return v;
 }
 
@@ -340,8 +349,8 @@ static uint32_t place(uint32_t extra)
 	for (const char *p = mes; *p; p++)
 		h = (h ^ (uint8_t)*p) * 16777619u;
 	h = (h ^ extra) * 16777619u;
-	h = (h ^ rd16(0x445298 + 2 * ('V' - 0x40))) * 16777619u;
-	return (h ^ rd16(0x445298 + 2 * ('N' - 0x40))) * 16777619u | 1;
+	h = (h ^ G.save.reg['V' - 0x40]) * 16777619u;
+	return (h ^ G.save.reg['N' - 0x40]) * 16777619u | 1;
 }
 
 static uint32_t choose(uint32_t key, uint32_t n)
@@ -469,7 +478,7 @@ void explore_tick(void)
 	uint32_t f = FRAME();
 	for (int i = 0; i < nq;) {
 		if ((int32_t)(f - q[i].frame) >= 0) {
-			win32_post_message(q[i].msg, q[i].wp, q[i].lp);
+			win32_post_ext(q[i].msg, q[i].wp, q[i].lp);
 			q[i] = q[--nq];
 		} else {
 			i++;
@@ -479,7 +488,7 @@ void explore_tick(void)
 		static int quit;
 		if (!quit++) {
 			fprintf(stderr, "explore: end frame %u mes %s\n", f, mes);
-			win32_post_message(0x12, 0, 0);
+			win32_post_ext(0x12, 0, 0);
 		}
 		return;
 	}

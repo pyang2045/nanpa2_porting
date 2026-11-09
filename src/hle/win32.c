@@ -1,5 +1,6 @@
 /* USER32/GDI32/KERNEL32/WINMM imports, the message queue, the 16 ms timer. */
 #include "hle.h"
+#include "replay.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include "dev.h"
 #include "status.h"
 #include "platform/present.h"
+#include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
 #define WM_DESTROY 0x0002
@@ -127,6 +129,12 @@ void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam)
 	q_count++;
 }
 
+void win32_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam)
+{
+	if (replay_external(msg, wparam, lparam, 0))
+		win32_post_message(msg, wparam, lparam);
+}
+
 static uint32_t sdl_to_vk(SDL_Keycode k)
 {
 	switch (k) {
@@ -218,10 +226,20 @@ static int pause_inactive(void)
 static void collect_events(void)
 {
 	SDL_Event ev;
-	dev_inject();
+	/* deterministic: the scripts and the bot run at every pump, and the host
+	 * queue every 256th (messages carry the pump they came at) */
+	static unsigned n;
+	if (replay_det()) {
+		if (!replay_replaying())
+			dev_inject();
+		if (n++ & 255)
+			return;
+	} else {
+		dev_inject();
+	}
 	/* scripted runs only take SDL_QUIT from the host, so the Cocoa event
 	 * pump (most of their host CPU) can run every 16 ms */
-	if (dev_scripted()) {
+	if (dev_scripted() && !replay_det()) {
 		static uint32_t last;
 		uint32_t now = SDL_GetTicks();
 		if (now - last < 16)
@@ -239,19 +257,19 @@ static void collect_events(void)
 			continue;
 		switch (ev.type) {
 		case SDL_QUIT:
-			win32_post_message(WM_QUIT, 0, 0);
+			win32_post_ext(WM_QUIT, 0, 0);
 			break;
 		case SDL_MOUSEMOTION:
-			win32_post_message(WM_MOUSEMOVE, 0, mouse_lparam(ev.motion.x, ev.motion.y));
+			win32_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(ev.motion.x, ev.motion.y));
 			break;
 		case SDL_MOUSEBUTTONDOWN:
 		case SDL_MOUSEBUTTONUP: {
 			int down = ev.type == SDL_MOUSEBUTTONDOWN;
 			uint32_t lp = mouse_lparam(ev.button.x, ev.button.y);
 			if (ev.button.button == SDL_BUTTON_LEFT)
-				win32_post_message(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
+				win32_post_ext(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
 			else if (ev.button.button == SDL_BUTTON_RIGHT)
-				win32_post_message(down ? WM_RBUTTONDOWN : WM_RBUTTONUP, 0, lp);
+				win32_post_ext(down ? WM_RBUTTONDOWN : WM_RBUTTONUP, 0, lp);
 			break;
 		}
 		case SDL_KEYDOWN:
@@ -264,14 +282,14 @@ static void collect_events(void)
 			}
 			uint32_t vk = sdl_to_vk(ev.key.keysym.sym);
 			if (vk)
-				win32_post_message(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
+				win32_post_ext(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
 			break;
 		}
 		case SDL_WINDOWEVENT:
 			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-				win32_post_message(WM_ACTIVATEAPP, 1, 0);
+				win32_post_ext(WM_ACTIVATEAPP, 1, 0);
 			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && pause_inactive())
-				win32_post_message(WM_ACTIVATEAPP, 0, 0);
+				win32_post_ext(WM_ACTIVATEAPP, 0, 0);
 			break;
 		}
 	}
@@ -297,7 +315,7 @@ static uint32_t dispatch(const struct msg *m)
 	uint32_t r = x86_call(win32_wndproc, 4, args);
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
-			rd8(0x445d8f), rd32(0x446292));
+			RT(input_bits), RT(frame));
 	return r;
 }
 
@@ -311,8 +329,18 @@ int win32_timer_running(void)
 }
 
 /* game-timer clock in 1/turbo ms (SDL_GetTicks wraps only after 49 days) */
+static uint32_t timer_ticks;
+
+uint32_t win32_timer_ticks(void)
+{
+	return timer_ticks;
+}
+
 static uint64_t timer_now(void)
 {
+	/* deterministic mode: the instruction count is the clock (turbo off) */
+	if (replay_det())
+		return replay_ms();
 	return (uint64_t)SDL_GetTicks() * (uint64_t)turbo;
 }
 
@@ -324,6 +352,7 @@ void win32_run_timer(void)
 	int n = 0;
 	while (now >= timer_next && n < 8 * turbo) {
 		hle_timer_callback();
+		timer_ticks++;
 		timer_next += 16;
 		n++;
 	}
@@ -349,7 +378,7 @@ void x86_set_speed(double ips)
 
 void x86_throttle(void)
 {
-	if (cpu_ips <= 0)
+	if (cpu_ips <= 0 || replay_replaying())
 		return;
 	uint64_t now = SDL_GetPerformanceCounter();
 	double freq = (double)SDL_GetPerformanceFrequency();
@@ -376,7 +405,7 @@ void x86_probe(uint32_t pc)
 		if (vm)
 			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
 				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
-				rd8(0x435e7a + cpu.r[ESI]), rd32(0x446292), (unsigned long long)x86_icount);
+				rd8(0x435e7a + cpu.r[ESI]), RT(frame), (unsigned long long)x86_icount);
 		return;
 	}
 	if (pc == 0x4071bb) { /* script hit test 0x4071a4: edi = rectangle table */
@@ -384,7 +413,7 @@ void x86_probe(uint32_t pc)
 		return;
 	}
 	if (on)
-		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), rd32(0x446292), (unsigned long long)x86_icount);
+		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), RT(frame), (unsigned long long)x86_icount);
 }
 
 void x86_poll(void)
@@ -396,7 +425,7 @@ void x86_poll(void)
 		log = getenv("NANPA2_LOG") != NULL;
 	if (log && SDL_GetTicks() - last_log > 1000) {
 		last_log = SDL_GetTicks();
-		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, rd32(0x446292), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
+		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, RT(frame), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
 	}
 	x86_poll_countdown = 2000;
 	status_main();
@@ -416,11 +445,13 @@ int win32_pump(void)
 	status_main();
 	x86_throttle();
 	win32_run_timer();
+	replay_pump();
 	ddraw_present(0);
-	/* the host event queue at most once a millisecond */
+	/* the host event queue at most once a millisecond (deterministic mode:
+	 * collect_events counts pumps instead) */
 	static uint32_t last_collect;
 	uint32_t now = SDL_GetTicks();
-	if (now != last_collect) {
+	if (replay_det() || now != last_collect) {
 		last_collect = now;
 		collect_events();
 	}
@@ -438,7 +469,7 @@ void win32_init(void)
 	cursor_count = 0;
 	cursor_shown = -1;
 	const char *t = getenv("NANPA2_TURBO");
-	turbo = t && atoi(t) > 1 ? atoi(t) : 1;
+	turbo = t && atoi(t) > 1 && !replay_det() ? atoi(t) : 1;
 }
 
 int win32_call_import(int id)

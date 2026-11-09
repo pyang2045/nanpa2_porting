@@ -162,6 +162,7 @@ static uint32_t stop_units[256], stop_calls[2 * 64 + 1];
 static const uint32_t call_exit_ra[] = {
 #define HLE_GAME_CALL_EXIT(ra, what) ra,
 #include "hle/overrides.h"
+#include "game/state.h"
 #undef HLE_GAME_CALL_EXIT
 	0
 };
@@ -305,7 +306,7 @@ static uint32_t compare(const struct game_unit *u)
 		s->mismatches++;
 		if (s->mismatches <= 20)
 			fprintf(stderr, "diff MISMATCH %08x %s call %llu (esi %08x frame %u):%s\n", u->addr,
-			        u->name, (unsigned long long)s->calls, in.r[ESI], rd32(0x446292), why);
+			        u->name, (unsigned long long)s->calls, in.r[ESI], RT(frame), why);
 		/* go on with the original's result */
 		for (size_t i = 0; i < mine.n; i++)
 			if (mine.b[i].state & TRACE_WRITTEN)
@@ -409,7 +410,7 @@ static void fuzz_run(const struct game_unit *u)
 			f(&seed0);
 			fprintf(stderr, "fuzzcase %08x %s esi %08x edi %08x ecx %08x edx %08x\n", u->addr, u->name,
 			        cpu.r[ESI], cpu.r[EDI], cpu.r[ECX], cpu.r[EDX]);
-			uint32_t sel = rd16(0x4452d8), m = 0x4462beu + sel;
+			uint32_t sel = SV(map_sel), m = 0x4462beu + sel;
 			fprintf(stderr, "  M:");
 			for (uint32_t k = 0; k < 0x34; k++)
 				fprintf(stderr, " %02x", rd8(m + k));
@@ -495,7 +496,7 @@ static uint32_t finish_exit(uint32_t pc)
 {
 	switch (pc) {
 	case 0x40638d:
-		cpu.r[ESP] = rd32(0x445cdc);
+		cpu.r[ESP] = RT(top_esp);
 		X86_COUNT(1);
 		/* fall through */
 	case 0x406393: /* the quit of a piece that already reset ESP */

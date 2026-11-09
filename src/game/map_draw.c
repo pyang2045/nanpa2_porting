@@ -20,6 +20,7 @@
  * composed in three work planes (WORK) and written out.
  */
 #include "game/map.h"
+#include "game/state.h"
 
 #define CELLS 0x4313c8u
 #define SHADOW 0x433308u
@@ -124,7 +125,7 @@ void game_map_fill_grid(void)
 	cpu.r[ECX] = 0;
 	cpu.r[EDX] = (cpu.r[EDX] & 0xffff0000u) | (prod >> 16);
 	cpu.r[EBX] = ebx;
-	cpu.r[ESI] = rd16(MAP_SEL);
+	cpu.r[ESI] = SV(map_sel);
 	cpu.r[EDI] = edi;
 	X86_COUNT(1);
 }
@@ -141,7 +142,7 @@ void game_map_fill_grid(void)
 void game_map_overlay_sprites(void)
 {
 	uint32_t m = map_base();
-	uint32_t sel = rd16(MAP_SEL);
+	uint32_t sel = SV(map_sel);
 	uint32_t s = rd16(m + M_SPRITES);
 	uint32_t ebp = cpu.r[EBP], eax = cpu.r[EAX], ecx = cpu.r[ECX];
 	X86_COUNT(2);
@@ -407,7 +408,7 @@ static void loop_end_regs(uint32_t cells, uint32_t dst_end)
 	cpu.r[EDI] = SHADOW + cells * 8;
 	cpu.r[EDX] = dst_end;
 	cpu.r[ECX] = 0;
-	cpu.r[ESI] = rd16(MAP_SEL);
+	cpu.r[ESI] = SV(map_sel);
 }
 
 /* 0x403d45: lock the three surfaces and draw the cells whose record

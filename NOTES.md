@@ -1173,3 +1173,40 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   harness (`NANPA2_DIFF`, `_DIFF_DIR`, `_FUZZ`, `_START_ORACLE`) and the lockstep comparison, as
   the oracle of the reimplemented units; nothing the player runs does. With the default
   `NANPA2_GAME_DIR` (`game/`) ctest now writes `game/nanpa2.dat` (first launch behaviour).
+
+## 2026-11-09 (refactor R0: deterministic replay; R1: state into structs, started)
+
+Plan and details: docs/refactor.md. The user approved turning the C reimplementation into a
+free-standing engine in stages (R1 state into structs, R2 ordinary calls, R3 real-time pacing,
+R4 direct platform calls); the byte-for-byte differential harness stops applying, so replay is
+the check.
+
+- 9bb18d5 (R0): `NANPA2_DETERMINISTIC=1`, `--record FILE`, `--replay FILE` (src/hle/replay.c).
+  The game clock is `x86_icount / 25000` ms (25 MIPS, turbo and the throttle cannot change it),
+  scripts and the bot run at every pump, outside messages are stamped (tick, pump of the tick).
+  Checkpoints every N ticks hash the screen, palette, the 0xc00 save image, MES files and opens,
+  VM opcode fetches, the FLAG files (`li.*`) and the raw emulated memory by 4 KB page, heap, stack,
+  registers (`raw.*`). Replay stops at the first difference (exit 3, key named);
+  tools/replay_diff.py compares two recordings; ctest `replay_det` (records at test time twice,
+  replays, two tampered recordings must diverge). Two recordings of the same input were identical
+  files at once, at 25 MIPS and unthrottled.
+- 62f125d: the bot's expression evaluation (x86_call 0x4037fc) advanced `x86_icount`, 77
+  instructions a menu: a replay (no bot) drifted. Found by replaying a recorded menu run.
+- Golden set (pre-refactor build, scratchpad, not committed): newgame (seed 31, 270000 frames,
+  271 checkpoints, Prologue to OPEN1), town (saves32, seed 43, 300000 frames, 301, TOWN at frame
+  263535), saveload (seed 41, a title load to OPEN1, 33), menu (seed 44, 40000 frames, 161).
+  Each replays identically on the pre-refactor build (twice) and with `--exe`.
+- bef599a (R1): `x86_alias` (src/x86/x86.c) backs a range of the data area with a C
+  object, so converted and unconverted code, the HLE layer and the script VM see the same bytes;
+  src/game/state.h structs `save_image` (0xc00, the FLAG file layout, static-asserted offsets),
+  `vm_rt`, `screen_state`, `anim_state`; the 0x4452xx text window, VM flags, registers, flags,
+  frame counter, input bits, fade/cursor words and the rest named there are `SV()/RT()/SC()/AN()`
+  field accesses. Every chunk matched all golden checkpoints, `li.*` and `raw.*`.
+  Frozen: the diff harness, fuzz, lockstep, recomp tests (ctest option NANPA2_FROZEN_TESTS, off):
+  they compare `x86_mem` directly. Kept and passing: selftest, start_trace, no_game_bytes,
+  asset_only, wavcheck, replay_det.
+- A mistake caught by replay: a name-based rewrite turned `CURSOR_SHOWN` of screen.c and
+  startup.c (0x4ac510) into the field at 0x445ce0; raw.data differed at the first checkpoint.
+  The converter now resolves names per file (tools: scratchpad convaddr.py, not committed).
+- What is left: docs/refactor.md "Still in emulated memory" (script and map buffers, sprites,
+  sound words, HLE heap objects), then R2-R4.
