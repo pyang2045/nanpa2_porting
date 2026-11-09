@@ -19,6 +19,11 @@
  *   --window WxH                                        initial window size (points)
  *   --fullscreen                                        start fullscreen
  *                                                       (Alt+Enter, Cmd+F toggle)
+ *   --record FILE / --replay FILE                       record the play (inputs and state
+ *                                                       checkpoints) / replay it and
+ *                                                       compare (src/hle/replay.h)
+ *   --deterministic                                     the game clock follows the emulated
+ *                                                       CPU, not the host
  *   --pause-inactive                                    stop the game while the
  *                                                       window is in the background
  *                                                       (the original behaviour)
@@ -43,6 +48,7 @@
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "hle/logo.h"
+#include "hle/replay.h"
 #include "hle/status.h"
 #include "launch.h"
 #include "x86/x86.h"
@@ -184,6 +190,7 @@ static void save_bmp(const char *path)
  * it) gives about 25 million instructions per second. */
 #define NANPA2_DEFAULT_MIPS 25.0
 static double cpu_mips = NANPA2_DEFAULT_MIPS;
+static int cpu_mips_set;
 
 static SDL_Window *game_window;
 
@@ -205,18 +212,22 @@ static int run_game(const char *game, const char *exe, const char *font)
 		fprintf(stderr, "cannot map the imports of nanpa2.exe\n");
 		return 1;
 	}
-	SDL_free(save);
 	text_init(font);
 	dev_init();
+	replay_init(save_env ? save_env : save ? save : ".");
 	status_init(game_window, cpu_mips);
 	x86_set_speed(cpu_mips * 1e6);
 	if (getenv("NANPA2_SAVETEST"))
 		return dev_save_selftest();
+	if (replay_replaying() && !getenv("NANPA2_CPU_MIPS") && !cpu_mips_set)
+		x86_set_speed(0); /* a replay runs as fast as the host can */
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
 	uint64_t t0 = SDL_GetPerformanceCounter();
 	x86_call(0x402090, 1, &hinstance);
+	replay_finish();
+	SDL_free(save);
 	/* raw speed with NANPA2_CPU_MIPS=0: everything the game executed,
 	 * HLE time included */
 	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
@@ -281,7 +292,13 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
 		else if (!strcmp(argv[i], "--cpu-mips") && i + 1 < argc)
-			mips = atof(argv[++i]);
+			mips = atof(argv[++i]), cpu_mips_set = 1;
+		else if (!strcmp(argv[i], "--record") && i + 1 < argc)
+			SDL_setenv("NANPA2_RECORD", argv[++i], 1);
+		else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
+			SDL_setenv("NANPA2_REPLAY", argv[++i], 1);
+		else if (!strcmp(argv[i], "--deterministic"))
+			SDL_setenv("NANPA2_DETERMINISTIC", "1", 1);
 		else if (!strcmp(argv[i], "--pause-inactive"))
 			SDL_setenv("NANPA2_PAUSE_INACTIVE", "1", 1);
 	}

@@ -77,6 +77,7 @@ set(GAME_SOURCES
   src/game/units.c
   src/game/trace.c
   src/game/diff.c
+  src/game/state_view.c
 )
 
 set(SOURCES
@@ -98,6 +99,7 @@ set(SOURCES
   src/cinepak.c
   src/hle/sound.c
   src/hle/dev.c
+  src/hle/replay.c
   src/hle/explore.c
   src/hle/status.c
   ${GAME_SOURCES}
@@ -252,6 +254,13 @@ set_tests_properties(diffreplay PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77
 add_test(NAME start_trace COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/start_trace.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/start-trace")
 set_tests_properties(start_trace PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
+# Deterministic mode and replay (about 40 s, headless; tests/replay_det.py): a
+# recording made at test time from the game data, twice (identical), then
+# replayed against its checkpoints, and two tampered recordings must diverge.
+add_test(NAME replay_det COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/replay_det.py"
+  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/replay-det")
+set_tests_properties(replay_det PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 # WAV loader: decoded duration equals header length / byte rate for mono,
 # stereo, 11 kHz and files with extra chunks before data.

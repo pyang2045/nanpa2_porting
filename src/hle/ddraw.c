@@ -69,18 +69,11 @@ void ddraw_set_entries(uint32_t start, uint32_t count, uint32_t entries)
 		wr32(palette_obj + 4 + 4 * (start + i), rd32(entries + 4 * i));
 }
 
-void ddraw_present(int force)
+int ddraw_snapshot(uint8_t *frame, uint32_t pal[256])
 {
-	static uint32_t last;
-	static uint8_t frame[SCREEN_W * SCREEN_H];
-	static uint32_t pal[256];
-	uint32_t now = SDL_GetTicks();
-	if (!force && now - last < 16)
-		return;
 	struct surf *p = primary();
 	if (!p)
-		return;
-	last = now;
+		return 0;
 	for (int y = 0; y < SCREEN_H && y < p->h; y++)
 		memcpy(frame + y * SCREEN_W, x86_ptr(p->pixels + (uint32_t)(y * p->pitch), SCREEN_W),
 		       SCREEN_W);
@@ -89,6 +82,20 @@ void ddraw_present(int force)
 		/* PALETTEENTRY: red, green, blue, flags */
 		pal[i] = ((e & 0xff) << 16) | (e & 0xff00) | ((e >> 16) & 0xff);
 	}
+	return 1;
+}
+
+void ddraw_present(int force)
+{
+	static uint32_t last;
+	static uint8_t frame[SCREEN_W * SCREEN_H];
+	static uint32_t pal[256];
+	uint32_t now = SDL_GetTicks();
+	if (!force && now - last < 16)
+		return;
+	if (!ddraw_snapshot(frame, pal))
+		return;
+	last = now;
 	dev_frame(frame, pal);
 	/* NANPA2_HEADLESS: the presenter keeps the frame in memory (no window,
 	 * no GPU, see present_common.h) */

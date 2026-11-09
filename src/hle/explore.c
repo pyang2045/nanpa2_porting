@@ -469,7 +469,7 @@ void explore_tick(void)
 	uint32_t f = FRAME();
 	for (int i = 0; i < nq;) {
 		if ((int32_t)(f - q[i].frame) >= 0) {
-			win32_post_message(q[i].msg, q[i].wp, q[i].lp);
+			win32_post_ext(q[i].msg, q[i].wp, q[i].lp);
 			q[i] = q[--nq];
 		} else {
 			i++;
@@ -479,7 +479,7 @@ void explore_tick(void)
 		static int quit;
 		if (!quit++) {
 			fprintf(stderr, "explore: end frame %u mes %s\n", f, mes);
-			win32_post_message(0x12, 0, 0);
+			win32_post_ext(0x12, 0, 0);
 		}
 		return;
 	}

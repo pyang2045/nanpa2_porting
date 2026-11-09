@@ -658,6 +658,8 @@ int x86_exe_check(const uint8_t *d, size_t n);
 uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args);
 
 /* Emulated heap */
+/* end of the used heap (replay checkpoints hash HEAP_BASE up to it) */
+uint32_t x86_heap_top(void);
 uint32_t x86_malloc(uint32_t size);
 void x86_free(uint32_t addr);
 

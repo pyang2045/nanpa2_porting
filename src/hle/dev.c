@@ -29,6 +29,7 @@
 #include "explore.h"
 #include "hle.h"
 #include "platform/present.h"
+#include "replay.h"
 
 static const char *shot_dir;
 static uint32_t shot_start, shot_interval, shot_count, shot_done;
@@ -96,7 +97,7 @@ void dev_init(void)
 
 int dev_scripted(void)
 {
-	return ninput > 0 || explore_on();
+	return ninput > 0 || explore_on() || replay_replaying();
 }
 
 uint32_t dev_now(void)
@@ -113,7 +114,7 @@ static uint32_t clock_now(void)
 	static int frames = -1;
 	if (frames < 0) {
 		const char *c = getenv("NANPA2_INPUT_CLOCK");
-		frames = c && !strcmp(c, "frames");
+		frames = (c && !strcmp(c, "frames")) || replay_det();
 	}
 	return frames ? rd32(0x446292) * 16u : dev_now();
 }
@@ -218,6 +219,7 @@ void dev_file_opened(const char *name)
 
 void dev_vm_fetch(uint32_t off)
 {
+	replay_note_vm(off);
 	explore_vm(off);
 	if (nseg)
 		sync_check(NULL, 1, off);
@@ -294,25 +296,25 @@ void dev_inject(void)
 				rd32(0x446292));
 		uint32_t lp = ((uint32_t)e->y << 16) | (uint32_t)e->x;
 		if (!strcmp(e->kind, "move")) {
-			win32_post_message(0x200, 0, lp);
+			win32_post_ext(0x200, 0, lp);
 		} else if (!strcmp(e->kind, "click") || !strcmp(e->kind, "down")) {
-			win32_post_message(0x200, 0, lp);
-			win32_post_message(0x201, 1, lp);
+			win32_post_ext(0x200, 0, lp);
+			win32_post_ext(0x201, 1, lp);
 		} else if (!strcmp(e->kind, "up")) {
-			win32_post_message(0x202, 0, lp);
+			win32_post_ext(0x202, 0, lp);
 		} else if (!strcmp(e->kind, "rclick")) {
-			win32_post_message(0x200, 0, lp);
-			win32_post_message(0x204, 2, lp);
+			win32_post_ext(0x200, 0, lp);
+			win32_post_ext(0x204, 2, lp);
 		} else if (!strcmp(e->kind, "rup")) {
-			win32_post_message(0x205, 0, lp);
+			win32_post_ext(0x205, 0, lp);
 		} else if (!strcmp(e->kind, "key")) {
-			win32_post_message(0x100, (uint32_t)e->x, 0);
+			win32_post_ext(0x100, (uint32_t)e->x, 0);
 		} else if (!strcmp(e->kind, "keyup")) {
-			win32_post_message(0x101, (uint32_t)e->x, 0);
+			win32_post_ext(0x101, (uint32_t)e->x, 0);
 		} else if (!strcmp(e->kind, "shot")) {
 			ev_shot_pending = 1;
 		} else if (!strcmp(e->kind, "quit")) {
-			win32_post_message(0x12, 0, 0);
+			win32_post_ext(0x12, 0, 0);
 		}
 	}
 }

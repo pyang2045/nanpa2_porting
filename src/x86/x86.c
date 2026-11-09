@@ -240,6 +240,11 @@ uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args)
  * header: size (including header) and a used flag. */
 static uint32_t heap_top = HEAP_BASE;
 
+uint32_t x86_heap_top(void)
+{
+	return heap_top;
+}
+
 uint32_t x86_malloc(uint32_t size)
 {
 	size = (size + 8 + 15) & ~15u;
