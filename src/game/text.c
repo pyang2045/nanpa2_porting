@@ -16,7 +16,11 @@
 #include "game/vm.h"
 #include "game/gmem.h"
 #include "game/state.h"
-#include "hle/hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 
 
 #define SCRATCH_PITCH 0x280u

@@ -24,4 +24,11 @@ extern void (*game_trap_hook)(void);
 /* NANPA2_PROBE=1: a timing line for the places the native code was probed (fades, wipes, ...) */
 void game_probe(uint32_t pc);
 
+
+/* Dev hooks of the script VM: it fetched the opcode at offset off of segment 0; the hit test
+ * (04 23) is about to scan the rectangle table at script address `table`. They feed NANPA2_VMTRACE,
+ * the exploration bot and NANPA2_HOTSPOTS. */
+void game_trace_fetch(uint32_t off);
+void game_trace_hit_table(uint32_t table);
+
 #endif

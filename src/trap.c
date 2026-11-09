@@ -4,9 +4,10 @@
 #include <stdlib.h>
 
 #include "game/state.h"
-#include "hle/clock.h"
-#include "hle/dev.h"
+#include "dev/dev.h"
+#include "game/gmem.h"
 #include "game/vm.h"
+#include "platform/clock.h"
 
 void (*game_trap_hook)(void);
 
@@ -38,4 +39,20 @@ void game_probe(uint32_t pc)
 	if (on)
 		fprintf(stderr, "probe %06x %u ms frame %u us %llu\n", pc, dev_now(), RT(frame),
 			(unsigned long long)clock_us());
+}
+
+void game_trace_fetch(uint32_t off)
+{
+	static int vm = -1;
+	if (vm < 0)
+		vm = getenv("NANPA2_VMTRACE") != NULL;
+	dev_vm_fetch(off);
+	if (vm)
+		fprintf(stderr, "vm %04x op %02x %02x %02x frame %u us %llu\n", off, rd8(0x435e78 + off),
+			rd8(0x435e79 + off), rd8(0x435e7a + off), RT(frame), (unsigned long long)clock_us());
+}
+
+void game_trace_hit_table(uint32_t table)
+{
+	dev_hit_table(table);
 }

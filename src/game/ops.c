@@ -11,7 +11,11 @@
 #include "game/ctl.h"
 #include "game/expr.h"
 #include "game/vm.h"
-#include "hle/hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "game/gmem.h"
 #include "game/state.h"
 
@@ -171,7 +175,7 @@ int vm_op_hit_test(void)
 	uint32_t rec = base + table, x = vm_arg(1), y = vm_arg(2), id;
 	/* the timing probe of the native 0x4071bb: the exploration bot and
 	 * NANPA2_HOTSPOTS read the rectangle table through it */
-	probe_hit_table(rec);
+	game_trace_hit_table(rec);
 	for (;; rec += 10) {
 		id = rd16(rec);
 		if (id == 0xffff)

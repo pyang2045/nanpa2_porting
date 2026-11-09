@@ -6,9 +6,13 @@
 #include <stdlib.h>
 
 #include "game/state.h"
-#include "hle/hle.h"
-#include "hle/clock.h"
-#include "hle/replay.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
+#include "platform/clock.h"
+#include "dev/replay.h"
 
 int ctl_pump(void)
 {

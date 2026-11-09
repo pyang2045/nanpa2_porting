@@ -23,7 +23,7 @@
  * NANPA2_INPUT can first load a save); NANPA2_EXPLORE_LOG=1 logs menus and
  * clicks. Runs are repeatable only roughly (the game timer is host-paced):
  * the seed and frame numbers locate a problem, they do not replay it. */
-#include "explore.h"
+#include "dev/explore.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -32,7 +32,11 @@
 
 #include "game/expr.h"
 #include "game/state.h"
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 
 #define FRAME() RT(frame)
 #define SCRIPT 0x435e78u
@@ -467,7 +471,7 @@ void explore_tick(void)
 	uint32_t f = FRAME();
 	for (int i = 0; i < nq;) {
 		if ((int32_t)(f - q[i].frame) >= 0) {
-			win32_post_ext(q[i].msg, q[i].wp, q[i].lp);
+			win_post_ext(q[i].msg, q[i].wp, q[i].lp);
 			q[i] = q[--nq];
 		} else {
 			i++;
@@ -477,7 +481,7 @@ void explore_tick(void)
 		static int quit;
 		if (!quit++) {
 			fprintf(stderr, "explore: end frame %u mes %s\n", f, mes);
-			win32_post_ext(0x12, 0, 0);
+			win_post_ext(0x12, 0, 0);
 		}
 		return;
 	}

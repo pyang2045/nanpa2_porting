@@ -9,7 +9,11 @@
  * bloc/bdat; MingLiU and Apple LiSung have hand-made strikes), otherwise its
  * outline through stb_truetype, unantialiased like GDI on an 8-bit DC; bold
  * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 
 #include <SDL.h>
 #include <stdio.h>

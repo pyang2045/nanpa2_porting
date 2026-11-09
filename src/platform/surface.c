@@ -6,8 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "hle/dev.h"
-#include "hle/hle.h"
+#include "dev/dev.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "platform/present.h"
 #include "trap.h"
 
@@ -158,6 +162,6 @@ void screen_present(int force)
 
 void screen_wait_vblank(void)
 {
-	win32_run_timer();
+	win_run_timer();
 	screen_present(0);
 }

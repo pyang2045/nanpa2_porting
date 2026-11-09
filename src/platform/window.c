@@ -1,18 +1,22 @@
 /* Platform API: the window, the message queue, the 16 ms timer and the cursor (platform/window.h). */
 #include "platform/window.h"
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "game/ctl.h"
 #include "game/pace.h"
-#include "clock.h"
-#include "replay.h"
+#include "platform/clock.h"
+#include "dev/replay.h"
 
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev.h"
-#include "status.h"
+#include "dev/dev.h"
+#include "dev/status.h"
 #include "platform/present.h"
 #include "game/startup.h"
 #include "game/state.h"
@@ -34,7 +38,7 @@ static struct msg {
 } queue[QUEUE_LEN];
 static int q_head, q_count;
 
-void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam)
+void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
 	/* coalesce mouse moves, as Windows does */
 	if (msg == WM_MOUSEMOVE && q_count) {
@@ -51,10 +55,10 @@ void win32_post_message(uint32_t msg, uint32_t wparam, uint32_t lparam)
 	q_count++;
 }
 
-void win32_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam)
+void win_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
 	if (replay_external(msg, wparam, lparam, 0))
-		win32_post_message(msg, wparam, lparam);
+		win_post(msg, wparam, lparam);
 }
 
 static uint32_t sdl_to_vk(SDL_Keycode k)
@@ -94,7 +98,7 @@ static uint32_t sdl_to_vk(SDL_Keycode k)
  * The port hides the host cursor only over the game image: letterbox
  * borders, the title bar, other windows and an unfocused window keep the
  * host cursor. */
-void win32_cursor_update(void)
+void win_cursor_update(void)
 {
 	SDL_Window *w = SDL_GetMouseFocus();
 	int over = 0;
@@ -114,11 +118,11 @@ void win32_cursor_update(void)
 int win_show_cursor(int show)
 {
 	cursor_count += show ? 1 : -1;
-	win32_cursor_update();
+	win_cursor_update();
 	return cursor_count;
 }
 
-void win32_cursor_state(int *count, int *shown, int *over_image)
+void win_cursor_state(int *count, int *shown, int *over_image)
 {
 	*count = cursor_count;
 	*shown = SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE;
@@ -179,19 +183,19 @@ static void collect_events(void)
 			continue;
 		switch (ev.type) {
 		case SDL_QUIT:
-			win32_post_ext(WM_QUIT, 0, 0);
+			win_post_ext(WM_QUIT, 0, 0);
 			break;
 		case SDL_MOUSEMOTION:
-			win32_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(ev.motion.x, ev.motion.y));
+			win_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(ev.motion.x, ev.motion.y));
 			break;
 		case SDL_MOUSEBUTTONDOWN:
 		case SDL_MOUSEBUTTONUP: {
 			int down = ev.type == SDL_MOUSEBUTTONDOWN;
 			uint32_t lp = mouse_lparam(ev.button.x, ev.button.y);
 			if (ev.button.button == SDL_BUTTON_LEFT)
-				win32_post_ext(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
+				win_post_ext(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
 			else if (ev.button.button == SDL_BUTTON_RIGHT)
-				win32_post_ext(down ? WM_RBUTTONDOWN : WM_RBUTTONUP, 0, lp);
+				win_post_ext(down ? WM_RBUTTONDOWN : WM_RBUTTONUP, 0, lp);
 			break;
 		}
 		case SDL_KEYDOWN:
@@ -204,19 +208,19 @@ static void collect_events(void)
 			}
 			uint32_t vk = sdl_to_vk(ev.key.keysym.sym);
 			if (vk)
-				win32_post_ext(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
+				win_post_ext(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
 			break;
 		}
 		case SDL_WINDOWEVENT:
 			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-				win32_post_ext(WM_ACTIVATEAPP, 1, 0);
+				win_post_ext(WM_ACTIVATEAPP, 1, 0);
 			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && pause_inactive())
-				win32_post_ext(WM_ACTIVATEAPP, 0, 0);
+				win_post_ext(WM_ACTIVATEAPP, 0, 0);
 			break;
 		}
 	}
 	if (cursor_check)
-		win32_cursor_update();
+		win_cursor_update();
 }
 
 static int pop_message(struct msg *m)
@@ -242,7 +246,7 @@ static uint32_t dispatch(const struct msg *m)
 
 /* ---- timer ---- */
 
-int win32_timer_running(void)
+int win_timer_running(void)
 {
 	return timer_on;
 }
@@ -250,12 +254,12 @@ int win32_timer_running(void)
 /* number of timer callbacks run so far */
 static uint32_t timer_ticks;
 
-uint32_t win32_timer_ticks(void)
+uint32_t win_timer_ticks(void)
 {
 	return timer_ticks;
 }
 
-void win32_run_timer(void)
+void win_run_timer(void)
 {
 	if (!timer_on)
 		return;
@@ -272,22 +276,6 @@ void win32_run_timer(void)
 		timer_next = now + 16; /* fell far behind: drop ticks */
 }
 
-void probe_vm_fetch(uint32_t off)
-{
-	static int vm = -1;
-	if (vm < 0)
-		vm = getenv("NANPA2_VMTRACE") != NULL;
-	dev_vm_fetch(off);
-	if (vm)
-		fprintf(stderr, "vm %04x op %02x %02x %02x frame %u us %llu\n", off, rd8(0x435e78 + off),
-			rd8(0x435e79 + off), rd8(0x435e7a + off), RT(frame), (unsigned long long)clock_us());
-}
-
-void probe_hit_table(uint32_t table)
-{
-	dev_hit_table(table);
-}
-
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
 int win_pump(void)
 {
@@ -297,7 +285,7 @@ int win_pump(void)
 	clock_add(PACE_PUMP_US);
 	status_main();
 	clock_throttle();
-	win32_run_timer();
+	win_run_timer();
 	replay_pump();
 	screen_present(0);
 	/* the host event queue at most once a millisecond (deterministic mode:
@@ -327,12 +315,7 @@ void win_show(void)
 {
 	/* Windows activates the new full-screen window; the game only runs its timer after
 	 * WM_ACTIVATEAPP */
-	win32_post_message(WM_ACTIVATEAPP, 1, 0);
-}
-
-void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
-{
-	win32_post_message(msg, wparam, lparam);
+	win_post(WM_ACTIVATEAPP, 1, 0);
 }
 
 void win_timer_start(void)

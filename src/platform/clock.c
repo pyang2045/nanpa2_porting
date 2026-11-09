@@ -1,11 +1,15 @@
-#include "clock.h"
+#include "platform/clock.h"
 
 #include <SDL.h>
 
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "platform/present.h"
-#include "replay.h"
-#include "status.h"
+#include "dev/replay.h"
+#include "dev/status.h"
 
 static double speed = 1.0;
 static uint64_t vclock;           /* virtual microseconds */
@@ -66,7 +70,7 @@ void clock_work(uint32_t us)
 	static uint32_t last;
 	vclock += us;
 	clock_throttle();
-	win32_run_timer();
+	win_run_timer();
 	uint32_t now = SDL_GetTicks();
 	if (now - last >= 8) { /* the host's own service, as the timer thread and DirectDraw did */
 		last = now;

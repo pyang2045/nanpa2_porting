@@ -65,4 +65,21 @@ void win_warp_cursor(int x, int y);
 /* An error for the player (the original's MessageBox): the platform shows it or prints it */
 void win_message_box(const char *text, const char *title);
 
+/* ---- for the host side (dev layer, clock, status, presenter) ---- */
+
+/* A message from outside the game (host, scripted input, the bot): recorded by --record, dropped
+ * while replaying (dev/replay.h) */
+void win_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam);
+/* timer ticks run so far */
+uint32_t win_timer_ticks(void);
+/* run the 16 ms ticks that are due */
+void win_run_timer(void);
+/* the timer is started and not stopped */
+int win_timer_running(void);
+/* The native game hides the system cursor (ShowCursor counter -1) and draws its own sprite; the
+ * host cursor is hidden only while the counter is negative and the pointer is over the game image
+ * of the focused window. Re-check after the mouse, window or fit changed. */
+void win_cursor_update(void);
+void win_cursor_state(int *count, int *shown, int *over_image);
+
 #endif

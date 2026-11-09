@@ -6,8 +6,8 @@
 #include <string.h>
 
 #include "fsys.h"
-#include "hle/dev.h"
-#include "hle/replay.h"
+#include "dev/dev.h"
+#include "dev/replay.h"
 
 static char save_root[1024];
 

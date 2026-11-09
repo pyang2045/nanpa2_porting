@@ -46,14 +46,16 @@
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
-#include "hle/clock.h"
-#include "hle/dev.h"
-#include "hle/hle.h"
-#include "hle/logo.h"
+#include "platform/clock.h"
+#include "dev/dev.h"
+#include "platform/files.h"
+#include "platform/logo.h"
+#include "platform/sound.h"
+#include "platform/text.h"
 #include "game/startup.h"
 #include "game/state.h"
-#include "hle/replay.h"
-#include "hle/status.h"
+#include "dev/replay.h"
+#include "dev/status.h"
 #include "launch.h"
 #include "asset.h"
 
@@ -209,10 +211,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
-	if (!hle_init(game, save_env ? save_env : save ? save : ".")) {
-		fprintf(stderr, "cannot map the imports of nanpa2.exe\n");
-		return 1;
-	}
+	files_init(game, save_env ? save_env : save ? save : ".");
 	text_init(font);
 	dev_init();
 	replay_init(save_env ? save_env : save ? save : ".");

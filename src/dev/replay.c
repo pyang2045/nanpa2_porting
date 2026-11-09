@@ -1,5 +1,5 @@
 /* Deterministic mode, recording and replay: see replay.h. */
-#include "replay.h"
+#include "dev/replay.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -7,10 +7,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "clock.h"
+#include "platform/clock.h"
 #include "game/pace.h"
 #include "game/state_view.h"
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 
 #define WM_QUIT_MSG 0x12u
 
@@ -277,7 +281,7 @@ static void checkpoint(int fin)
 
 void replay_pump(void)
 {
-	uint32_t t = win32_timer_ticks();
+	uint32_t t = win_timer_ticks();
 	if (t != cur_tick) {
 		cur_tick = t;
 		cur_k = 0;
@@ -294,11 +298,11 @@ void replay_pump(void)
 			struct rev *e = &revs[next_rev++];
 			if (rec) /* --replay with --record: the same messages, to carry the recording over to a new checkpoint format */
 				fprintf(rec, "ev %u %u %x %x %x\n", cur_tick, cur_k, e->msg, e->wparam, e->lparam);
-			win32_post_message(e->msg, e->wparam, e->lparam);
+			win_post(e->msg, e->wparam, e->lparam);
 		}
 		if (!have_fin && next_rev >= nrevs && next_rcp >= nrcps && !quit_sent) {
 			quit_sent = 1;
-			win32_post_message(WM_QUIT_MSG, 0, 0);
+			win_post(WM_QUIT_MSG, 0, 0);
 		}
 	}
 }

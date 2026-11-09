@@ -37,7 +37,11 @@
 #include "game/pace.h"
 #include "game/file.h"
 #include "game/vm.h"
-#include "hle/hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "game/gmem.h"
 #include "game/state.h"
 
@@ -280,7 +284,7 @@ static int run_handler(int (*fn)(void))
  * block result. */
 static int fetch(void)
 {
-	probe_vm_fetch(vm_pc);
+	game_trace_fetch(vm_pc);
 	ctl_work_us(PACE_OP_US);
 	uint32_t op = vm_script_byte(vm_pc);
 	if (op == VM_BLOCK_END) {

@@ -14,7 +14,7 @@
  * waits in CVDisplayLinkCreateWithCGDisplay / IOServiceOpen inside
  * SDL_Init) still writes a file: phase "init", the desktop state and a
  * warning. The game sections follow once status_init() has run. */
-#include "status.h"
+#include "dev/status.h"
 
 #include <errno.h>
 #include <signal.h>
@@ -31,8 +31,12 @@
 #include <unistd.h>
 #endif
 
-#include "dev.h"
-#include "hle.h"
+#include "dev/dev.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "platform/desktop.h"
 #include "platform/present.h"
 #include "game/state.h"
@@ -72,7 +76,7 @@ static struct snap {
 	uint32_t flags;
 	int w, h, x, y;
 	int focus;
-	int cursor_count, cursor_shown, cursor_over; /* win32_cursor_state */
+	int cursor_count, cursor_shown, cursor_over; /* win_cursor_state */
 	struct present_stats ps;
 } snap;
 
@@ -176,7 +180,7 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 		     now - s->tick, ps->worst_wait_ms);
 		return;
 	}
-	int timer = win32_timer_running(), in_logo = SDL_AtomicGet(&logo);
+	int timer = win_timer_running(), in_logo = SDL_AtomicGet(&logo);
 	if (timer && !in_logo && now - last_frame_change > WATCH_FRAME_MS && (headless || ps->occluded != 1)) {
 		if (!active)
 			warn("timer", "timer stopped: 0x4ac4ec=0 (game deactivated), frame counter %u for %u ms", frame,
@@ -318,7 +322,7 @@ static void write_status(void)
 		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black,
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
 		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
-		now - last_frame_change, active, win32_timer_running(), speed, now - s.tick,
+		now - last_frame_change, active, win_timer_running(), speed, now - s.tick,
 		SDL_AtomicGet(&logo), music, vq, "null", wq, warning_key, warnings, warned);
 	write_json(buf);
 }
@@ -387,7 +391,7 @@ void status_main(void)
 		s.focus = (s.flags & SDL_WINDOW_INPUT_FOCUS) != 0;
 	}
 	present_stats(&s.ps);
-	win32_cursor_state(&s.cursor_count, &s.cursor_shown, &s.cursor_over);
+	win_cursor_state(&s.cursor_count, &s.cursor_shown, &s.cursor_over);
 	SDL_LockMutex(lock);
 	snap = s;
 	SDL_UnlockMutex(lock);

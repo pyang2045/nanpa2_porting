@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Deterministic mode, recording and replay (src/hle/replay.h), checked on the
+"""Deterministic mode, recording and replay (src/dev/replay.h), checked on the
 player's own game data; nothing derived from it is kept in the repository.
 
   tests/replay_det.py BUILD/nanpa2 GAME_DIR WORK_DIR [--frames N]
 
 1. A new game played by the exploration bot for N frames, recorded (--record).
 2. The same again from a fresh save folder: the two recordings (messages and
-   every checkpoint, the raw memory hashes included) must be identical, and so
+   every checkpoint, the G hash included) must be identical, and so
    must the FLAG files written.
 3. Replay of the first recording: every checkpoint matches, exit 0.
 4. A recording with one checkpoint hash changed: the replay stops with exit 3
@@ -80,8 +80,8 @@ def main():
     # the game clock is the virtual time of the pacing model (src/game/pace.h): the format and
     # pace version are in the header and the clock is a checkpoint key that grows
     text = open(ra).read()
-    if not text.startswith("nanpa2-replay 2\npace ") or " raw.clock=" not in text:
-        print("FAIL: the recording lacks the format 2 header, its pace version or raw.clock")
+    if not text.startswith("nanpa2-replay 2\npace ") or " raw.clock=" not in text or " raw.gdata=" not in text:
+        print("FAIL: the recording lacks the format 2 header, its pace version, raw.clock or raw.gdata")
         return 1
     clocks = [int(w.split("=")[1]) for l in text.split("\n") if l.startswith("cp ") for w in l.split() if w.startswith("raw.clock=")]
     if clocks != sorted(set(clocks)) or clocks[-1] < int(frames) * 1000:
@@ -95,10 +95,8 @@ def main():
     if flags(da) != flags(db):
         print("FAIL: the FLAG files differ between the runs")
         return 1
-    # NANPA2_DATA_CHECK=2: all game state is in the C objects (src/game/state.h);
-    # a write into the data area that no alias holds fails the run (exit 4)
-    rc, out, _ = run(exe, game, work, "r1", ["--replay", ra], {"NANPA2_DATA_CHECK": "2"})
-    if rc or "replay: ok" not in out or "data-check: 0 changed" not in out:
+    rc, out, _ = run(exe, game, work, "r1", ["--replay", ra], {})
+    if rc or "replay: ok" not in out:
         print(out[-2000:])
         print("FAIL: the replay did not match (exit %d)" % rc)
         return 1

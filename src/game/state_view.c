@@ -4,7 +4,7 @@
 
 #include "game/state.h"
 #include "game/vm.h"
-#include "hle/replay.h"
+#include "dev/replay.h"
 
 void state_save_export(uint8_t out[STATE_SAVE_SIZE])
 {

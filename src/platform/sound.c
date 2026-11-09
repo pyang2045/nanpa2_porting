@@ -26,7 +26,11 @@
  * Dev hook: NANPA2_AUDIO_DUMP=out.wav writes the mixed output (44100 Hz
  * S16 stereo) to a WAV file. Without an audio device the SDL dummy driver
  * runs the mixer in real time, so the dump and game timing are the same. */
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 
 #include <SDL.h>
 #include <math.h>
@@ -37,7 +41,7 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3_ex.h"
 
-#include "dev.h"
+#include "dev/dev.h"
 #include "fsys.h"
 
 #define RATE 44100

@@ -59,19 +59,18 @@ set(SOURCES
   src/fsys.c
   src/asset.c
   src/trap.c
-  src/hle/hle.c
-  src/platform/files.c
-  src/hle/win32.c
-  src/hle/clock.c
+    src/platform/files.c
+  src/platform/window.c
+  src/platform/clock.c
   src/platform/surface.c
-  src/hle/text.c
-  src/hle/logo.c
+  src/platform/text.c
+  src/platform/logo.c
   src/cinepak.c
-  src/hle/sound.c
-  src/hle/dev.c
-  src/hle/replay.c
-  src/hle/explore.c
-  src/hle/status.c
+  src/platform/sound.c
+  src/dev/dev.c
+  src/dev/replay.c
+  src/dev/explore.c
+  src/dev/status.c
   ${GAME_SOURCES}
 )
 
@@ -166,7 +165,7 @@ add_test(NAME selftest COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1 NANPA2_
   "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/selftest-saves" $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
 set_tests_properties(selftest PROPERTIES TIMEOUT 30
   FIXTURES_REQUIRED selftest_dir PASS_REGULAR_EXPRESSION "save selftest: ok"
-  FAIL_REGULAR_EXPRESSION "MISMATCH|x86 trap")
+  FAIL_REGULAR_EXPRESSION "MISMATCH|game trap")
 add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
 set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
 

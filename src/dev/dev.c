@@ -19,19 +19,23 @@
  *   NANPA2_SPEED=N  run the game N times faster than the original (clock.c; 0 = as
  *       fast as the host can; NANPA2_TURBO is the old name), for long scripted runs
  *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
-#include "dev.h"
+#include "dev/dev.h"
 
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "explore.h"
+#include "dev/explore.h"
 #include "game/file.h"
 #include "game/state.h"
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "platform/present.h"
-#include "replay.h"
+#include "dev/replay.h"
 
 static const char *shot_dir;
 static uint32_t shot_start, shot_interval, shot_count, shot_done;
@@ -298,25 +302,25 @@ void dev_inject(void)
 				RT(frame));
 		uint32_t lp = ((uint32_t)e->y << 16) | (uint32_t)e->x;
 		if (!strcmp(e->kind, "move")) {
-			win32_post_ext(0x200, 0, lp);
+			win_post_ext(0x200, 0, lp);
 		} else if (!strcmp(e->kind, "click") || !strcmp(e->kind, "down")) {
-			win32_post_ext(0x200, 0, lp);
-			win32_post_ext(0x201, 1, lp);
+			win_post_ext(0x200, 0, lp);
+			win_post_ext(0x201, 1, lp);
 		} else if (!strcmp(e->kind, "up")) {
-			win32_post_ext(0x202, 0, lp);
+			win_post_ext(0x202, 0, lp);
 		} else if (!strcmp(e->kind, "rclick")) {
-			win32_post_ext(0x200, 0, lp);
-			win32_post_ext(0x204, 2, lp);
+			win_post_ext(0x200, 0, lp);
+			win_post_ext(0x204, 2, lp);
 		} else if (!strcmp(e->kind, "rup")) {
-			win32_post_ext(0x205, 0, lp);
+			win_post_ext(0x205, 0, lp);
 		} else if (!strcmp(e->kind, "key")) {
-			win32_post_ext(0x100, (uint32_t)e->x, 0);
+			win_post_ext(0x100, (uint32_t)e->x, 0);
 		} else if (!strcmp(e->kind, "keyup")) {
-			win32_post_ext(0x101, (uint32_t)e->x, 0);
+			win_post_ext(0x101, (uint32_t)e->x, 0);
 		} else if (!strcmp(e->kind, "shot")) {
 			ev_shot_pending = 1;
 		} else if (!strcmp(e->kind, "quit")) {
-			win32_post_ext(0x12, 0, 0);
+			win_post_ext(0x12, 0, 0);
 		}
 	}
 }

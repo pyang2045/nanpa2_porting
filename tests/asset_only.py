@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""nanpa2.dat (src/x86/asset.c, docs/reimpl.md "The asset"): the engine runs
+"""nanpa2.dat (src/asset.c, docs/reimpl.md "The asset"): the engine runs
 from the asset alone.
 
 1. `nanpa2 --make-assets` cuts the asset from the exe; it must be a valid
@@ -7,8 +7,9 @@ from the asset alone.
    its bytes may be a 64-byte run of that code (or of the rest of .text);
 2. a game folder without nanpa2.exe (symlinks to the real one) and with the
    asset in it runs headless to a scripted point on game time
-   (NANPA2_INPUT_CLOCK=frames) with no trap, and its screenshots and HLE call trace equal
-   those of the same run with the whole exe loaded (NANPA2_INTERP=1);
+   (NANPA2_INPUT_CLOCK=frames) with no trap, and its screenshots and its recording (every
+   checkpoint: screen, palette, saved state, files opened, the G hash, the game clock) equal
+   those of the same run with the whole exe's data loaded (NANPA2_LOAD_EXE=1);
 3. a folder with the exe and no asset makes one at the first launch;
 4. a folder with neither stops with a clear message.
 
@@ -49,14 +50,17 @@ def run(name, gamedir, extra=None, quit_ms=None, timeout=300, shots=False):
     save = os.path.join(scratch, name + "-save")
     os.makedirs(save, exist_ok=True)
     env = dict(os.environ, NANPA2_HEADLESS="1", NANPA2_SAVE_DIR=save, NANPA2_INPUT_CLOCK="frames",
-               NANPA2_HLETRACE="1", **(extra or {}))
+               NANPA2_CP_TICKS="100", **(extra or {}))
     if quit_ms:
         env["NANPA2_INPUT"] = "quit,%d" % quit_ms
     if shots:
         env["NANPA2_SHOT_DIR"] = os.path.join(scratch, name + "-shots")
         os.makedirs(env["NANPA2_SHOT_DIR"], exist_ok=True)
         env["NANPA2_SHOT_SCHEDULE"] = "4000,4000,5"
-    p = subprocess.run([exe, "--game", gamedir], env=env, capture_output=True, text=True, timeout=timeout)
+    args = [exe, "--game", gamedir]
+    if shots:
+        args += ["--record", os.path.join(scratch, name + ".rec")]
+    p = subprocess.run(args, env=env, capture_output=True, text=True, timeout=timeout)
     return p
 
 
@@ -94,28 +98,28 @@ shutil.copy(asset, os.path.join(hidden, "nanpa2.dat"))
 whole = folder("whole", True)
 trace = {}
 digests = {}
-for name, d, extra in (("asset", hidden, {}), ("exe", whole, {"NANPA2_INTERP": "1"})):
+for name, d, extra in (("asset", hidden, {}), ("exe", whole, {"NANPA2_LOAD_EXE": "1"})):
     p = run(name, d, extra, quit_ms=24000, shots=True)
-    if p.returncode != 0 or "x86 trap" in p.stderr or "WARNING" in p.stderr:
+    if p.returncode != 0 or "game trap" in p.stderr or "WARNING" in p.stderr:
         fail("%s run: exit %d\n%s" % (name, p.returncode, p.stderr[-1500:]))
     want = "assets: " + os.path.join(d, "nanpa2.dat") if name == "asset" else "loaded whole"
     if want not in p.stderr:
         fail("%s run did not log %r" % (name, want))
-    trace[name] = [ln for ln in p.stderr.splitlines() if ln.startswith("hle ") and not ln.startswith("hle 00401bf0")
-                   and not ln.startswith("hle 00402c70")]
+    trace[name] = [ln for ln in open(os.path.join(scratch, name + ".rec")).read().splitlines()
+                   if ln.startswith(("cp ", "fin ", "ev "))]
     shots = sorted(os.listdir(os.path.join(scratch, name + "-shots")))
     digests[name] = [hashlib.md5(open(os.path.join(scratch, name + "-shots", s), "rb").read()).hexdigest()
                      for s in shots]
-if len(trace["asset"]) < 200 or len(digests["asset"]) < 3:
-    fail("too little traced: %d calls, %d screenshots" % (len(trace["asset"]), len(digests["asset"])))
+if len(trace["asset"]) < 6 or len(digests["asset"]) < 3:
+    fail("too little recorded: %d lines, %d screenshots" % (len(trace["asset"]), len(digests["asset"])))
 if trace["asset"] != trace["exe"]:
     for i, (x, y) in enumerate(zip(trace["asset"], trace["exe"])):
         if x != y:
-            fail("HLE traces differ at call %d: asset %s, exe %s" % (i, x, y))
-    fail("HLE trace lengths differ: %d, %d" % (len(trace["asset"]), len(trace["exe"])))
+            fail("recordings differ at line %d: asset %s, exe %s" % (i, x[:200], y[:200]))
+    fail("recording lengths differ: %d, %d" % (len(trace["asset"]), len(trace["exe"])))
 if digests["asset"] != digests["exe"]:
     fail("screenshots differ: %s vs %s" % (digests["asset"], digests["exe"]))
-print("asset-only run: %d HLE calls and %d screenshots equal those of the whole-exe run" %
+print("asset-only run: %d recorded lines and %d screenshots equal those of the whole-exe run" %
       (len(trace["asset"]), len(digests["asset"])))
 
 # ---- 3. first launch with the exe makes the asset

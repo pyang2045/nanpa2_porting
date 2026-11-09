@@ -39,7 +39,7 @@ int replay_replaying(void);  /* host input, scripts and the bot are off */
 void replay_init(const char *save_dir);
 /* Virtual milliseconds: instructions run / 25000 */
 uint64_t replay_ms(void);
-/* In win32_pump, after the timer ran and before host events are taken:
+/* In win_pump, after the timer ran and before host events are taken:
  * counts pumps, posts due recorded messages, takes due checkpoints. */
 void replay_pump(void);
 /* A message from outside the game (host, script, bot): recorded. Returns 0

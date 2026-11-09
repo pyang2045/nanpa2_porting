@@ -8,7 +8,11 @@
 
 #include "game/ctl.h"
 #include "game/state.h"
-#include "hle/hle.h"
+#include "game/gmem.h"
+#include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/text.h"
+#include "platform/window.h"
 #include "platform/surface.h"
 #include "platform/window.h"
 
