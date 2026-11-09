@@ -22,8 +22,9 @@ static uint64_t cp_ticks = 250;
 static uint32_t cur_tick, cur_k;
 static uint64_t last_cp_idx;
 static char save_root[1024];
-/* NANPA2_REPLAY_CHECK=li[,raw.icount,raw.data,...]: compare only the keys that start
- * with one of the comma-separated prefixes ("li" = every li.* key); unset = all keys */
+/* NANPA2_REPLAY_CHECK=li[,raw.clock,raw.data,...]: compare only the keys that start
+ * with one of the comma-separated prefixes ("li" = every li.* key); unset = all keys;
+ * "none" = replay the messages without any checkpoint comparison */
 static const char *check_keys;
 static int key_checked(const char *tok, size_t kl)
 {
@@ -264,6 +265,8 @@ static void checkpoint(int fin)
 	}
 	if (!replaying)
 		return;
+	if (check_keys && !strcmp(check_keys, "none"))
+		return; /* messages only: recorded input on a build with other timing */
 	size_t at = next_rcp;
 	if (at >= nrcps || rcps[at].fin != fin) {
 		/* the recording has no checkpoint here (a longer run than it) */

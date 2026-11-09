@@ -13,7 +13,7 @@ reimplementation is then no longer byte for byte the original, the differential 
 | R0 | deterministic mode, recordings with state checkpoints, replay and compare, a golden set | done |
 | R1 | game state in C structs instead of emulated memory | done: all of the data area is one C object; what stays addressed and why is listed below |
 | R2 | ordinary C calls instead of register and stack conventions (`cpu.r[]`, `push32`, `go(ra)`, jump units) | done: see "R2" below |
-| R3 | real-time pacing that keeps the original speed (no per-unit charges) | not started |
+| R3 | real-time pacing that keeps the original speed (no per-unit charges) | done: see "R3" below |
 | R4 | direct calls into the platform layer instead of HLE thunks | not started |
 
 ## R0: deterministic mode, recording and replay
@@ -24,11 +24,12 @@ varied, and the exploration bot and `NANPA2_INPUT` posted their messages at host
 `NANPA2_DETERMINISTIC=1` (implied by `--record` and `--replay`) removes every host clock from the
 game's behaviour:
 
-- **The game clock is the instruction count**: `replay_ms()` = `x86_icount / 25000`, a fixed
-  25 MIPS whatever `--cpu-mips` or `NANPA2_TURBO` say (turbo is off in this mode). The timer
-  callback runs from `win32_run_timer` against that clock. `x86_throttle` only sleeps, so a
+- **The game clock is the virtual time** (R0 to R2: the instruction count at a fixed 25 MIPS; since
+  R3 the microseconds of the pacing model, see "R3"): `replay_ms()` = `clock_us() / 1000`, whatever
+  `--speed` says. The timer
+  callback runs from `win32_run_timer` against that clock. the throttle only sleeps, so a
   throttled and an unthrottled run are identical (checked: 1000 frames at 25 MIPS and at
-  `NANPA2_CPU_MIPS=0` give the same file).
+  `NANPA2_CPU_MIPS=0`, the R0 names of speed 1 and 0 give the same file).
 - **Input is taken at pumps, not milliseconds**: scripts (`NANPA2_INPUT`, clock forced to the
   game's frame counter) and the exploration bot run at every `win32_pump`; the host event queue
   every 256th. Every message that comes from outside the game goes through `win32_post_ext`.
@@ -72,7 +73,7 @@ file and not the checkpoints. `NANPA2_REPLAY_CHECK=li` compares only the `li.*` 
 
 **Replay** (`--replay FILE` or `NANPA2_REPLAY`): all outside sources are off (host input,
 scripts, the bot; only a window close is honoured), the recorded messages are posted at their
-tick and pump, the throttle is off unless `--cpu-mips` is given, and every checkpoint is compared
+tick and pump, the throttle is off unless `--speed` is given, and every checkpoint is compared
 with the recorded one. The first difference stops the run with exit code 3:
 
     replay: DIVERGED at checkpoint 2 (tick 750 pump 0): li.screen golden=... live=...
@@ -305,13 +306,142 @@ calls that became direct C calls and the stack garbage that parameterless thunks
 | differential harness, fuzzers, lockstep, the recomp backend, `tools/recomp.py`, `tools/liveness.py`, `tools/reimpl_status.py`, the x86 interpreter | removed (nothing runs native game code; the units are no longer register-level functions an oracle could be compared with). `NANPA2_FROZEN_TESTS` is gone |
 | golden replays | the check; `NANPA2_REPLAY_CHECK` selects keys |
 
-### Left for R3 and R4
+## R3: pacing
 
-- **R3**: replace `COST`/`POLL` and the instruction-count clock by real-time pacing with the original's
-  speed (the timer callback, frame waits, fades, text delay as time); re-record the goldens; drop
-  `x86_icount`, `raw.icount`, the poll countdown and the 25 MIPS model; then `top_esp` and the `ECX/EDX`
-  zeroing go.
+**What it replaced.** Every unit charged the instruction count of the native code it replaced
+(`COST(n)`, and `POLL(at)` for a backward jump, about 900 sites) and the game clock was that count at
+25 MIPS. R3 removes all of it: no `COST`, `POLL`, `X86_COUNT`, `X86_POLL`, `x86_icount`, poll
+countdown, `RT.top_esp` (the word stays in `struct vm_rt` as `unused_top_esp` for the layout), the
+`ECX = EDX = 0` after the pump and its self-test, the CPU save around the window procedure, the
+evaluator's instruction count, the `--cpu-mips` option.
+
+### How the time model was derived
+
+The charges were measured first: a profiling build attributed every charge to its function while
+the four golden runs replayed (newgame 4320 s of game time, town 4800 s, saveload 128 s, menu 640 s).
+Newgame, in seconds of the 4320 (25 MIPS):
+
+| Where | s | Share | What it is |
+|---|---|---|---|
+| `win32_pump` (500 instructions a call, 193 million calls) | 3854 | 89.2 % | the spin of a wait on the 16 ms timer: not work |
+| waits' own loop bodies (`vm_wait_frames`, `vm_input_down`, `game_anim_step`, ...) | 134 | 3.1 % | the same spin: 3.5 % on top of the pump |
+| `vm_eval` (229 instructions a call, 17.7 million calls) | 162 | 3.8 % | script expressions |
+| `vm_skip_block` (4 to 6 instructions a byte) | 49 | 1.1 % | skipping a block |
+| `TextOutA` (5000 instructions a byte) | 49 | 1.1 % | GDI text, 0.2 ms a glyph |
+| decompression (70 per input byte) | 22 | 0.5 % | GP4 and ANI files |
+| opcode fetch, argument parsing, handlers | about 30 | 0.7 % | about 2 µs an opcode |
+| `game_draw_char` cell copy | 12 | 0.3 % | 8 instructions a pixel |
+| blits (`blit_cost`) | 4 | 0.1 % | |
+| everything in the map, animation steps, cursor, palette, fills | under 3 | under 0.1 % | |
+
+The transitions are timer-paced; the busy work matters only in the few places where the game runs
+between two timer waits. The model (`src/game/pace.h`, each constant an instruction cost / 25) charges
+the pump (21 µs: 500 instructions plus its share of the wait loop), the opcode (2 µs), the expression
+(9 µs), the block skip (1 µs + 0.2 µs a byte), the GDI glyph (200 µs a byte), the character cell
+(n*n/3 µs), the GP4 decode (70 instructions a compressed byte, 1.2 an output byte), the blit (pixels /
+100 µs plain, / 25 keyed), the dissolve pass (25 rows of 260 µs + 6.4 µs a set mask bit, so 7.2 ms on average, 128 passes), the fade
+set-up (290 µs) and one round of the two waits that do not pump (the animation slot wait and the
+fade wait: 1 µs). Applied beside the old charges on the four golden replays the model's game time was
+newgame 4371 s against 4320 (+1.2 %), town 4867 against 4800 (+1.4 %), saveload 126.3 against 128.0
+(-1.3 %), menu 639.4 against 640 (-0.1 %).
+
+The map's busy work (about 2 s of 4800), the cursor, the animation steps, palette work and fills have
+no cost: the walk is paced by its 3-frame wait (48 ms a step before and after).
+
+### The clock
+
+`src/hle/clock.c` keeps the virtual machine time in microseconds, advanced by `ctl_work_us(us)` (game
+code) and one `PACE_PUMP_US` per pump. `ctl_work_us` also keeps the host up: it throttles, runs the timer
+callback if it is due, and presents, services the status file and SDL events at most every 8 ms.
+The 16 ms timer callback, the game's clock, runs against one of two sources:
+
+- **real time x speed** (default, speed 1.0): the game runs at the original's speed. The work costs are
+  made real by sleeping when the virtual time is ahead of the host's (the old throttle, with the
+  budget in virtual microseconds). `--speed X` / `NANPA2_SPEED=X` scales both; `NANPA2_TURBO=N` is
+  the old name.
+- **the virtual time**: deterministic mode (`--record`, `--replay`, `NANPA2_DETERMINISTIC`) and speed 0
+  (as fast as the host can; replays use it unless `--speed` is given). Nothing reads a host clock,
+  so the game's behaviour is a function of its input, as before.
+
+A recording is format 2: `nanpa2-replay 2`, `pace N` (`PACE_VERSION`, bumped when a constant changes,
+since a recording depends on the model), and `raw.clock` (the virtual microseconds) replaces
+`raw.icount`. `NANPA2_REPLAY_CHECK=none` replays the messages without comparing checkpoints (recorded
+input on a build with other timing).
+
+### Measured before and after
+
+The game's own clock in ms (`NANPA2_TIMELOG=1`, one line per fade, wipe, character, step and file
+open; `tools/timing_stats.py`), the same scripted input on 90e7de9 and on the R3 build in deterministic
+mode, which is real seconds at speed 1.0 (and checked in real time, below). The scenario is the load
+path of the saveload golden, `NANPA2_INPUT` events replayed to tick 794, then no button, or a button
+held from tick 800:
+
+| What | 90e7de9 | R3 |
+|---|---|---|
+| palette fade (16 ticks) | 258-272 ms, median 267 | 258-272 ms, median 268 |
+| dissolve wipe, no button | 4094 and 4096 ms | 4094 and 4096 ms |
+| dissolve wipe, button held | 949 ms | 957 ms |
+| title (start1.mes) to the load's open1.mes | 2312 ms | 2329 ms |
+| first line of OPEN1, 8 characters (TextOut + cell, no delay) | 4 ms | 5 ms |
+| a text window of 40 or more characters (bot runs, 1896 against 2242 windows) | median 709 ms | median 703 ms |
+| a step of the player in the town | 48 ms (3 frames) | 48 ms |
+| whole load scenario to the first wipe | 12811 ms | 12798 ms |
+
+In real time (non-deterministic, `NANPA2_SPEED=1`, headless, the same script): the first dissolve took
+4094 ms by the host clock, the 18.5 s of game time took 18.7 s (0.98x including the 0.2 s start-up).
+
+### Determinism and the goldens
+
+`golden_r3` (kept outside the repository) was recorded on the R3 build with the old bot seeds for
+newgame (seed 31, 270000 frames: title, name entry, the Prologue, OPEN1, 70 MES files) and saveload (seed
+41, 8000 frames: the load into OPEN1), which still cover the same ground, and with new seeds for the other
+two, because the bot's choices depend on pump counts and the old seeds no longer reach the town or the
+S46-S53 menus: town (seed 48, 330000 frames: TOWN.MES at
+frame 135623, 39.MES, IZUMI, PARA_SUB, the player walking by mouse) and menu (seed 46, 40000 frames: S46-S53). Each replays twice,
+every checkpoint matching with all keys (`li.*`, `raw.clock`, `raw.data`, `raw.heap`, ...), the two
+replays recording identical files; `NANPA2_DATA_CHECK` reports 0 ranges. `replay_det` (ctest) now
+records twice, compares the recordings and the FLAG files, replays, and checks the two tampered recordings
+diverge.
+
+### Content, not timing
+
+`tools/replay_diff.py --sequence A.rec B.rec [--logs A.log B.log]` compares two recordings by what the
+game went through rather than when: the cumulative MES chain (`li.mes`), the distinct FLAG states, the
+quiescent screens as a longest common subsequence, and the names of the MES files from `NANPA2_TIMELOG`
+logs. Result against the golden_r2 runs:
+
+- saveload (same bot seed, same path): the 3 MES files, the FLAG state, all 3 quiescent screens and the
+  last screen and palette are identical.
+- The old recordings' messages replayed on the R3 build (`NANPA2_REPLAY_CHECK=none`) stay in step for the
+  first 12 MES files in newgame and town (title, name entry, S1 on) and 9 in menu, then desynchronise:
+  the messages are at tick and pump, and the pump counts of a wait differ by a few percent. That is the
+  limit of comparing by input.
+- The exploration bot makes its choices from the pump count, so its long runs take other paths with
+  the new clock (newgame, same seed, shares the first 16 MES files with the old run and then differs, for
+  example S10 -> S12 where the old took S10 -> S11). Over the four sets the R3 runs open 90 distinct MES
+  files and 137 transitions, the old 77 and 112. These runs are different plays, so they can neither
+  show nor rule out a content difference.
+- The charge removal itself was reviewed as a diff: about 900 deleted statements, all whole-line `COST`,
+  `POLL`, `X86_COUNT`, `X86_POLL` (none with a side effect in its argument), and 18 `if (cond)` lines whose only body was a
+  deleted charge. No other line of the game logic changed, except the animation slot wait and the
+  fade wait, which gained `ctl_work_us(PACE_SPIN_US)`: they spin without a pump on a flag the timer
+  callback sets, and the timer used to run from the polls they no longer have.
+
+### Left for R4 and later
+
+- `hle_invoke`, the C runtime and Win32 thunks, the emulated stack, heap and address space (R4).
+- The `native_pc` and `exit_pc`/`loop_pc` parameters of the opcode helpers in ops.c, ops_sys.c and
+  ops_vm.c are documentation of native jump targets that nothing uses now; remove with the opcode
+  tables' native addresses.
+- `RT.unused_top_esp` and the other native words nothing reads (`raw.data` covers them).
+- The map code still carries the byte-offset indexing for the unchecked-index behaviour (R1).
+- A per-opcode cost proportional to the expression's length (the evaluator's 229 instructions average
+  hides a range 6 to 200) if the script loops ever feel off; the model's constants are in one file.
+
+### Left for R4
+
 - **R4**: replace `hle_invoke` and the thunks by direct calls (FILE handles as `FILE *`, surfaces as
   platform objects, COM objects gone), then the emulated stack, heap and address space can go: `G`
   stops being aliased and its pointer-valued fields (segment bases, animation `start`/`pc`,
   locked pixel pointers) become indices or C pointers with conversion at the FLAG save and load.
+  R3's leftovers are listed at the end of the R3 section.

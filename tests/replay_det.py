@@ -13,6 +13,9 @@ player's own game data; nothing derived from it is kept in the repository.
    and names the checkpoint and the key that differs.
 5. The recording with a click left out: the replay diverges.
 
+The clock is the pacing model's virtual time (R3): the header carries the pace version and every
+checkpoint `raw.clock`, which advances at least 1 ms a frame.
+
 Exit codes: 0 pass, 77 skip (no game folder), 1 failure.
 """
 import os
@@ -73,6 +76,16 @@ def main():
     n_ev = sum(1 for l in open(ra) if l.startswith("ev "))
     if n_cp < 3 or n_ev < 20:
         print("FAIL: the recording is too short (%d messages, %d checkpoints)" % (n_ev, n_cp))
+        return 1
+    # the game clock is the virtual time of the pacing model (src/game/pace.h): the format and
+    # pace version are in the header and the clock is a checkpoint key that grows
+    text = open(ra).read()
+    if not text.startswith("nanpa2-replay 2\npace ") or " raw.clock=" not in text:
+        print("FAIL: the recording lacks the format 2 header, its pace version or raw.clock")
+        return 1
+    clocks = [int(w.split("=")[1]) for l in text.split("\n") if l.startswith("cp ") for w in l.split() if w.startswith("raw.clock=")]
+    if clocks != sorted(set(clocks)) or clocks[-1] < int(frames) * 1000:
+        print("FAIL: raw.clock does not advance with the frames (%s ...)" % clocks[:3])
         return 1
     p = subprocess.run([sys.executable, diff, ra, rb], capture_output=True, text=True)
     print(p.stdout.strip())
