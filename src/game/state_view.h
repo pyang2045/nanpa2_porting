@@ -12,6 +12,11 @@
 /* The image the save file holds: script name, flags, registers, work words */
 #define STATE_SAVE_SIZE 0xc00u
 void state_save_image(uint8_t out[STATE_SAVE_SIZE]);
+/* Hash of the whole of G (the data area, 0x431000-0x4c0000) with the fields that hold values of
+ * the platform (handles, pixel pointers, the DirectDraw lock descriptor) zeroed first, so that
+ * the hash depends on the game's state and not on how the platform names its objects (R4,
+ * docs/refactor.md "The G hash"). */
+uint64_t state_data_hash(void);
 /* The game's frame counter */
 uint32_t state_frame(void);
 

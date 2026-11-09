@@ -192,6 +192,7 @@ static int build_cp(char *out, size_t cap)
 	ADD(" li.vm=%" PRIu64 "/%" PRIx64, vm_ops, vm_last);
 	ADD(" li.flags=%d/%016" PRIx64, nsaves, sv);
 	ADD(" raw.clock=%" PRIu64, (uint64_t)clock_us());
+	ADD(" raw.gdata=%016" PRIx64, state_data_hash());
 	ADD(" raw.cpu=%016" PRIx64, replay_hash(&cpu.r[0], sizeof cpu.r, 0));
 	static uint8_t data[DATA_HI - DATA_LO];
 	x86_read_virtual(DATA_LO, data, sizeof data);
@@ -312,6 +313,8 @@ void replay_pump(void)
 		while (next_rev < nrevs &&
 		       (revs[next_rev].tick < cur_tick || (revs[next_rev].tick == cur_tick && revs[next_rev].k <= cur_k))) {
 			struct rev *e = &revs[next_rev++];
+			if (rec) /* --replay with --record: the same messages, to carry the recording over to a new checkpoint format */
+				fprintf(rec, "ev %u %u %x %x %x\n", cur_tick, cur_k, e->msg, e->wparam, e->lparam);
 			win32_post_message(e->msg, e->wparam, e->lparam);
 		}
 		if (!have_fin && next_rev >= nrevs && next_rcp >= nrcps && !quit_sent) {
