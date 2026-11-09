@@ -78,17 +78,16 @@ void game_palette_copy_regs(void)
 
 /* the blit of a rectangle record {x0, y0, w, h, dx, dy} (u16 each, the
  * surfaces in the cdecl's seventh argument as 0x100: surface 1 to 0) */
-static void blit(void (*fn)(void), uint32_t rect)
+static void blit(int masked, uint32_t rect)
 {
 	cpu.r[EDI] = rect;
-	push32(0x100);
+	uint32_t v[6];
 	for (int i = 5; i >= 0; i--) {
 		set16(EAX, rd16(rect + 2u * (uint32_t)i));
-		push32(cpu.r[EAX]);
+		v[i] = cpu.r[EAX];
 	}
 	X86_COUNT(17);
-	fn();
-	cpu.r[ESP] += 0x1c;
+	(masked ? game_blit_masked : game_blit_copy)(v[0], v[1], v[2], v[3], v[4], v[5], 1, 0);
 	X86_COUNT(1);
 }
 
@@ -165,7 +164,7 @@ void game_anim_run_slot(void)
 		case ANI_MASKED: {
 			uint32_t rect = ANIM_DATA + rd16(pc);
 			cpu.r[EBX] = pc + 2;
-			blit(op == ANI_COPY ? game_blit_copy : game_blit_masked, rect);
+			blit(op != ANI_COPY, rect);
 			wr32(slot + SLOT_PC, cpu.r[EBX]);
 			X86_COUNT(2);
 			X86_POLL(op == ANI_COPY ? 0x403787 : 0x4037c8);

@@ -125,11 +125,8 @@ HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
 /* Stage 4: the text, the animation slots and the palette copy
  * (src/game/text.c, anim.c); 0x403510 leaves sub-op 4 (run a slot to its
  * end, spinning on the frame counter) to the original */
-HLE_GAME_OVERRIDE(0x401900, "draw one character (src/game/text.c)")
 HLE_GAME_OVERRIDE(0x403624, "animation step, once a frame (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x403661, "run one animation slot (src/game/anim.c)")
-HLE_GAME_OVERRIDE(0x4063ee, "text cursor advance (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x406b24, "clear the text window (src/game/text.c)")
 HLE_GAME_OVERRIDE(0x406dff, "reset the animation slots (src/game/anim.c)")
 HLE_GAME_OVERRIDE(0x40752c, "copy a picture palette (src/game/anim.c)")
 
@@ -255,14 +252,12 @@ HLE_GAME_JUMP(0x4035b5, "animation slot wait loop (src/game/anim.c)")
 HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
 HLE_GAME_CALL_EXIT(0x4070b6, "op 1a: slot control (0x403510)")
 /* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
-HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
 
 /* Stage 5B (src/game/screen.c): the surface lock and unlock and the cursor
  * restore, which native code (the map, the window procedure) still calls.
  * The other screen routines (cursor draw, show, hide, blits, fill, XOR,
  * palette, fades) are called only from C and have no override. */
 HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
-HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
 
 /* Stage 5B startup/input/file (src/game/file.c): the file routines, called
@@ -284,10 +279,7 @@ HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
 
 /* Stage 6: the dissolve wipe (src/game/wipe.c): op 19 sub-op 4 calls it as a
  * call exit (return 0x40738b), it pumps messages in between (0x401b90) */
-HLE_GAME_JUMP(0x401a50, "dissolve wipe (src/game/wipe.c)")
-HLE_GAME_JUMP(0x401b90, "dissolve wipe: after the pump")
 HLE_GAME_JUMP(0x40738b, "op 19 4: after the wipe")
-HLE_GAME_CALL_EXIT(0x401b90, "dissolve wipe: pump messages (0x401bf0)")
 HLE_GAME_CALL_EXIT(0x40738b, "op 19 4: the dissolve wipe (0x401a50)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
@@ -298,7 +290,6 @@ HLE_GAME_CALL_EXIT(0x40738b, "op 19 4: the dissolve wipe (0x401a50)")
  * is inside the script hit test 0x4071a4 with edi = its rectangle table
  * (NANPA2_HOTSPOTS=1; its C handler in src/game/ops.c fires it too). */
 HLE_PROBE(0x40616e, "script VM opcode fetch")
-HLE_PROBE(0x401a50, "wipe entry")
 HLE_PROBE(0x40738b, "wipe return in opcode 0x407386")
 HLE_PROBE(0x4062ff, "ASCII character draw")
 HLE_PROBE(0x40636d, "Big5 character draw")

@@ -191,8 +191,10 @@ uint32_t game_op_anim(void);            /* 1a 0x407096 */
 uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
 uint32_t game_op_wipe_done(void);        /* 0x40738b */
-uint32_t game_wipe(void);                /* 0x401a50, src/game/wipe.c */
-uint32_t game_wipe_pumped(void);         /* 0x401b90 */
+/* src/game/wipe.c: the dissolve wipe 0x401a50 (surface s1 over s0); the piece wrapper runs it
+ * from op 19 sub-op 4's handler and goes on at next_pc with EAX the result */
+uint32_t game_wipe(uint32_t s0, uint32_t s1);
+uint32_t game_wipe_piece(uint32_t s0, uint32_t s1, uint32_t next_pc);
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
 uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
@@ -200,37 +202,43 @@ uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
 /* ---- src/game/screen.c (stage 5B): palette and fades ---- */
 void game_palette_save(void);           /* 0x40756c */
 void game_palette_restore(void);        /* 0x407599 */
-void game_palette_fill(uint32_t v);     /* 0x40754d */
+void game_palette_fill(uint16_t v);     /* 0x40754d */
 void game_palette_upload(void);         /* 0x401ca0 */
-void game_fade_start(void);             /* 0x401d30 */
+uint32_t game_fade_start(void);         /* 0x401d30; the last blue distance (EAX) */
 uint32_t game_fade_active(void);        /* 0x401e10 */
-uint32_t game_palette_wait_piece(void); /* 0x406f41: 04 16 3 waits for the fade */
+void game_palette_wait(void);           /* 0x406f41: 04 16 3 waits for the fade, restores the tables */
 
-/* surfaces, cursor, rectangles (cdecl arguments at ESP, results in EAX) */
-void game_lock_regs(void);              /* 0x401190 */
+/* surfaces, cursor, rectangles (screen.c). Surface arguments of the lock and unlock are the
+ * DirectDraw objects (guest addresses); the pixel pointer is a guest address (x86_ptr). */
+uint32_t game_surface_lock(uint32_t surf);    /* 0x401190 */
+uint32_t game_surface_unlock(uint32_t surf);  /* 0x4012b0; EAX as the routine leaves it */
+void game_lock_regs(void);              /* 0x401190, cdecl at ESP: map_draw.c's game_ncall */
 void game_unlock_regs(void);            /* 0x4012b0 */
-uint32_t game_surface_lock(uint32_t surf);
-void game_surface_unlock(uint32_t surf);
+uint32_t game_frame_alloc(uint32_t bytes); /* scratch on the emulated stack for the HLE boundary */
+void game_frame_free(uint32_t bytes);
 void game_cursor_restore(void);         /* 0x4011f0 */
-void game_cursor_restore_regs(void);
-void game_cursor_draw(void);            /* 0x4012e0 */
+uint32_t game_cursor_draw(void);        /* 0x4012e0; the cursor's x (EAX) */
 void game_cursor_show(void);            /* 0x401c40 */
 void game_cursor_hide(void);            /* 0x401c60 */
-void game_cursor_setpos(void);          /* 0x401c80 (cdecl x, y) */
-void game_blit_copy(void);              /* 0x401430 (dx, dy, sx, sy, w, h, surfaces) */
-void game_blit_masked(void);            /* 0x4014f0 */
-void game_blit_swap(void);              /* 0x401670 */
-void game_fill_rect(void);              /* 0x4017b0 (x, y, w, h, colour << 4, surface) */
-void game_xor_rect(void);
-void game_picture_load(void);           /* 0x406e20, ECX = load the file named by arg 0 */               /* 0x401870 */
+void game_cursor_setpos(uint32_t x, uint32_t y); /* 0x401c80 */
+/* the rectangles: (dx, dy, sx, sy, w, h) as 32-bit words the handler computed, surfaces src, dst */
+void game_blit_copy(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                    uint8_t src, uint8_t dst);   /* 0x401430 */
+void game_blit_masked(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                      uint8_t src, uint8_t dst); /* 0x4014f0 */
+void game_blit_swap(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                    uint8_t src, uint8_t dst);   /* 0x401670 */
+void game_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colour,
+                    uint32_t surf);              /* 0x4017b0, colour << 4 */
+void game_xor_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colour,
+                   uint32_t surf);               /* 0x401870 */
+uint32_t game_picture_load(int named);  /* 0x406e20: named = load the file named by arg 0; EAX of the last unlock */
 
 /* ---- src/game/text.c ---- */
-void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
-                    uint32_t bg);       /* 0x401900 */
-void game_draw_char_regs(void);
+void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t fg, uint8_t bg); /* 0x401900 */
 void game_text_advance(void);           /* 0x4063ee */
 void game_text_newline(void);           /* 0x406415 */
-void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
+void game_clear_text_window(uint32_t colour); /* 0x406b24, colour << 4 (the fill's) */
 
 /* ---- src/game/anim.c ---- */
 void game_anim_step(void);              /* 0x403624 */
