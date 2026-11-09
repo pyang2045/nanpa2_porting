@@ -1356,3 +1356,7 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
 - `no_game_bytes` also looks for every 16-byte run (8 or more different values) of the exe's .data in the
   binary; the allowed ones are the file-name constants (`start.mes`, `flag0`, `MUSIC\%02d.*`, `SPEECH\A\A10930.WAV`).
   `asset_only` checks the range list and size and that a version 2 file is still used.
+
+- `no_game_bytes` 16-byte check: it also failed on the app's libSDL3.dylib, which holds the 16-bit ramp 0, 4, 8, ...
+  that the exe's MP3 library data has (.data 0x4a7c46). Linear ramps (computed tables) are now left out of the 16-byte
+  check as they are of the 64-byte one; our own binaries are still scanned for every other run.
