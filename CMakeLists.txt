@@ -26,6 +26,7 @@ set(NANPA2_PYTHON "${_py}" CACHE FILEPATH "Python for the tests")
 # Game logic reimplemented in C (docs/reimpl.md), without SDL or HLE
 # dependencies, so the differential replay links it alone.
 set(GAME_SOURCES
+  src/game/ctl.c
   src/game/expr.c
   src/game/vm.c
   src/game/ops.c
