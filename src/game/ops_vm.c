@@ -1,300 +1,242 @@
 /*
- * Opcode handlers that run a block, a script or a wait (jump units split
- * at their calls, stage 3).
+ * Opcode handlers that run a block, a script or a wait (R2: direct style).
  *
- * The native handlers of if (0f), while (04 10), call label (13), call
- * offset (14), wait (11, 16) and the menu loop (04 13) call into the VM
- * itself (0x4061cd runs a block, 0x4060f9 a script from ESI) or into
- * routines that pump messages and wait on the timer. Their C versions do
- * not run those: at such a call they do what the native `call` does, push
- * the return address and give the dispatcher the callee's address
- * (call_exit). The block, script or wait then runs natively, once, on the
- * emulated stack, and returns to the return address, where the rest of the
- * handler is a jump unit of its own (game_op_if_then is 0f after its
- * block). No host frames are left under a running block, so the VM's
- * stack resets (04 1e, the quit path 0x40638d) need nothing special, and
- * under the differential test a piece's oracle ends at the same call
- * (HLE_GAME_CALL_EXIT, src/hle/overrides.h), so no block or wait runs
- * twice.
+ * The native handlers of if (0f), while (04 10), call label (13), call offset
+ * (14), wait (11, 16), the menu loop (04 13), the MES-file ops (04 1e, 04 1f,
+ * 04 21) and the number printer (15) call into the VM itself (0x4061cd runs a
+ * block, 0x4060f9 a script from ESI) or into routines that pump messages and
+ * wait on the timer. They were jump units split at each such call; they are
+ * ordinary C functions now: a block or script is a nested call of vm_loop()
+ * (src/game/loop.c), a wait a C loop that pumps, and what the native handler
+ * kept on its stack (the statement's pc) is a local.
  *
- * Each piece's contract: in, the registers the native code there reads
- * (ESI, and after a block AL, its result: 0 end, 1 continue, 2 break);
- * out, ESI and, where the piece can `ret` out of the running block, AL.
- * A jump back to the handler's own entry or to another piece ends a piece
- * too (the dispatcher goes on there), as it ends the oracle.
+ * Contract of a handler: it is entered with vm_pc past the opcode bytes and
+ * returns -1 (on with the loop) or the block result AL (0 end, 1 continue, 2
+ * break) that the native `ret` out of the running block leaves.
  *
  * Semantics: re-notes.md "Script opcodes".
  */
+#include "game/ctl.h"
 #include "game/file.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 #include "game/state.h"
 
-#define RUN_BLOCK 0x4061cdu  /* inc esi; call 0x4060f9: the block at ESI (its 01) */
-#define WAIT_CLICK 0x406acc  /* wait for a click or Enter, pressed then released */
-#define WAIT_FRAMES 0x4075c6 /* ECX/4 + 1 frames, pumping and animating */
-
-/* the native `call target` with return address ra */
-static uint32_t call_exit(uint32_t target, uint32_t ra)
-{
-	push32(ra);
-	X86_COUNT(1);
-	return target;
-}
-
 /* `jmp 0x4060f9` (or a jcc) at native_pc: backward, so it polls */
-static uint32_t loop_at(uint32_t native_pc)
+static int loop_at(uint32_t native_pc)
 {
-	X86_POLL(native_pc);
-	return VM_LOOP;
+	POLL(native_pc);
+	return -1;
 }
 
-/* call 0x4061d4: skip the block at pc; AX = 0 (the depth counter) */
+/* call 0x4061d4: skip the block at pc; the depth counter is gone (AX = 0) */
 static uint32_t skip(uint32_t pc)
 {
 	pc = vm_skip_block(pc);
-	cpu.r[EAX] &= 0xffff0000u;
-	X86_COUNT(1);
+	COST(1);
 	return pc;
 }
 
 /* 0f expr 01 ... 00 [02 0f expr 01 ... 00]... [02 01 ... 00]: if, else
  * if, else. The condition is the low word of the value (`cmp ax, 0`). A
- * true condition runs its block (on to game_op_if_then); a false one skips
- * it, then 02 0f goes back to the entry for the next condition, 02 alone
- * runs the else block (on to game_op_if_else), anything else ends the
- * statement with AL = 0. */
-uint32_t game_op_if(void)
+ * true condition runs its block, then skips the else parts; a false one skips
+ * the block, then 02 0f goes back to the entry for the next condition, 02
+ * alone runs the else block, anything else ends the statement. A block that
+ * ended with continue or break (AL 1 or 2) returns from the running block
+ * with it. */
+int vm_op_if(void)
 {
-	uint32_t pc = cpu.r[ESI];
-	uint32_t v = vm_eval(&pc);
-	cpu.r[EAX] = v;
-	X86_COUNT(3);
-	if (v & 0xffff) {
-		cpu.r[ESI] = pc;
-		return call_exit(RUN_BLOCK, 0x4065ae);
+	for (;;) {
+		uint32_t pc = vm_pc;
+		uint32_t v = vm_eval(&pc);
+		COST(3);
+		if (v & 0xffff) {
+			vm_pc = pc;
+			COST(1); /* call 0x4061cd */
+			int al = vm_run_block();
+			/* 0x4065ae: skip one else part (02 + block) per round */
+			for (;;) {
+				pc = vm_pc;
+				COST(2);
+				if (vm_script_byte(pc) != VM_SEPARATOR)
+					break;
+				vm_pc = skip(pc);
+				COST(1);
+				POLL(0x4065c5);
+				al = 0;
+			}
+			COST(1);
+			if (!(al & 0xff))
+				return loop_at(0x4065b9);
+			COST(1);
+			return al;
+		}
+		pc = skip(pc);
+		COST(3);
+		if (vm_script_byte(pc) != VM_SEPARATOR) {
+			vm_pc = pc;
+			return loop_at(0x4065d5);
+		}
+		pc++;
+		COST(2);
+		if (vm_script_byte(pc) == VM_IF) {
+			vm_pc = pc + 1;
+			COST(2);
+			POLL(0x4065e6);
+			continue; /* the handler's entry: the next condition */
+		}
+		vm_pc = pc;
+		COST(1); /* call 0x4061cd */
+		int al = vm_run_block();
+		COST(2); /* 0x4065ed: after the else block */
+		if (!(al & 0xff))
+			return loop_at(0x4065ef);
+		COST(1);
+		return al;
 	}
-	pc = skip(pc);
-	cpu.r[EAX] &= ~0xffu; /* mov al, 0 */
-	X86_COUNT(3);
-	if (vm_script_byte(pc) != VM_SEPARATOR) {
-		cpu.r[ESI] = pc;
-		return loop_at(0x4065d5);
-	}
-	pc++;
-	X86_COUNT(2);
-	if (vm_script_byte(pc) == VM_IF) {
-		cpu.r[ESI] = pc + 1;
-		X86_COUNT(2);
-		X86_POLL(0x4065e6);
-		return 0x40659e;
-	}
-	cpu.r[ESI] = pc;
-	return call_exit(RUN_BLOCK, 0x4065ed);
 }
 
-/* 0f after a true condition's block: skip one else part (02 + block)
- * per round, coming back here (the native loop jumps back to 0x4065ae);
- * then, with AL as the block left it (0 after a skip), AL = 0 goes on with
- * the script and 1/2 (continue/break) return from the running block. */
-uint32_t game_op_if_then(void)
+/* 04 10 x expr 01 ... 00: while. The statement's offset is saved; the byte
+ * after 04 10 is skipped; a true condition (low word) runs the block, which
+ * ends the loop with break (AL = 2) or goes round again, a false one skips
+ * the block and ends the loop. */
+int vm_op_while(void)
 {
-	uint32_t pc = cpu.r[ESI];
-	X86_COUNT(2);
-	if (vm_script_byte(pc) == VM_SEPARATOR) {
-		cpu.r[ESI] = skip(pc);
-		X86_COUNT(1);
-		X86_POLL(0x4065c5);
-		return 0x4065ae;
+	uint32_t start = vm_pc;
+	for (;;) {
+		uint32_t pc = start + 1;
+		uint32_t v = vm_eval(&pc);
+		COST(5);
+		if (!(v & 0xffff)) {
+			vm_pc = skip(pc);
+			COST(1);
+			return loop_at(0x406633);
+		}
+		vm_pc = pc;
+		COST(1); /* call 0x4061cd */
+		int al = vm_run_block();
+		vm_pc = start;
+		COST(3);
+		if ((al & 0xff) != 2) {
+			POLL(0x406621);
+			continue;
+		}
+		vm_pc = skip(start);
+		return loop_at(0x406628);
 	}
-	X86_COUNT(1);
-	if (!(cpu.r[EAX] & 0xff))
-		return loop_at(0x4065b9);
-	X86_COUNT(1);
-	return pop32();
 }
 
-/* 0f after the else block: AL = 0 goes on, else return from the running
- * block with it. */
-uint32_t game_op_if_else(void)
+/* 13 n: run the block at label n (0x445dbc + 2n), then go on after the
+ * statement. */
+int vm_op_call_label(void)
 {
-	X86_COUNT(2);
-	if (!(cpu.r[EAX] & 0xff))
-		return loop_at(0x4065ef);
-	X86_COUNT(1);
-	return pop32();
-}
-
-/* 04 10 x expr 01 ... 00: while. The statement's offset is saved on the
- * stack; the byte after 04 10 is skipped; a true condition (low word)
- * runs the block (on to game_op_while_next), a false one skips it and
- * ends the loop (EAX = the saved offset, popped). */
-uint32_t game_op_while(void)
-{
-	uint32_t start = cpu.r[ESI], pc = start + 1;
-	push32(start);
-	uint32_t v = vm_eval(&pc);
-	cpu.r[EAX] = v;
-	X86_COUNT(5);
-	if (v & 0xffff) {
-		cpu.r[ESI] = pc;
-		return call_exit(RUN_BLOCK, 0x40661e);
-	}
-	cpu.r[ESI] = skip(pc);
-	cpu.r[EAX] = pop32();
-	X86_COUNT(1);
-	return loop_at(0x406633);
-}
-
-/* 04 10 after its block: back to the statement (the entry) unless the
- * block ended with break (AL = 2), which skips the block and goes on. */
-uint32_t game_op_while_next(void)
-{
-	uint32_t start = pop32();
-	cpu.r[ESI] = start;
-	X86_COUNT(3);
-	if ((cpu.r[EAX] & 0xff) != 2) {
-		X86_POLL(0x406621);
-		return 0x40660c;
-	}
-	cpu.r[ESI] = skip(start);
-	return loop_at(0x406628);
-}
-
-/* 13 n: run the block at label n (0x445dbc + 2n, EAX as the parser left
- * it), then go on after the statement (game_op_call_label_done). */
-uint32_t game_op_call_label(void)
-{
-	game_parse_args_regs();
-	push32(cpu.r[ESI]);
-	cpu.r[ESI] = rd16(VM_LABELS + 2 * cpu.r[EAX]);
-	X86_COUNT(3);
-	return call_exit(RUN_BLOCK, 0x40666b);
-}
-
-uint32_t game_op_call_label_done(void)
-{
-	cpu.r[ESI] = pop32();
-	X86_COUNT(1);
+	uint32_t a;
+	vm_parse_args(&vm_pc, &a);
+	uint32_t saved = vm_pc;
+	vm_pc = rd16(VM_LABELS + 2 * a);
+	COST(3);
+	COST(1); /* call 0x4061cd */
+	vm_run_block();
+	vm_pc = saved;
+	COST(1);
 	return loop_at(0x40666c);
 }
 
 /* 14 off: run the script at offset off (a nested VM, call 0x4060f9) up to
  * its 00/02, then go on after the statement. */
-uint32_t game_op_call_offset(void)
+int vm_op_call_offset(void)
 {
-	game_parse_args_regs();
-	push32(cpu.r[ESI]);
-	cpu.r[ESI] = cpu.r[EAX];
-	X86_COUNT(3);
-	return call_exit(VM_LOOP, 0x406aa7);
-}
-
-uint32_t game_op_call_offset_done(void)
-{
-	cpu.r[ESI] = pop32();
-	X86_COUNT(1);
+	uint32_t a;
+	vm_parse_args(&vm_pc, &a);
+	uint32_t saved = vm_pc;
+	vm_pc = a;
+	COST(3);
+	vm_call_loop();
+	vm_pc = saved;
+	COST(1);
 	return loop_at(0x406aa8);
 }
 
 /* 11: wait for a click (0x406acc), then clear the text window in the text
- * colour (game_op_wait_clear). */
-uint32_t game_op_wait(void)
+ * colour. */
+int vm_op_wait(void)
 {
-	return call_exit(WAIT_CLICK, 0x4065fb);
-}
-
-uint32_t game_op_wait_clear(void)
-{
+	COST(1); /* call 0x406acc */
+	vm_wait_click();
 	cpu.r[EBX] = SV(text_colour);
-	X86_COUNT(2);
+	COST(2);
 	game_clear_text_window(); /* 0x406b24: draws, no waiting */
 	return loop_at(0x406607);
 }
 
-/* 16 [n]: wait n/4 + 1 frames (0x4075c6, ECX = n), or with no argument for
- * a click (0x406acc); after either, go on (game_op_delay_done). */
-uint32_t game_op_delay(void)
+/* 16 [n]: wait n/4 + 1 frames (0x4075c6), or with no argument for a click
+ * (0x406acc); then go on. */
+int vm_op_delay(void)
 {
-	game_parse_args_regs();
-	X86_COUNT(2);
-	if (cpu.r[ECX]) {
-		cpu.r[ECX] = cpu.r[EAX];
-		X86_COUNT(1);
-		return call_exit(WAIT_FRAMES, 0x406abd);
+	uint32_t a, n = vm_parse_args(&vm_pc, &a);
+	COST(2);
+	if (n) {
+		COST(1);
+		COST(1); /* call 0x4075c6 */
+		vm_wait_frames(a);
+		COST(1);
+		return loop_at(0x406abd);
 	}
-	return call_exit(WAIT_CLICK, 0x406ac7);
-}
-
-/* 0x406abd and 0x406ac7: `jmp 0x4060f9` */
-uint32_t game_op_delay_done(void)
-{
-	X86_COUNT(1);
-	return loop_at(0x406abd);
-}
-
-uint32_t game_op_delay_click_done(void)
-{
-	X86_COUNT(1);
+	COST(1); /* call 0x406acc */
+	vm_wait_click();
+	COST(1);
 	return loop_at(0x406ac7);
 }
 
-/* ---- calling into the native routines that load files and draw */
+/* ---- calling into the routines that load files */
 
 static void load(uint32_t name, uint32_t dst)
 {
-	push32(dst);
-	push32(name);
-	X86_COUNT(2);
+	COST(2);
 	game_file_load(name, dst);
-	cpu.r[ESP] += 8;
-	X86_COUNT(1);
+	COST(1);
 }
 
-/* rep movsd of n dwords from esi to edi (ESI, EDI end past them) */
-static void movsd(uint32_t n, uint32_t esi, uint32_t edi)
+/* rep movsd of n dwords from src to dst */
+static void movsd(uint32_t n, uint32_t src, uint32_t dst)
 {
-	if (n > 0x10000)
-		x86_trap(0x40705e, "rep movsd count with its upper half set (the native copy runs off memory)");
 	for (uint32_t i = 0; i < n; i++)
-		wr32(edi + 4 * i, rd32(esi + 4 * i));
-	cpu.r[ESI] = esi + 4 * n;
-	cpu.r[EDI] = edi + 4 * n;
-	cpu.r[ECX] = 0;
-	X86_COUNT(n);
+		wr32(dst + 4 * i, rd32(src + 4 * i));
+	COST(n);
 }
 
 #define MES_NAME 0x444e78u   /* name of the running MES file (32 bytes) */
 #define FLAG_NAME 0x445d86u  /* "FLAGn" (n at 0x445d8a) */
 
 /* 04 1e and the end of 04 21 0: load the MES file named at MES_NAME over
- * the script, reset the animation slots and the click handlers, and
- * restart the VM at the file's entry on the top-level stack. */
-static uint32_t restart(void)
+ * the script, reset the animation slots and the click handlers, and restart
+ * the VM at the file's entry on the top-level stack. */
+static int restart(void)
 {
 	load(MES_NAME, VM_SCRIPT);
 	game_anim_reset();
 	RT_SET(click_busy, 0);
 	wr16(VM_CLICK_HANDLERS, 0);
 	wr16(VM_CLICK_HANDLERS + 2, 0);
-	cpu.r[ESI] = rd16(VM_SCRIPT);
-	uint32_t esp = cpu.r[ESP];
-	cpu.r[ESP] = RT(top_esp);
-	X86_COUNT(6);
-	/* from a nested VM the stack drops back: that leaves the handler at
-	 * 0x406fc8 (`jmp 0x4060f9`, where the oracle stops, x86_stop_at) */
-	if (cpu.r[ESP] > esp)
-		return 0x406fc8;
+	vm_pc = rd16(VM_SCRIPT);
+	COST(6);
+	/* from a nested VM the stack drops back to the top level: the native
+	 * handler leaves for 0x406fc8 (`jmp 0x4060f9`), one more instruction */
+	if (vm_depth > 0) {
+		COST(1);
+		POLL(0x406fc8);
+		vm_restart();
+	}
 	return loop_at(0x406fc8);
 }
 
 /* 04 1e name: jump to another MES file. */
-uint32_t game_op_jump_mes(void)
+int vm_op_jump_mes(void)
 {
-	game_parse_args_regs();
-	cpu.r[EDI] = MES_NAME;
-	game_string_arg_regs();
-	X86_COUNT(3);
+	vm_parse_args(&vm_pc, &(uint32_t){ 0 });
+	uint32_t src, last;
+	vm_string_arg(MES_NAME, &src, &last);
+	COST(3);
 	return restart();
 }
 
@@ -306,49 +248,39 @@ uint32_t game_op_jump_mes(void)
 static void flag_load(void)
 {
 	uint32_t keep = SV(vflags) & 0x60;
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | keep;
-	push32(cpu.r[EAX]);
-	X86_COUNT(3);
+	COST(3);
 	load(FLAG_NAME, MES_NAME);
-	cpu.r[EAX] = pop32();
-	uint32_t f = (SV(vflags) & 0x9f) | (cpu.r[EAX] & 0xff);
-	cpu.r[EAX] = (cpu.r[EAX] & 0xffff00ffu) | f << 8;
+	uint32_t f = (SV(vflags) & 0x9f) | keep;
 	SV_SET(vflags, f);
-	X86_COUNT(5);
-	game_vm_init_regs();
-	X86_COUNT(1);
+	COST(5);
+	vm_init();
+	COST(1);
 }
 
-uint32_t game_op_flag_file(void)
+int vm_op_flag_file(void)
 {
-	game_parse_args_regs();
-	uint32_t mode = cpu.r[EAX];
-	uint32_t bx = (cpu.r[EBX] & 0xffff0000u) | rd16(VM_ARG_VALUES + 2);
-	bx = (bx & ~0xffu) | ((bx + 0x30) & 0xff);
-	cpu.r[EBX] = bx;
+	uint32_t mode;
+	vm_parse_args(&vm_pc, &mode);
+	uint32_t bx = (rd16(VM_ARG_VALUES + 2) + 0x30) & 0xff;
 	wr8(FLAG_NAME + 4, bx);
-	X86_COUNT(5);
+	COST(5);
 	if (mode == 0) {
 		flag_load();
 		return restart();
 	}
-	X86_COUNT(2);
+	COST(2);
 	if (mode == 1) {
-		push32(0xc00);
-		push32(MES_NAME);
-		push32(FLAG_NAME);
-		X86_COUNT(3);
-		game_file_save(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4), rd32(cpu.r[ESP] + 8));
-		cpu.r[ESP] += 12;
-		X86_COUNT(1);
+		COST(3);
+		game_file_save(FLAG_NAME, MES_NAME, 0xc00);
+		COST(1);
 		return loop_at(0x40719f);
 	}
-	uint32_t esi = cpu.r[ESI];
+	uint32_t pc = vm_pc;
 	movsd(8, MES_NAME, 0x445d66);
 	flag_load();
 	movsd(8, 0x445d66, MES_NAME);
-	cpu.r[ESI] = esi;
-	X86_COUNT(8);
+	vm_pc = pc;
+	COST(8);
 	return loop_at(0x40714d);
 }
 
@@ -364,28 +296,28 @@ void game_format_number_regs(void)
 	static const uint16_t place[5] = { 10000, 1000, 100, 10, 1 };
 	uint32_t edi = 0x445ce6, ax = cpu.r[EAX] & 0xffff, bx = cpu.r[EBX];
 	uint32_t dl = cpu.r[EDX] & 0xff, dh = (cpu.r[EDX] >> 8) & 0xff;
-	X86_COUNT(3);
+	COST(3);
 	if (dh) {
 		wr8(edi++, VM_STRING);
-		X86_COUNT(2);
+		COST(2);
 	}
 	int first;
 	if (dl == 0)
 		first = ax >= 10000 ? 0 : ax >= 1000 ? 1 : ax >= 100 ? 2 : ax >= 10 ? 3 : 4;
 	else
 		first = dl == 1 ? 4 : dl == 2 ? 3 : dl == 3 ? 2 : dl == 4 ? 1 : 0;
-	X86_COUNT(2 * (uint32_t)(5 - first) + 2);
+	COST(2 * (uint32_t)(5 - first) + 2);
 	for (int i = first; i < 5; i++) {
 		uint32_t cx = place[i];
 		bx &= 0xffff0000u;
-		X86_COUNT(3);
+		COST(3);
 		while (ax >= cx) {
 			ax -= cx;
 			bx = (bx & 0xffff0000u) | ((bx + 1) & 0xffff);
-			X86_COUNT(3);
-			X86_POLL(0x406a70);
+			COST(3);
+			POLL(0x406a70);
 		}
-		X86_COUNT(5);
+		COST(5);
 		if (!dh) {
 			bx = (bx & 0xffff0000u) | ((bx + 0xa2af) & 0xffff);
 			wr8(edi, bx >> 8);
@@ -399,7 +331,7 @@ void game_format_number_regs(void)
 			wr8(edi, VM_STRING);
 			wr8(edi + 1, 0);
 		}
-		X86_COUNT(5);
+		COST(5);
 	}
 	cpu.r[EAX] = (cpu.r[EAX] & 0xffff0000u) | ax;
 	cpu.r[EBX] = bx;
@@ -412,77 +344,64 @@ void game_format_number_regs(void)
 /* 15 v: print v as text: format it (0x4069fd), then run the digits as a
  * script (a nested VM at NUMBER_TEXT, which draws them like any text)
  * and go on. */
-uint32_t game_op_print_number(void)
+int vm_op_print_number(void)
 {
-	game_parse_args_regs();
+	uint32_t a;
+	vm_parse_args(&vm_pc, &a);
 	uint32_t f = SV(number_format);
+	/* AX = the value, DL/DH from the format byte; the formatter reads the rest
+	 * of EBX/EDX as the native handler left them (upper halves are dead: it
+	 * keeps and clears only the words it names) */
+	cpu.r[EAX] = a;
 	cpu.r[EDX] = (cpu.r[EDX] & 0xffff0000u) | (f & 0xf0) << 8 | (f & 0x0f);
-	X86_COUNT(5);
+	COST(5);
 	game_format_number_regs();
-	push32(cpu.r[ESI]);
-	cpu.r[ESI] = NUMBER_TEXT - VM_SCRIPT;
-	X86_COUNT(4);
-	return call_exit(VM_LOOP, 0x4069f7);
-}
-
-uint32_t game_op_print_number_done(void)
-{
-	cpu.r[ESI] = pop32();
-	X86_COUNT(1);
+	uint32_t saved = vm_pc;
+	vm_pc = NUMBER_TEXT - VM_SCRIPT;
+	COST(4);
+	vm_call_loop();
+	vm_pc = saved;
+	COST(1);
 	return loop_at(0x4069f8);
 }
 
 /* 04 1f name: run another MES file as a subroutine. The labels (0x1e
  * dwords from VM_LABELS) and the file name are saved, the file is loaded
- * over the script, the click handler state is pushed and cleared, and the
- * file runs as a nested VM from its entry (game_op_call_mes_done goes on
- * when it returns). */
+ * over the script, the click handler state is saved and cleared, and the
+ * file runs as a nested VM from its entry; then the click handlers, the
+ * labels and the name are restored (the native `mov cx, 0x1e` leaves ECX's
+ * upper half as the nested VM left it, zero from the message pump: the count
+ * is 0x1e), the caller's file is loaded again and the script goes on. */
 #define SAVED_LABELS 0x445e36u
 #define SAVED_NAME 0x445d46u
 
-uint32_t game_op_call_mes(void)
+int vm_op_call_mes(void)
 {
-	game_parse_args_regs();
-	push32(cpu.r[ESI]);
+	vm_parse_args(&vm_pc, &(uint32_t){ 0 });
+	uint32_t saved = vm_pc;
 	movsd(0x1e, VM_LABELS, SAVED_LABELS);
 	movsd(8, MES_NAME, SAVED_NAME);
-	cpu.r[EDI] = MES_NAME;
-	game_string_arg_regs();
-	X86_COUNT(8);
+	uint32_t src, last;
+	vm_string_arg(MES_NAME, &src, &last);
+	COST(8);
 	load(MES_NAME, VM_SCRIPT);
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | RT(click_busy);
-	push32(cpu.r[EAX]);
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffffu) | rd16(VM_CLICK_HANDLERS);
-	push32(cpu.r[EAX]);
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffffu) | rd16(VM_CLICK_HANDLERS + 2);
-	push32(cpu.r[EAX]);
+	uint32_t busy = RT(click_busy), left = rd16(VM_CLICK_HANDLERS), right = rd16(VM_CLICK_HANDLERS + 2);
 	RT_SET(click_busy, 0);
 	wr16(VM_CLICK_HANDLERS, 0);
 	wr16(VM_CLICK_HANDLERS + 2, 0);
-	cpu.r[ESI] = rd16(VM_SCRIPT);
-	X86_COUNT(10);
-	return call_exit(VM_LOOP, 0x40704a);
-}
-
-/* 04 1f after the file returned: restore the click handlers, the labels
- * and the name (`mov cx, n`: the count takes ECX's upper half as the
- * nested VM left it, zero from the message pump), reload the caller's
- * file and go on. */
-uint32_t game_op_call_mes_done(void)
-{
-	cpu.r[EAX] = pop32();
-	wr16(VM_CLICK_HANDLERS + 2, cpu.r[EAX]);
-	cpu.r[EAX] = pop32();
-	wr16(VM_CLICK_HANDLERS, cpu.r[EAX]);
-	cpu.r[EAX] = pop32();
-	RT_SET(click_busy, cpu.r[EAX]);
-	X86_COUNT(6);
-	movsd((cpu.r[ECX] & 0xffff0000u) | 0x1e, SAVED_LABELS, VM_LABELS);
+	vm_pc = rd16(VM_SCRIPT);
+	COST(10);
+	vm_call_loop();
+	wr16(VM_CLICK_HANDLERS + 2, right);
+	wr16(VM_CLICK_HANDLERS, left);
+	RT_SET(click_busy, busy);
+	COST(6);
+	movsd(0x1e, SAVED_LABELS, VM_LABELS);
 	movsd(8, SAVED_NAME, MES_NAME);
-	X86_COUNT(6);
+	COST(6);
 	load(MES_NAME, VM_SCRIPT);
-	cpu.r[ESI] = pop32();
-	X86_COUNT(1);
+	vm_pc = saved;
+	COST(1);
 	return loop_at(0x407091);
 }
 
@@ -491,151 +410,104 @@ uint32_t game_op_call_mes_done(void)
  * The block at label n (or the inline block given as the argument) is the
  * menu (0x445e0c, for 04 14); label 38 runs first, then each round: pump
  * (0x401bf0; WM_QUIT ends the VM), step the animations (0x403624), and
- * while [0x445304] stays set, run label 39, then for each input k = 0..5
- * enabled in 0x4452e1 (bit 1 << (k + 1): click, right click, the arrows)
- * that is down (0x4074d5 k), run label 32 + k and, unless bit 0 of
+ * while [0x445304] stays set, run label 39, then for the first input k =
+ * 0..5 enabled in 0x4452e1 (bit 1 << (k + 1): click, right click, the arrows)
+ * that is down (0x4074d5 k) run label 32 + k and, unless bit 0 of
  * 0x4452e1 is set, wait until k is released (stepping the animations
- * meanwhile for k = 5). The pieces after each call are jump units; all of
- * them run with the statement's ESI pushed. */
+ * meanwhile for k = 5); then the next round. */
 #define MENU_BLOCK 0x445e0cu /* u16: the menu's block */
 #define MENU_INIT 0x445e08u  /* label 38 */
 #define MENU_FRAME 0x445e0au /* label 39 */
-#define PUMP 0x401bf0u
-#define INPUT_TEST 0x4074d5u
 
 static const struct menu_input {
-	uint32_t bit, handler, ra_test, ra_block, ra_wait;
-	uint32_t pc_pump_after_block, pc_wait_loop, pc_pump_after_wait;
+	uint32_t bit, handler;
+	uint32_t pc_pump_after_block, pc_wait_loop, pc_pump_after_wait; /* native backward jumps */
 } menu_inputs[6] = {
-	{ 0x02, 0x445dfc, 0x4066f6, 0x406704, 0x406714, 0x40670b, 0x406714, 0x406716 },
-	{ 0x04, 0x445dfe, 0x406728, 0x406736, 0x40674a, 0x40673d, 0x40674a, 0x40674c },
-	{ 0x08, 0x445e00, 0x406761, 0x40676f, 0x406783, 0x406776, 0x406783, 0x406785 },
-	{ 0x10, 0x445e02, 0x40679a, 0x4067a8, 0x4067bc, 0x4067af, 0x4067bc, 0x4067be },
-	{ 0x20, 0x445e04, 0x4067d3, 0x4067e1, 0x4067f5, 0x4067e8, 0x4067f5, 0x4067f7 },
-	{ 0x40, 0x445e06, 0x406810, 0x406822, 0x40683b, 0x406829, 0x40683b, 0x40683d },
+	{ 0x02, 0x445dfc, 0x40670b, 0x406714, 0x406716 },
+	{ 0x04, 0x445dfe, 0x40673d, 0x40674a, 0x40674c },
+	{ 0x08, 0x445e00, 0x406776, 0x406783, 0x406785 },
+	{ 0x10, 0x445e02, 0x4067af, 0x4067bc, 0x4067be },
+	{ 0x20, 0x445e04, 0x4067e8, 0x4067f5, 0x4067f7 },
+	{ 0x40, 0x445e06, 0x406829, 0x40683b, 0x40683d },
 };
 
-uint32_t game_op_menu(void)
+int vm_op_menu(void)
 {
-	game_parse_args_regs();
+	vm_parse_args(&vm_pc, &(uint32_t){ 0 });
 	uint32_t type = rd8(VM_ARG_TYPES);
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | type;
-	X86_COUNT(3);
+	COST(3);
+	uint32_t blk;
 	if (type == VM_ARG_BLOCK) {
-		cpu.r[EAX] = (cpu.r[EAX] & ~0xffffu) | rd16(VM_ARG_VALUES);
+		blk = rd16(VM_ARG_VALUES);
 	} else {
-		cpu.r[EAX] = rd16(VM_ARG_VALUES);
-		cpu.r[EAX] = rd16(VM_LABELS + 2 * cpu.r[EAX]);
-		X86_COUNT(2);
+		blk = rd16(VM_LABELS + 2 * rd16(VM_ARG_VALUES));
+		COST(2);
 	}
-	wr16(MENU_BLOCK, cpu.r[EAX]);
+	wr16(MENU_BLOCK, blk);
 	SV_SET(menu_run, 1);
-	push32(cpu.r[ESI]);
-	cpu.r[ESI] = rd16(MENU_INIT);
-	X86_COUNT(5);
-	return call_exit(RUN_BLOCK, 0x4066b8);
-}
-
-/* the round's start (0x4066b8; the pieces below jump there from
- * native_pc, backward, so they poll) */
-static uint32_t menu_pump(uint32_t native_pc)
-{
-	if (native_pc)
-		X86_POLL(native_pc);
-	return call_exit(PUMP, 0x4066bd);
-}
-
-/* from input k on: test the first one enabled, or start the next round */
-static uint32_t menu_scan(int k)
-{
-	for (; k < 6; k++) {
-		X86_COUNT(2);
-		if (SV(input_enable) & menu_inputs[k].bit) {
-			cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | (uint32_t)k;
-			X86_COUNT(1);
-			return call_exit(INPUT_TEST, menu_inputs[k].ra_test);
+	uint32_t saved = vm_pc;
+	vm_pc = rd16(MENU_INIT);
+	COST(5);
+	COST(1); /* call 0x4061cd */
+	vm_run_block();
+	uint32_t poll = 0; /* the native backward jump to the round's start, 0 for the first round */
+	for (;;) {
+		if (poll)
+			POLL(poll);
+		poll = 0;
+		COST(1); /* call 0x401bf0 */
+		int alive = ctl_pump();
+		COST(2);
+		if (!alive)
+			ctl_quit();
+		game_anim_step();
+		COST(2);
+		if (!SV(menu_run)) {
+			vm_pc = saved;
+			COST(1);
+			return loop_at(0x4066d5);
+		}
+		vm_pc = rd16(MENU_FRAME);
+		COST(1);
+		COST(1); /* call 0x4061cd */
+		vm_run_block();
+		poll = 0x406803; /* the scan ran off the end */
+		for (int k = 0; k < 6; k++) {
+			COST(2);
+			if (!(SV(input_enable) & menu_inputs[k].bit))
+				continue;
+			COST(1); /* mov al, k */
+			COST(1); /* call 0x4074d5 */
+			int down = vm_input_down((uint32_t)k);
+			COST(1);
+			if (!down) {
+				if (k < 5)
+					continue;
+				poll = 0x406810;
+				break;
+			}
+			vm_pc = rd16(menu_inputs[k].handler);
+			COST(1);
+			COST(1); /* call 0x4061cd */
+			vm_run_block();
+			COST(2);
+			if (SV(input_enable) & 1) {
+				poll = menu_inputs[k].pc_pump_after_block;
+				break;
+			}
+			for (;;) { /* wait for the release */
+				if (k == 5)
+					game_anim_step();
+				COST(1); /* mov al, k */
+				COST(1); /* call 0x4074d5 */
+				down = vm_input_down((uint32_t)k);
+				COST(1);
+				if (!down)
+					break;
+				POLL(menu_inputs[k].pc_wait_loop);
+			}
+			poll = menu_inputs[k].pc_pump_after_wait;
+			break;
 		}
 	}
-	return menu_pump(0x406803);
 }
-
-static uint32_t menu_wait(int k)
-{
-	if (k == 5)
-		game_anim_step();
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | (uint32_t)k;
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, menu_inputs[k].ra_wait);
-}
-
-uint32_t game_op_menu_round(void) /* 0x4066b8: after label 38 */
-{
-	return menu_pump(0);
-}
-
-uint32_t game_op_menu_pumped(void) /* 0x4066bd */
-{
-	X86_COUNT(2);
-	if (!cpu.r[EAX]) { /* WM_QUIT: 0x40638d, mov esp, [0x445cdc] */
-		cpu.r[ESP] = RT(top_esp);
-		X86_COUNT(1);
-		return 0x406393;
-	}
-	game_anim_step();
-	X86_COUNT(2);
-	if (!SV(menu_run)) {
-		cpu.r[ESI] = pop32();
-		X86_COUNT(1);
-		return loop_at(0x4066d5);
-	}
-	cpu.r[ESI] = rd16(MENU_FRAME);
-	X86_COUNT(1);
-	return call_exit(RUN_BLOCK, 0x4066e6);
-}
-
-uint32_t game_op_menu_framed(void) /* 0x4066e6: after label 39 */
-{
-	return menu_scan(0);
-}
-
-/* after 0x4074d5 k (ZF set: k is not down) */
-static uint32_t menu_tested(int k)
-{
-	X86_COUNT(1);
-	if (cpu.zf)
-		return k == 5 ? menu_pump(0x406810) : menu_scan(k + 1);
-	cpu.r[ESI] = rd16(menu_inputs[k].handler);
-	X86_COUNT(1);
-	return call_exit(RUN_BLOCK, menu_inputs[k].ra_block);
-}
-
-/* after label 32 + k */
-static uint32_t menu_handled(int k)
-{
-	X86_COUNT(2);
-	if (SV(input_enable) & 1)
-		return menu_pump(menu_inputs[k].pc_pump_after_block);
-	return menu_wait(k);
-}
-
-/* after 0x4074d5 k while waiting for the release (ZF clear: still down) */
-static uint32_t menu_waited(int k)
-{
-	X86_COUNT(1);
-	if (!cpu.zf) {
-		X86_POLL(menu_inputs[k].pc_wait_loop);
-		return menu_wait(k);
-	}
-	return menu_pump(menu_inputs[k].pc_pump_after_wait);
-}
-
-#define MENU_INPUT_PIECES(k) \
-	uint32_t game_op_menu_tested##k(void) { return menu_tested(k); } \
-	uint32_t game_op_menu_handled##k(void) { return menu_handled(k); } \
-	uint32_t game_op_menu_waited##k(void) { return menu_waited(k); }
-MENU_INPUT_PIECES(0)
-MENU_INPUT_PIECES(1)
-MENU_INPUT_PIECES(2)
-MENU_INPUT_PIECES(3)
-MENU_INPUT_PIECES(4)
-MENU_INPUT_PIECES(5)

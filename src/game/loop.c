@@ -1,255 +1,297 @@
 /*
- * The script VM's own loop (stage 4): the entry 0x4060d4, the loop head
- * 0x4060f9 with the click handlers, the opcode fetch and dispatch
- * (0x40616e), blocks (01 ... 00 / 02), text (06 ... 06 and Big5
- * characters), and the waits every pass and the handlers use: the input
- * test 0x4074d5, the frame wait 0x4075c6 and the click wait 0x406acc.
+ * The script VM's own loop (R2: direct style): the entry 0x4060d4, the loop
+ * 0x4060f9 with the click handlers, the opcode fetch and dispatch (0x40616e),
+ * blocks (01 ... 00 / 02), text (06 ... 06 and Big5 characters), and the waits
+ * the loop and the handlers use: the input test 0x4074d5, the frame wait
+ * 0x4075c6 and the click wait 0x406acc.
  *
  * Every pass of the loop pumps messages (0x401bf0), steps the animations
  * (0x403624), tests the left and right button for the click handlers that
  * ext op 20 sets (0x4074d5 twice, which pumps again), then fetches one
- * opcode. Like the handlers in src/game/ops_vm.c, the loop is split at the
- * calls that pump messages, wait or run a block: the C piece pushes the
- * return address and goes on at the callee (call_exit), and the code after
- * the call is a piece of its own (src/hle/overrides.h, HLE_GAME_CALL_EXIT
- * and the HLE_GAME_JUMP lines of this file). So the pump runs once,
- * natively, between pieces, a nested block is the same loop on a deeper
- * stack, and a piece's oracle ends where the C piece does.
+ * opcode and runs its handler. This used to be a set of pieces that returned
+ * native addresses to a dispatcher; it is ordinary C now:
  *
- * A block (01) and the VM itself end at 00 or 02: at the top level the VM
- * ends (0x40638d unwinds to the entry's frame and returns to WinMain),
- * inside a block the loop returns to whoever ran the block with AL = 0.
- * Bytes 03, 05, 07, 08 and 0x20-0x7f end the VM too.
+ *   - `vm_pc` is the program counter (the native ESI): an offset in segment 0.
+ *   - vm_loop() runs until a block ends; a nested block (if, while, label and
+ *     offset calls, the menu's blocks, a click handler, a called MES file) is a
+ *     nested call of vm_loop(), as natively it was `call 0x4060f9` on the
+ *     native stack. vm_depth counts them (the native test ESP == [top ESP]).
+ *   - A handler returns -1 (go on with the next pass: the native `jmp
+ *     0x4060f9`) or the block result AL (0 end, 1 continue, 2 break): the native
+ *     `ret` out of the running block.
+ *   - A wait is a C loop that pumps through ctl_pump(). WM_QUIT, the end of
+ *     the script at the top level and opcodes that end the VM unwind with
+ *     ctl_quit() to game_vm_run(); a restart (04 1e, 04 21) longjmps back to
+ *     the top of the loop.
  *
- * Pieces read and write the CPU as the native code there does. The click
- * handler path (a button down with its handler set: wait for both buttons
- * to be released, then run the handler's block) is pieces too (stage 6). Ext
- * op 20 sets the handlers and no shipped script uses it, so the path is
- * reached only with the dev hook NANPA2_CLICKTEST (src/hle/dev.c).
+ * Cost and polls are exactly the native pieces' (src/game/ctl.h): every
+ * COST/POLL keeps its place relative to the pump and the other HLE calls.
+ *
+ * Handlers that have not been converted yet (the subsystem ops of ops_sys.c)
+ * are still register-level pieces: legacy() runs one on the emulated CPU until
+ * it jumps back to the loop head, with ESI = vm_pc.
  */
+#include <setjmp.h>
+
+#include "game/ctl.h"
 #include "game/file.h"
+#include "game/game.h"
 #include "game/vm.h"
+#include "hle/hle.h"
 #include "x86/x86.h"
 #include "game/state.h"
 
-#define PUMP 0x401bf0u        /* message pump: EAX = 0 on WM_QUIT */
-#define LOAD_FILE 0x401050u   /* cdecl (name, buffer) */
-#define VM_END 0x40638du      /* mov esp, [VM_TOP_ESP]; pop ebp; ret */
-#define VM_UNWOUND 0x406393u  /* after that mov: where an oracle stops */
-#define VM_TOP_ESP 0x445cdcu  /* ESP of the top-level VM (after its push ebp) */
 #define INPUT_SKIP 0x40u      /* Ctrl: no waiting for clicks */
 #define BIG5_NEWLINE 0xa1beu
 
-#define RUN_BLOCK 0x4061cdu
-#define INPUT_TEST 0x4074d5u
-#define WAIT_FRAMES 0x4075c6u
-#define WAIT_CLICK 0x406accu
+uint32_t vm_pc;
+int vm_depth;
+static jmp_buf *vm_restart_jmp;
 
-/* the native `call target` with return address ra */
-static uint32_t call_exit(uint32_t target, uint32_t ra)
+/* ---- the entry, and the end */
+
+/* a restart of the top-level loop from anywhere (04 1e, 04 21): the native
+ * `mov esp, [top]` and jump to the loop head */
+_Noreturn void vm_restart(void)
 {
-	push32(ra);
-	X86_COUNT(1);
-	return target;
+	longjmp(*vm_restart_jmp, 1);
 }
 
-/* WM_QUIT (the pump returned 0) in a piece with words on the stack:
- * 0x40638d's `mov esp, [VM_TOP_ESP]`, which takes ESP above the piece's
- * own level, where its oracle stops; the rest (pop ebp, ret to WinMain)
- * runs natively */
-static uint32_t quit(void)
+static void vm_loop_top(void *arg)
 {
-	cpu.r[ESP] = RT(top_esp);
-	X86_COUNT(1);
-	return VM_UNWOUND;
+	(void)arg;
+	jmp_buf here;
+	vm_restart_jmp = &here;
+	setjmp(here);
+	vm_depth = 0;
+	vm_loop();
+	x86_trap(0x4061aa, "a block result at the top level of the VM");
 }
 
-/* ---- the entry and the loop head */
+/* 0x4060d4 after its set-up: load START.MES (or the file named at
+ * VM_SCRIPT_NAME) and run the VM until the script ends or the game quits. The
+ * native tail (`mov esp, [top]`, pop ebp, ret: 3 instructions, the first
+ * charged by ctl_quit) is charged here. */
+void game_vm_run(void)
+{
+	vm_init();
+	COST(3);
+	game_file_load(VM_SCRIPT_NAME, VM_SCRIPT);
+	vm_pc = rd16(VM_SCRIPT);
+	COST(2);
+	ctl_catch(vm_loop_top, NULL);
+	COST(2);
+}
 
-/* 0x4060d4, called by WinMain: save EBP and the top-level ESP, set up the
- * VM state (0x406395), load the MES file named at VM_SCRIPT_NAME (START.MES
- * at first) and start at its entry (its first word). */
+/* The piece that WinMain (startup.c) enters by call, until it calls
+ * game_vm_run directly: the native frame the piece-world expects. */
 uint32_t game_vm_entry(void)
 {
 	push32(cpu.r[EBP]);
 	RT_SET(top_esp, cpu.r[ESP]);
-	X86_COUNT(3);
-	game_vm_init_regs();
-	push32(VM_SCRIPT);
-	push32(VM_SCRIPT_NAME);
-	X86_COUNT(3);
-	game_file_load(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
-	cpu.r[ESP] += 8;
-	cpu.r[ESI] = rd16(VM_SCRIPT);
-	X86_COUNT(2);
-	return VM_LOOP;
-}
-
-/* 0x4060f9: each pass starts with the message pump */
-uint32_t game_vm_loop(void)
-{
-	return call_exit(PUMP, 0x4060fe);
-}
-
-static uint32_t fetch(void);
-
-/* 0x4060fe, after the pump: WM_QUIT ends the VM; else step the
- * animations, then test the left button for its handler, unless the
- * handlers are off (@[9] bit 2) or one is running. */
-uint32_t game_vm_pumped(void)
-{
-	X86_COUNT(2);
-	if (!cpu.r[EAX])
-		return VM_END; /* at this piece's ESP, where its oracle stops too */
-	X86_COUNT(1);
-	game_anim_step();
-	X86_COUNT(2);
-	if (SV(vflags) & 4)
-		return fetch();
-	X86_COUNT(2);
-	if (RT(click_busy))
-		return fetch();
-	set8l(EAX, 0);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x406124);
-}
-
-/* 0x406143: a button is down with its handler set (EDI): wait until the
- * left, then the right button are up (0x4074d5 tests each: ZF set = up) */
-static uint32_t click_wait(void)
-{
-	set8l(EAX, 0);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x40614a);
-}
-
-/* 0x406124, after testing the left button (ZF set: up): down, with no
- * handler, goes straight to the fetch, skipping the right button; up
- * tests the right one. */
-uint32_t game_vm_click_tested0(void)
-{
-	cpu.r[EDI] = rd16(VM_CLICK_HANDLERS);
-	X86_COUNT(2);
-	if (!cpu.zf) {
-		f_logic(cpu.r[EDI], 32); /* or edi, edi */
-		X86_COUNT(2);
-		if (!cpu.r[EDI])
-			return fetch();
-		return click_wait();
-	}
-	set8l(EAX, 1);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x406134);
-}
-
-/* 0x406134, after testing the right button */
-uint32_t game_vm_click_tested1(void)
-{
-	cpu.r[EDI] = rd16(VM_CLICK_HANDLERS + 2);
-	X86_COUNT(2);
-	if (!cpu.zf) {
-		f_logic(cpu.r[EDI], 32);
-		X86_COUNT(2);
-		if (!cpu.r[EDI])
-			return fetch();
-		return click_wait();
-	}
-	X86_COUNT(1);
-	return fetch();
-}
-
-/* 0x40614a, after testing the left button again: still down, ask again;
- * up, test the right one */
-uint32_t game_vm_click_up0(void)
-{
-	X86_COUNT(1);
-	if (!cpu.zf) {
-		X86_POLL(0x40614a);
-		return click_wait();
-	}
-	set8l(EAX, 1);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x406153);
-}
-
-/* 0x406153, after the right button: down, back to the left; both up, run
- * the handler's block (ESI saved, the busy flag set) */
-uint32_t game_vm_click_up1(void)
-{
-	X86_COUNT(1);
-	if (!cpu.zf) {
-		X86_POLL(0x406153);
-		return click_wait();
-	}
-	push32(cpu.r[ESI]);
-	RT_SET(click_busy, 0xff);
-	cpu.r[ESI] = cpu.r[EDI];
-	X86_COUNT(3);
-	return call_exit(RUN_BLOCK, 0x406164);
-}
-
-/* 0x406164: the handler's block is done */
-uint32_t game_vm_click_done(void)
-{
-	RT_SET(click_busy, 0);
-	cpu.r[ESI] = pop32();
-	X86_COUNT(3); /* mov [busy], pop esi, jmp 0x4060f9 */
-	X86_POLL(0x40616c);
-	return VM_LOOP;
-}
-
-/* ---- fetch and dispatch */
-
-/* handlers of ops 0a-1a (table 0x40620b; 10 is a no-op, the loop head) and
- * of the extended ops 04 10-04 26 (table 0x406262), as offsets from
- * HANDLER_BASE (16 bits, so the binary does not hold the native tables:
- * ctest no_game_bytes) */
-#define HANDLER_BASE 0x400000u
-static const uint16_t op_handlers[] = {
-	0x6491, 0x64b5, 0x64d9, 0x64f8, 0x6557, 0x659e, 0x60f9, 0x65f6, 0x663e,
-	0x6658, 0x6a9a, 0x69ce, 0x6aad, 0x6b05, 0x69be, 0x7204, 0x7096,
-};
-static const uint16_t ext_handlers[] = {
-	0x660c, 0x6638, 0x663b, 0x6671, 0x6842, 0x6916, 0x6f06, 0x6b76, 0x6bcb,
-	0x6c20, 0x6c85, 0x6cea, 0x6d8b, 0x6e11, 0x6f7c, 0x6fcd, 0x70bc, 0x70d5,
-	0x739b, 0x71a4, 0x73a5, 0x73cd, 0x73ee,
-};
-#define N_OPS (sizeof op_handlers / sizeof op_handlers[0])
-#define N_EXT (sizeof ext_handlers / sizeof ext_handlers[0])
-
-/* 00 or 02 (0x4061aa): the end of the running block, or of the VM at the
- * top level; a block returns with AL = 0 (EAX's upper bytes are ESP's,
- * from the native test) */
-static uint32_t block_end(void)
-{
-	cpu.r[ESI]++;
-	cpu.r[EAX] = cpu.r[ESP];
-	X86_COUNT(4);
-	if (cpu.r[ESP] == RT(top_esp))
-		return VM_END;
-	set8l(EAX, 0);
-	X86_COUNT(2);
+	COST(3);
+	game_vm_run();
+	cpu.r[ESP] = RT(top_esp);
+	cpu.r[EBP] = pop32();
 	return pop32();
 }
 
-/* 01 (0x4061bc): run the block (0x4061cd: past the 01, a nested loop) with
- * ESI saved; game_vm_block_done goes on after it */
-static uint32_t block_open(void)
+/* ---- the still register-level handlers */
+
+/* Run the piece-world handler at native address `addr` (entered with ESI past
+ * the opcode bytes, EAX = its table index) until it jumps to the loop head.
+ * Its pieces call HLE routines and each other as the dispatcher did: units by
+ * address, anything else through hle_call with the return address on the
+ * stack. A quit leaves through the native exits, which unwind like ctl_quit. */
+static void legacy(uint32_t addr, uint32_t index)
 {
-	push32(cpu.r[ESI]);
-	X86_COUNT(1);
-	return call_exit(RUN_BLOCK, 0x4061c2);
+	cpu.r[ESI] = vm_pc;
+	cpu.r[EAX] = index;
+	uint32_t pc = addr;
+	for (;;) {
+		if (pc == VM_LOOP)
+			break;
+		if (pc == 0x40638d)
+			ctl_quit();
+		if (pc == 0x406393 || pc == 0x40472f)
+			ctl_unwind();
+		const struct game_unit *u = game_unit_find(pc);
+		if (u && u->jump) {
+			uint32_t next = u->jump();
+			if (u->poll_self && next == pc)
+				POLL(pc);
+			pc = next;
+			continue;
+		}
+		uint32_t ra = rd32(cpu.r[ESP]);
+		hle_call(pc);
+		pc = ra;
+	}
+	vm_pc = cpu.r[ESI];
 }
 
-/* the character delay after a character, then the piece at ra (the cursor
- * advance; a jump there from the native code ends a piece too) */
-static uint32_t char_delay(uint32_t ra)
+/* ---- waits */
+
+/* 0x4074d5, AL = k: pump, then test input k: 0 click/Enter (0x10), 1 right
+ * click/Esc (0x20), 2-5 up, down, left, right (1, 2, 4, 8). 1 when it is down
+ * (the native ZF clear). WM_QUIT ends the VM. */
+int vm_input_down(uint32_t k)
 {
-	cpu.r[ECX] = SV(text_delay);
-	X86_COUNT(3);
-	if (!cpu.r[ECX])
-		return ra;
-	return call_exit(WAIT_FRAMES, ra);
+	static const uint8_t bit[6] = { 0x10, 0x20, 0x01, 0x02, 0x04, 0x08 };
+	COST(1); /* push eax */
+	COST(1); /* call 0x401bf0 */
+	int alive = ctl_pump();
+	COST(2);
+	if (!alive)
+		ctl_quit();
+	k &= 0xff;
+	COST(1 + 2 * (k < 6 ? k + 1 : 6));
+	int zf;
+	if (k < 6) {
+		zf = (RT(input_bits) & bit[k]) == 0;
+		COST(2);
+	} else {
+		zf = k == 5; /* the last `cmp al, 5` */
+		COST(1);
+	}
+	return !zf;
+}
+
+/* 0x4075c6, n: wait until the frame counter reaches its value now + n / 4 + 1,
+ * pumping and stepping the animations each round */
+void vm_wait_frames(uint32_t n)
+{
+	uint32_t target = RT(frame) + (n >> 2) + 1;
+	COST(5);
+	COST(1); /* call 0x401bf0 */
+	for (;;) {
+		int alive = ctl_pump();
+		COST(2);
+		if (!alive)
+			ctl_quit();
+		COST(1);
+		game_anim_step();
+		COST(3);
+		if (target > RT(frame)) { /* ja: not there yet */
+			POLL(0x4075eb);
+			COST(1); /* push eax */
+			COST(1); /* call 0x401bf0 */
+			continue;
+		}
+		COST(1);
+		return;
+	}
+}
+
+/* 0x406acc / 0x406ae8: with Ctrl down the wait ends at once (1), else wait a
+ * frame (0) */
+static int click_skip_or_frame(void)
+{
+	int ctrl = (RT(input_bits) & INPUT_SKIP) != 0;
+	COST(3);
+	if (ctrl) {
+		COST(1);
+		return 1;
+	}
+	COST(1); /* mov ecx, 1 */
+	COST(1); /* call 0x4075c6 */
+	vm_wait_frames(1);
+	return 0;
+}
+
+/* 0x406acc: wait for a click or Enter, pressed (one frame per test) and then
+ * released */
+void vm_wait_click(void)
+{
+	for (;;) {
+		if (click_skip_or_frame())
+			return;
+		COST(1); /* mov al, 0 */
+		COST(1); /* call 0x4074d5 */
+		int down = vm_input_down(0);
+		COST(1);
+		if (down)
+			break;
+		POLL(0x406ae6);
+	}
+	for (;;) {
+		if (click_skip_or_frame())
+			return;
+		COST(1);
+		COST(1);
+		int down = vm_input_down(0);
+		COST(1);
+		if (!down) {
+			COST(1);
+			return;
+		}
+		POLL(0x406b02);
+	}
+}
+
+/* ---- blocks */
+
+/* 0x4061cd, called with vm_pc at a block's 01: run the block as a nested loop
+ * (`call 0x4060f9`); the result is its AL. The caller charges its own `call`. */
+int vm_run_block(void)
+{
+	vm_pc++;
+	COST(1);
+	COST(1); /* call 0x4060f9 */
+	vm_depth++;
+	int al = vm_loop();
+	vm_depth--;
+	COST(1); /* ret of 0x4061cd */
+	return al;
+}
+
+/* a nested loop at vm_pc (`call 0x4060f9`): the result is its AL */
+int vm_call_loop(void)
+{
+	COST(1);
+	vm_depth++;
+	int al = vm_loop();
+	vm_depth--;
+	return al;
+}
+
+/* 00 or 02 (0x4061aa): the end of the running block, or of the VM at the top
+ * level; a block returns with AL = 0 */
+static int block_end(void)
+{
+	vm_pc++;
+	COST(4);
+	if (vm_depth == 0)
+		ctl_quit();
+	COST(2);
+	return 0;
+}
+
+/* 01 (0x4061bc): run the block (a nested loop) with vm_pc saved; then skip
+ * it (0x4061d4) and go on */
+static int block_open(void)
+{
+	uint32_t saved = vm_pc;
+	COST(1);
+	COST(1); /* call 0x4061cd */
+	vm_run_block();
+	vm_pc = vm_skip_block(saved);
+	COST(3);
+	POLL(0x4061c8);
+	return -1;
+}
+
+/* ---- text */
+
+/* the character delay after a character */
+static void char_delay(void)
+{
+	uint32_t n = SV(text_delay);
+	COST(3);
+	if (!n)
+		return;
+	COST(1); /* call 0x4075c6 */
+	vm_wait_frames(n);
 }
 
 /* the text colour as the native code pushes it: bg = colour >> 4 (all of
@@ -264,274 +306,235 @@ static uint32_t colour_fg(void)
 	return SV(text_colour) & 0xf;
 }
 
-/* 0x4062bf: the next byte of a 06 string: 06 ends it, any other is one
+/* 0x4062bf: the characters of a 06 string: 06 ends it, any other byte is one
  * ASCII character (size 0) at the cursor */
-static uint32_t string_char(void)
+static void string_chars(void)
 {
-	uint32_t c = vm_script_byte(cpu.r[ESI]++);
-	set8l(EAX, c);
-	X86_COUNT(4);
-	if (c == VM_STRING) {
-		X86_POLL(0x4062c8);
-		return VM_LOOP;
+	for (;;) {
+		uint32_t c = vm_script_byte(vm_pc++);
+		COST(4);
+		if (c == VM_STRING) {
+			POLL(0x4062c8);
+			return;
+		}
+		uint32_t bg = colour_bg(), fg = colour_fg(), y = SV(text_y), x = SV(text_x) << 3;
+		COST(15);
+		x86_probe(0x4062ff);
+		game_draw_char(c, x, y, 0, fg, bg);
+		char_delay();
+		COST(1);
+		game_text_advance();
+		COST(1);
+		POLL(0x40631a);
 	}
-	uint32_t bg = colour_bg(), fg = colour_fg(), y = SV(text_y), x = SV(text_x) << 3;
-	cpu.r[EDX] = x;
-	cpu.r[EAX] = c;
-	X86_COUNT(15);
-	x86_probe(0x4062ff);
-	game_draw_char(c, x, y, 0, fg, bg);
-	return char_delay(0x406315);
 }
 
 /* a byte from 0x80 (0x40631c) and the next: one Big5 character, A1BE a
  * newline */
-static uint32_t big5_char(void)
+static void big5_char(uint32_t first)
 {
-	uint32_t pc = cpu.r[ESI] + 1;
-	uint32_t c = (cpu.r[EAX] & 0xff) << 8 | vm_script_byte(pc++);
-	cpu.r[ESI] = pc;
-	set16(EAX, c);
-	X86_COUNT(6);
+	uint32_t pc = vm_pc + 1;
+	uint32_t c = (first & 0xff) << 8 | vm_script_byte(pc++);
+	vm_pc = pc;
+	COST(6);
 	if (c == BIG5_NEWLINE) {
-		X86_COUNT(1);
+		COST(1);
 		game_text_newline();
-		X86_COUNT(1);
-		X86_POLL(0x406331);
-		return VM_LOOP;
+		COST(1);
+		POLL(0x406331);
+		return;
 	}
 	uint32_t bg = colour_bg(), fg = colour_fg(), size = SV(text_size), y = SV(text_y),
 	         x = SV(text_x) << 3;
-	cpu.r[EDX] = x;
-	cpu.r[EAX] = c;
-	X86_COUNT(16);
+	COST(16);
 	x86_probe(0x40636d);
 	game_draw_char(c, x, y, size, fg, bg);
-	return char_delay(0x406383);
+	char_delay();
+	COST(1);
+	game_text_advance();
+	COST(1);
+	POLL(0x406388);
+}
+
+/* ---- fetch and dispatch */
+
+/* handlers of ops 0a-1a (table 0x40620b; 10 is a no-op, the loop head) and of
+ * the extended ops 04 10-04 26 (table 0x406262): the C handler, or for the ones
+ * still register-level (fn NULL) its native address as an offset from
+ * HANDLER_BASE (16 bits, so the binary does not hold the native tables: ctest
+ * no_game_bytes) */
+#define HANDLER_BASE 0x400000u
+struct handler {
+	int (*fn)(void);
+	uint16_t native;
+};
+static const struct handler op_handlers[] = {
+	{ vm_op_set_flags, 0 }, { vm_op_set_flags_expr, 0 }, { vm_op_set_reg, 0 }, { vm_op_store_words, 0 },
+	{ vm_op_store_bytes, 0 }, { vm_op_if, 0 }, { NULL, 0x60f9 }, { vm_op_wait, 0 }, { vm_op_set_label, 0 },
+	{ vm_op_call_label, 0 }, { vm_op_call_offset, 0 }, { vm_op_print_number, 0 }, { vm_op_delay, 0 },
+	{ NULL, 0x6b05 }, { vm_op_text_colour, 0 }, { NULL, 0x7204 }, { NULL, 0x7096 },
+};
+static const struct handler ext_handlers[] = {
+	{ vm_op_while, 0 }, { vm_op_continue, 0 }, { vm_op_break, 0 }, { vm_op_menu, 0 }, { NULL, 0x6842 },
+	{ NULL, 0x6916 }, { NULL, 0x6f06 }, { NULL, 0x6b76 }, { NULL, 0x6bcb }, { NULL, 0x6c20 },
+	{ NULL, 0x6c85 }, { NULL, 0x6cea }, { NULL, 0x6d8b }, { NULL, 0x6e11 }, { vm_op_jump_mes, 0 },
+	{ vm_op_call_mes, 0 }, { vm_op_click_handler, 0 }, { vm_op_flag_file, 0 }, { vm_op_args_only, 0 },
+	{ vm_op_hit_test, 0 }, { NULL, 0x73a5 }, { NULL, 0x73cd }, { NULL, 0x73ee },
+};
+#define N_OPS (sizeof op_handlers / sizeof op_handlers[0])
+#define N_EXT (sizeof ext_handlers / sizeof ext_handlers[0])
+
+static int run_handler(const struct handler *h, uint32_t index)
+{
+	if (h->fn)
+		return h->fn();
+	if (h->native == 0x60f9) /* op 10: the loop head itself, no backward jump */
+		return -1;
+	legacy(HANDLER_BASE + h->native, index);
+	return -1;
 }
 
 /* 0x40616e: fire the fetch probe (the exploration bot and NANPA2_VMTRACE
- * watch it), read the opcode at ESI and go on at what it is */
-static uint32_t fetch(void)
+ * watch it), read the opcode at vm_pc and run what it is. Returns -1 or the
+ * block result. */
+static int fetch(void)
 {
-	x86_probe(0x40616e);
-	uint32_t op = vm_script_byte(cpu.r[ESI]);
-	set8l(EAX, op);
-	X86_COUNT(1);
+	probe_vm_fetch(vm_pc);
+	uint32_t op = vm_script_byte(vm_pc);
+	COST(1);
 	if (op == VM_BLOCK_END) {
-		X86_COUNT(2);
+		COST(2);
 		return block_end();
 	}
 	if (op == VM_BLOCK_OPEN) {
-		X86_COUNT(4);
+		COST(4);
 		return block_open();
 	}
 	if (op == 0x04) { /* 04 xx: extended op (no bound check natively) */
-		uint32_t xx = vm_script_byte(cpu.r[ESI] + 1);
-		cpu.r[ESI] += 2;
-		cpu.r[EAX] = xx - 0x10;
-		X86_COUNT(6 + 5);
-		if (cpu.r[EAX] >= N_EXT)
+		uint32_t xx = vm_script_byte(vm_pc + 1);
+		vm_pc += 2;
+		uint32_t index = (xx - 0x10) & 0xffffffffu;
+		COST(6 + 5);
+		if (index >= N_EXT)
 			x86_trap(0x40625b, "extended opcode outside the native table");
-		return HANDLER_BASE + ext_handlers[cpu.r[EAX]];
+		return run_handler(&ext_handlers[index], index);
 	}
 	if (op == VM_SEPARATOR) {
-		X86_COUNT(8);
+		COST(8);
 		return block_end();
 	}
 	if (op == VM_STRING) {
-		cpu.r[ESI]++;
-		X86_COUNT(10 + 1);
-		return string_char();
+		vm_pc++;
+		COST(10 + 1);
+		string_chars();
+		return -1;
 	}
 	if (op >= 0x80) {
-		X86_COUNT(12);
-		return big5_char();
+		COST(12);
+		big5_char(op);
+		return -1;
 	}
-	if (op < 0x09 || op >= 0x20) {
-		X86_COUNT(op < 0x09 ? 14 : 16);
-		return VM_END;
+	if (op < 0x09 || op >= 0x20) { /* 03, 05, 07, 08 and 0x20-0x7f end the VM */
+		COST(op < 0x09 ? 14 : 16);
+		ctl_quit();
 	}
-	cpu.r[ESI]++;
-	cpu.r[EAX] = op - 0x0a;
-	X86_COUNT(17 + 4);
-	if (cpu.r[EAX] >= N_OPS)
+	vm_pc++;
+	uint32_t index = op - 0x0a;
+	COST(17 + 4);
+	if (index >= N_OPS)
 		x86_trap(0x406204, "opcode outside the native table (09, 1b-1f)");
-	return HANDLER_BASE + op_handlers[cpu.r[EAX]];
+	return run_handler(&op_handlers[index], index);
 }
 
-/* ---- blocks */
+/* ---- the loop */
 
-/* 0x4061c2, after a block: ESI back at its 01, skip it (0x4061d4, AX = 0)
- * and go on */
-uint32_t game_vm_block_done(void)
+/* 0x406143: a button is down with its handler set: wait until the left, then
+ * the right button are up, then run the handler's block (busy flag set, vm_pc
+ * saved) */
+static int click_run(uint32_t handler)
 {
-	cpu.r[ESI] = vm_skip_block(pop32());
-	set16(EAX, 0);
-	X86_COUNT(3);
-	X86_POLL(0x4061c8);
-	return VM_LOOP;
-}
-
-/* 0x4061cd, called with ESI at a block's 01: run the block as a nested
- * loop (`call 0x4060f9`); 0x4061d3 returns its AL */
-uint32_t game_vm_run_block(void)
-{
-	cpu.r[ESI]++;
-	X86_COUNT(1);
-	return call_exit(VM_LOOP, 0x4061d3);
-}
-
-uint32_t game_vm_block_return(void)
-{
-	X86_COUNT(1);
-	return pop32();
-}
-
-/* ---- text */
-
-/* 0x406315, after an ASCII character (and its delay): advance the cursor,
- * then the next byte of the string */
-uint32_t game_vm_string_next(void)
-{
-	X86_COUNT(1);
-	game_text_advance();
-	X86_COUNT(1);
-	X86_POLL(0x40631a);
-	return string_char();
-}
-
-/* 0x406383, after a Big5 character: advance the cursor, go on */
-uint32_t game_vm_big5_next(void)
-{
-	X86_COUNT(1);
-	game_text_advance();
-	X86_COUNT(1);
-	X86_POLL(0x406388);
-	return VM_LOOP;
-}
-
-/* ---- waits */
-
-/* 0x4074d5, AL = k: pump, then test input k: 0 click/Enter (0x10), 1
- * right click/Esc (0x20), 2-5 up, down, left, right (1, 2, 4, 8); ZF set
- * when it is up. WM_QUIT ends the VM. */
-uint32_t game_input_test(void)
-{
-	push32(cpu.r[EAX]);
-	X86_COUNT(1);
-	return call_exit(PUMP, 0x4074db);
-}
-
-uint32_t game_input_tested(void)
-{
-	static const uint8_t bit[6] = { 0x10, 0x20, 0x01, 0x02, 0x04, 0x08 };
-	X86_COUNT(2);
-	if (!f_logic(cpu.r[EAX], 32)) /* or eax, eax: the flags a quit leaves */
-		return quit();
-	cpu.r[EAX] = pop32();
-	uint32_t k = cpu.r[EAX] & 0xff;
-	X86_COUNT(1 + 2 * (k < 6 ? k + 1 : 6));
-	if (k < 6) {
-		f_logic(RT(input_bits) & bit[k], 8);
-		X86_COUNT(2);
-	} else {
-		f_sub(k, 5, 0, 8); /* the last `cmp al, 5` */
-		X86_COUNT(1);
+	for (;;) {
+		COST(1); /* mov al, 0 */
+		COST(1); /* call 0x4074d5 */
+		int down = vm_input_down(0);
+		COST(1);
+		if (down) {
+			POLL(0x40614a);
+			continue;
+		}
+		COST(1); /* mov al, 1 */
+		COST(1);
+		down = vm_input_down(1);
+		COST(1);
+		if (down) {
+			POLL(0x406153);
+			continue;
+		}
+		break;
 	}
-	return pop32();
+	uint32_t saved = vm_pc;
+	RT_SET(click_busy, 0xff);
+	vm_pc = handler;
+	COST(3);
+	COST(1); /* call 0x4061cd */
+	vm_run_block();
+	RT_SET(click_busy, 0);
+	vm_pc = saved;
+	COST(3); /* mov [busy], pop esi, jmp 0x4060f9 */
+	POLL(0x40616c);
+	return -1;
 }
 
-/* 0x4075c6, ECX = n: wait until the frame counter reaches its value now +
- * n / 4 + 1, pumping and stepping the animations each round (ECX =
- * n / 4 + 1, EAX = the target frame) */
-uint32_t game_wait_frames(void)
+/* one pass of the loop (0x4060f9): pump, step the animations, test the buttons
+ * for their click handlers unless they are off (@[9] bit 2) or one is
+ * running, then fetch and run one opcode */
+static int vm_pass(void)
 {
-	cpu.r[ECX] = (cpu.r[ECX] >> 2) + 1;
-	cpu.r[EAX] = RT(frame) + cpu.r[ECX];
-	push32(cpu.r[EAX]);
-	X86_COUNT(5);
-	return call_exit(PUMP, 0x4075d7);
-}
-
-/* 0x4075d7, after a pump, the target frame on the stack */
-uint32_t game_wait_frames_pumped(void)
-{
-	X86_COUNT(2);
-	if (!cpu.r[EAX])
-		return quit();
-	X86_COUNT(1);
+	COST(1); /* call 0x401bf0 */
+	int alive = ctl_pump();
+	COST(2);
+	if (!alive)
+		ctl_quit();
+	COST(1);
 	game_anim_step();
-	cpu.r[EAX] = pop32();
-	f_sub(cpu.r[EAX], RT(frame), 0, 32);
-	X86_COUNT(3);
-	if (!cpu.cf && !cpu.zf) { /* ja: not there yet */
-		X86_POLL(0x4075eb);
-		push32(cpu.r[EAX]);
-		X86_COUNT(1);
-		return call_exit(PUMP, 0x4075d7);
+	COST(2);
+	if (SV(vflags) & 4)
+		return fetch();
+	COST(2);
+	if (RT(click_busy))
+		return fetch();
+	COST(1); /* mov al, 0 */
+	COST(1); /* call 0x4074d5 */
+	int down = vm_input_down(0);
+	uint32_t h = rd16(VM_CLICK_HANDLERS);
+	COST(2);
+	if (down) {
+		COST(2); /* or edi, edi */
+		if (!h)
+			return fetch();
+		return click_run(h);
 	}
-	X86_COUNT(1);
-	return pop32();
-}
-
-/* 0x406acc / 0x406ae8: with Ctrl down return at once (AL = 0x40), else
- * wait a frame and test the button (the piece at ra) */
-static uint32_t click_wait_round(uint32_t ra)
-{
-	set8l(EAX, f_logic(RT(input_bits) & INPUT_SKIP, 8));
-	X86_COUNT(3);
-	if (cpu.r[EAX] & 0xff) {
-		X86_COUNT(1);
-		return pop32();
+	COST(1); /* mov al, 1 */
+	COST(1);
+	down = vm_input_down(1);
+	h = rd16(VM_CLICK_HANDLERS + 2);
+	COST(2);
+	if (down) {
+		COST(2);
+		if (!h)
+			return fetch();
+		return click_run(h);
 	}
-	cpu.r[ECX] = 1;
-	X86_COUNT(1);
-	return call_exit(WAIT_FRAMES, ra);
+	COST(1);
+	return fetch();
 }
 
-/* 0x406acc: wait for a click or Enter, pressed (one frame per test) and
- * then released */
-uint32_t game_wait_click(void)
+/* 0x4060f9: run until a block ends; the block result (AL) */
+int vm_loop(void)
 {
-	return click_wait_round(0x406adf);
-}
-
-/* 0x406adf / 0x406afb, after a frame: test the button */
-uint32_t game_wait_click_framed(void)
-{
-	set8l(EAX, 0);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x406ae6);
-}
-
-uint32_t game_wait_click_release_framed(void)
-{
-	set8l(EAX, 0);
-	X86_COUNT(1);
-	return call_exit(INPUT_TEST, 0x406b02);
-}
-
-/* 0x406ae6, tested (ZF set: up): up waits on for the press, down waits
- * for the release */
-uint32_t game_wait_click_tested(void)
-{
-	X86_COUNT(1);
-	if (cpu.zf) {
-		X86_POLL(0x406ae6);
-		return WAIT_CLICK;
+	for (;;) {
+		int r = vm_pass();
+		if (r >= 0)
+			return r;
 	}
-	return click_wait_round(0x406afb);
-}
-
-/* 0x406b02, tested while waiting for the release */
-uint32_t game_wait_click_release_tested(void)
-{
-	X86_COUNT(1);
-	if (!cpu.zf) {
-		X86_POLL(0x406b02);
-		return click_wait_round(0x406afb);
-	}
-	X86_COUNT(1);
-	return pop32();
 }

@@ -297,6 +297,12 @@ static void hle_trace(uint32_t addr)
 	fputc('\n', stderr);
 }
 
+/* the trace line of a pump that the C engine calls directly (ctl.c) */
+void hle_trace_pump(void)
+{
+	hle_trace(0x401bf0);
+}
+
 void hle_call(uint32_t addr)
 {
 	hle_trace(addr);
