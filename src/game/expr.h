@@ -14,8 +14,8 @@ void script_set_flag(uint32_t n, uint32_t v);
 
 /* Evaluate the RPN expression at *pc (a script offset) up to its 0x03 end
  * token; *pc moves past it. Returns the value. A token that cannot start an
- * expression ends it at once: *bare_token gets it (else -1) and the
- * caller's EAX keeps its upper bytes (see game_eval_regs). Malformed
+ * expression ends it at once: *bare_token gets it (else -1) and it is the
+ * value returned. Malformed
  * expressions (stack underflow, leftover values, an unknown token after a
  * value) trap: the native code would return into garbage. *insns is the
  * number of instructions the native loop runs for it (CPU-time estimate). */
@@ -27,11 +27,5 @@ extern uint64_t script_eval_coverage[256];
  * the byte at *pc is not a constant token (*value = that byte; *pc still
  * moves past it). */
 int script_read_constant(uint32_t *pc, uint32_t *value);
-
-/* Register-level entry points (native calling conventions; called from
- * src/game/game.c after the return address was popped). */
-void game_eval_regs(void);          /* 0x4037fc */
-void game_read_constant_regs(void); /* 0x4039f7 */
-void game_set_flag_regs(void);      /* 0x406455 */
 
 #endif

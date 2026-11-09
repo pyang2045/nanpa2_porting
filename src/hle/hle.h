@@ -23,13 +23,7 @@
 #define THUNK_END 0xf2000000u
 
 void hle_call(uint32_t addr);
-int hle_is_target(uint32_t addr);
-
-/* Jump overrides (HLE_GAME_JUMP in overrides.h, script opcode handlers
- * reimplemented in src/game): code that reaches one by any jump continues
- * at pc = hle_jump(addr). There is no return address; the handler leaves
- * the CPU as the native one would at the returned pc. */
-uint32_t hle_jump(uint32_t addr);
+void hle_trace_pump(void); /* NANPA2_HLETRACE line of the message pump, called directly by ctl_pump */
 
 /* After hle_call popped the return address: argument i (0-based). */
 static inline uint32_t hle_arg(int i)
@@ -46,6 +40,13 @@ static inline void hle_stdcall_pop(int n)
 /* Copy a NUL-terminated string from emulated memory (truncates). */
 void hle_strcpy_in(char *dst, uint32_t src, size_t cap);
 uint32_t hle_strlen(uint32_t a);
+
+/* Dev probes (win32.c): the script VM fetched the opcode at offset off of
+ * segment 0; the hit test (04 23) is about to scan the rectangle table at
+ * script address table. They feed NANPA2_VMTRACE, the exploration bot and
+ * NANPA2_HOTSPOTS. */
+void probe_vm_fetch(uint32_t off);
+void probe_hit_table(uint32_t table);
 
 /* Setup: map imports (IAT) to thunks. Needs x86_load_image() first. */
 int hle_init(const char *game_dir, const char *save_dir);

@@ -21,7 +21,21 @@ static uint64_t cp_ticks = 250;
 static uint32_t cur_tick, cur_k;
 static uint64_t last_cp_idx;
 static char save_root[1024];
-static int check_li_only;
+/* NANPA2_REPLAY_CHECK=li[,raw.icount,raw.data,...]: compare only the keys that start
+ * with one of the comma-separated prefixes ("li" = every li.* key); unset = all keys */
+static const char *check_keys;
+static int key_checked(const char *tok, size_t kl)
+{
+	if (!check_keys)
+		return 1;
+	for (const char *p = check_keys; *p;) {
+		size_t n = strcspn(p, ",");
+		if (n == 2 && !strncmp(p, "li", 2) ? !strncmp(tok, "li.", 3) : (n <= kl && !strncmp(tok, p, n)))
+			return 1;
+		p += n + (p[n] == ',');
+	}
+	return 0;
+}
 
 /* what the run has reached (the layout independent part) */
 static uint64_t files_hash, mes_hash, nfiles, nmes;
@@ -203,7 +217,7 @@ static int diff_cp(const char *golden, const char *live, char *out, size_t cap)
 		if (!eq)
 			continue;
 		size_t kl = (size_t)(eq - tok);
-		if (check_li_only && strncmp(tok, "li.", 3))
+		if (!key_checked(tok, kl))
 			continue;
 		/* the same key in the live line */
 		const char *p = live;
@@ -375,7 +389,7 @@ void replay_init(const char *save_dir)
 	if (c && atoi(c) > 0)
 		cp_ticks = (uint64_t)atoi(c);
 	const char *chk = getenv("NANPA2_REPLAY_CHECK");
-	check_li_only = chk && !strcmp(chk, "li");
+	check_keys = chk && *chk ? strdup(chk) : NULL;
 	const char *rp = getenv("NANPA2_REPLAY");
 	const char *rc = getenv("NANPA2_RECORD");
 	if (rp) {
@@ -389,8 +403,8 @@ void replay_init(const char *save_dir)
 			exit(2);
 		}
 		replaying = 1;
-		fprintf(stderr, "replay: %s: %zu messages, %zu checkpoints every %u ticks%s\n", rp, nrevs, nrcps,
-			(unsigned)cp_ticks, check_li_only ? " (layout independent keys only)" : "");
+		fprintf(stderr, "replay: %s: %zu messages, %zu checkpoints every %u ticks%s%s%s\n", rp, nrevs, nrcps,
+			(unsigned)cp_ticks, check_keys ? " (keys: " : "", check_keys ? check_keys : "", check_keys ? ")" : "");
 	}
 	if (rc) {
 		rec = fopen(rc, "wb");

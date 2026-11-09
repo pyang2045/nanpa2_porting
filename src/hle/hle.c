@@ -5,10 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "game/game.h"
 #include "logo.h"
 #include "lzh.h"
-#include "x86/interp.h"
 #include "game/state.h"
 
 #define MAX_IMPORTS 256
@@ -80,17 +78,9 @@ static int map_imports(void)
 
 int hle_init(const char *game_dir, const char *save_dir)
 {
-	x86_interp_init(); /* the override list, used by both backends */
 	crt_init(game_dir, save_dir);
 	win32_init();
 	return map_imports();
-}
-
-/* Everything outside the game code (thunks, the C runtime) and the
- * overrides of overrides.h, the list both backends use. */
-int hle_is_target(uint32_t addr)
-{
-	return x86_is_hle(addr);
 }
 
 /* ---- COM objects ----
@@ -242,7 +232,6 @@ static void override_call(uint32_t addr)
 		unsigned char *out = lzh_decode(x86_ptr(src, cap), cap, &n);
 		if (!out)
 			x86_trap(addr, "corrupt GP4/ANI data");
-		X86_TRACE(dst, (uint32_t)n, 1); /* differential tests undo it */
 		memcpy(x86_ptr(dst, (uint32_t)n), out, n);
 		/* emulated CPU time of the native decoder: lifting it and counting
 		 * gave about 70 instructions per input byte + 1.2 per output byte
@@ -257,17 +246,6 @@ static void override_call(uint32_t addr)
 	x86_trap(addr, msg);
 }
 
-uint32_t hle_jump(uint32_t addr)
-{
-	X86_LOCKSTEP_POINT(LS_HLE, addr);
-	uint32_t pc;
-	if (game_jump(addr, &pc))
-		return pc;
-	char msg[64];
-	snprintf(msg, sizeof msg, "no jump override for %08x", addr);
-	x86_trap(addr, msg);
-}
-
 /* NANPA2_HLETRACE=1: every call into the HLE layer (imports, COM methods,
  * C runtime, HLE overrides) with its first six arguments, before it runs.
  * Stack addresses are written STK so that two builds' traces compare (the
@@ -275,10 +253,14 @@ uint32_t hle_jump(uint32_t addr)
 static void hle_trace(uint32_t addr)
 {
 	static int on = -1;
-	if (on < 0)
-		on = getenv("NANPA2_HLETRACE") != NULL;
+	if (on < 0) {
+		const char *e = getenv("NANPA2_HLETRACE");
+		on = !e ? 0 : !strcmp(e, "2") ? 2 : 1; /* 2: with the instruction count */
+	}
 	if (!on)
 		return;
+	if (on == 2)
+		fprintf(stderr, "ic %llu ", (unsigned long long)x86_icount);
 	fprintf(stderr, "hle %08x", addr);
 	int n = 1; /* arguments known: imports have their count, others show the first */
 	if (addr >= THUNK_IMPORT && addr < THUNK_COM) {
@@ -295,9 +277,14 @@ static void hle_trace(uint32_t addr)
 	fputc('\n', stderr);
 }
 
+/* the trace line of a pump that the C engine calls directly (ctl.c) */
+void hle_trace_pump(void)
+{
+	hle_trace(0x401bf0);
+}
+
 void hle_call(uint32_t addr)
 {
-	X86_LOCKSTEP_POINT(LS_HLE, addr);
 	hle_trace(addr);
 	pop32(); /* return address: the caller continues there */
 	if (addr >= THUNK_COM && addr < THUNK_END) {
@@ -323,8 +310,6 @@ void hle_call(uint32_t addr)
 		snprintf(msg, sizeof msg, "import %s", i < nimports ? imports[i].name : "?");
 		x86_trap(addr, msg);
 	}
-	if (game_call(addr)) /* reimplemented game logic (src/game) */
-		return;
 	if (crt_call(addr))
 		return;
 	override_call(addr);

@@ -1,147 +1,133 @@
 /*
- * The town map, part 1 (stage 5A): the 04 26 dispatcher 0x403a70 and the
- * sub-ops that only move data around (init, sprite scripts, entry points,
- * layer unpacking and copying), the area trigger test and the sprite
- * collision test. The drawing is in map_draw.c, the movement in
- * map_move.c, the walk planner in map_path.c.
+ * The town map, part 1: the sub-ops of 04 26 that only move data around (init,
+ * sprite scripts, entry points, layer unpacking and copying), the area trigger
+ * test and the sprite collision test, and the dispatch of the sub-ops that do
+ * not wait. The drawing is in map_draw.c, the movement in map_move.c, the walk
+ * planner in map_path.c, the sprite scripts in map_sprite.c, and the sub-ops
+ * that wait for the window (5, 7, 12) and the handler itself in map_pump.c.
  *
- * 04 26 n, args: the VM's ext op 0x26 (src/game/ops_sys.c game_op_map)
- * parses the argument list, calls 0x403a70 with ESI = the argument values
- * (0x445d06), and keeps AX as the script register S. 0x403a70 copies
- * arguments 1..6 to MAP_ARGS (the sub-ops read them there) and runs
- * sub-op n of a table the native code holds in .data; the C dispatches on
- * n itself. Sub-ops 5, 7 and 12 pump messages and stay native until the
- * pump is split (docs/reimpl.md "Stage 5A"); so does any sub-op not
- * listed here.
- *
- * The result of a sub-op is AX at its return, whatever it was last used
- * for (the unit comparison sees it as S), so each function below leaves
- * AX as the native one does.
+ * 04 26 n, args: the handler (map_pump.c) parses the argument list; 0x403a70
+ * copies arguments 1..6 to G.map.v.args (the sub-ops read them there) and runs
+ * sub-op n. The script register S gets the AX the sub-op leaves, whatever it
+ * was last used for, so each function below returns the AX the native one
+ * leaves (only the low 16 bits are kept).
  */
 #include "game/map.h"
-#include "game/state.h"
 
 /* ---- the sub-ops */
 
 /* Sub-op 0, 0x403a87: take the layer's size, find the walk grid after the
  * layer (w*h tiles of 2 bytes, 4 bytes of size before) and forget the
- * event state. S = the walk grid's offset. */
+ * event state. AX = the walk grid's offset. */
 static uint32_t op_init(void)
 {
-	uint32_t m = map_base();
-	uint32_t layer = rd16(m + M_LAYER);
-	uint32_t size = rd32(SEG1 + layer);
-	wr32(m + M_MAP_W, size);
-	uint32_t w = rd16(m + M_MAP_W), h = rd16(m + M_MAP_H);
-	uint32_t grid = ((w * h) * 2 + 4 + rd16(m + M_LAYER)) & 0xffff;
+	struct map_rec *m = map_rec();
+	uint32_t layer = m->layer;
+	uint32_t size = seg1_u16(layer) | (seg1_u16(layer + 2) << 16);
+	m->map_w = size & 0xffff;
+	m->map_h = size >> 16;
+	uint32_t grid = ((m->map_w * m->map_h) * 2 + 4 + m->layer) & 0xffff;
 	MV_SET(walk_base, grid);
 	MV_SET(autowalk, 0);
 	MV_SET(last_sprite, 0xffff);
 	MV_SET(last_click, 0xffff);
 	MV_SET(last_area, 0xffff);
-	X86_COUNT(26);
+	COST(26);
 	return (size & 0xffff0000u) | grid; /* EAX: the size's height over the offset */
 }
 
 /* Sub-op 1, 0x403ae9: patch the first sprite script (the player's): bytes
- * 0xc1 and 0xc3 at 2 and 4. S = 1 (EAX is left at the sub-op number). */
+ * 0xc1 and 0xc3 at 2 and 4. AX stays at the sub-op number. */
 static void op_player_script(void)
 {
-	uint32_t m = map_base();
-	uint32_t table = rd16(m + M_SCRIPTS);
-	uint32_t script = rd16(SEG1 + table);
-	wr8(SEG1 + script + 2, 0xc1);
-	wr8(SEG1 + script + 4, 0xc3);
+	struct map_rec *m = map_rec();
+	uint32_t script = seg1_u16(m->scripts);
+	seg1_set8(script + 2, 0xc1);
+	seg1_set8(script + 4, 0xc3);
 	MV_SET(last_sprite, 0xffff);
 	MV_SET(last_click, 0xffff);
 	MV_SET(last_area, 0xffff);
-	X86_COUNT(15);
+	COST(15);
 }
 
-/* the sprite table entry of MAP_ARGS[0] (EDI = M, ESI = the sprite) */
-static uint32_t sprite_arg(uint32_t m)
+/* the sprite table entry of argument 1 */
+static struct sprite *sprite_arg(const struct map_rec *m)
 {
-	uint32_t n = MV(args[0]);
-	return ((n << 4) + rd16(m + M_SPRITES)) & 0xffff;
+	return sprite_at(((MV(args[0]) << 4) + m->sprites) & 0xffff);
 }
 
 /* Sub-op 13, 0x4053a6: sprite a runs script b from its start, with no
- * movement in progress. S = b. */
+ * movement in progress. AX = b. */
 static uint32_t op_sprite_script(void)
 {
-	uint32_t s = SEG1 + sprite_arg(map_base());
+	struct sprite *s = sprite_arg(map_rec());
 	uint32_t b = MV(args[1]);
-	wr8(s + S_SCRIPT, b);
-	wr8(s + S_SCRIPT_PC, 0);
-	wr16(s + S_KIND, 0); /* kind and count */
-	X86_COUNT(16);
+	s->script = b;
+	s->script_pc = 0;
+	s->kind = 0;
+	s->count = 0;
+	COST(16);
 	return b;
 }
 
 /* Sub-op 14, 0x4053de: b = 0 enables sprite a (clears the off flag), else
- * disables it. S = b. */
+ * disables it. AX = b. */
 static uint32_t op_sprite_enable(void)
 {
-	uint32_t s = SEG1 + sprite_arg(map_base());
+	struct sprite *s = sprite_arg(map_rec());
 	uint32_t b = MV(args[1]);
 	if (b == 0)
-		wr8(s + S_FLAGS, rd8(s + S_FLAGS) & ~SPRITE_OFF);
+		s->flags &= (uint8_t)~SPRITE_OFF;
 	else
-		wr8(s + S_FLAGS, rd8(s + S_FLAGS) | SPRITE_OFF);
-	X86_COUNT(15);
+		s->flags |= SPRITE_OFF;
+	COST(15);
 	return b;
 }
 
-/* The entry n, 18 bytes: the view cell, the player's cell and frame, the
- * scroll limits (M_MIN_X..M_MAX_Y) */
-static uint32_t entry_arg(uint32_t m)
+/* The entry of argument 1, 18 bytes: the view cell, the player's cell and
+ * frame, the scroll limits */
+static struct entry *entry_arg(const struct map_rec *m)
 {
-	uint32_t e = rd16(m + M_ENTRIES);
 	uint32_t n2 = MV(args[0]) * 2;
-	return SEG1 + e + n2 * 8 + n2;
+	return entry_at(m->entries + n2 * 8 + n2);
 }
 
 static void history_fill(void)
 {
 	for (uint32_t i = 1; i < HISTORY_LEN; i++) {
-		hist_wr32(5 * i, hist_rd32(0));
-		hist_wr8(5 * i + 4, hist_rd8(4));
-		X86_POLL(0x4050f6);
+		*hist(i) = *hist(0);
+		POLL(0x4050f6);
 	}
-	X86_COUNT(5 + 9 * 6);
+	COST(5 + 9 * 6);
 }
 
 /* Sub-op 10, 0x40502c: put the view and the first three sprites at entry
  * a, fill the history with that position and take the entry's scroll
- * limits. Stops the auto-walk. S = the entry's last limit word. */
+ * limits. Stops the auto-walk. AX = the entry's last limit word pair. */
 static uint32_t op_enter(void)
 {
 	MV_SET(autowalk, 0);
-	uint32_t m = map_base();
-	uint32_t e = entry_arg(m);
-	wr16(m + M_VIEW_X, rd16(e));
-	wr16(m + M_VIEW_Y, rd16(e + 2));
-	uint32_t sp = SEG1 + rd16(m + M_SPRITES);
-	uint32_t x = rd16(e + 4);
-	wr16(sp + S_X, x);
-	wr16(sp + 0x10 + S_X, x);
-	wr16(sp + 0x20 + S_X, x);
-	hist_wr16(1, x);
-	uint32_t y = rd16(e + 6);
-	wr16(sp + S_Y, y);
-	wr16(sp + 0x10 + S_Y, y);
-	wr16(sp + 0x20 + S_Y, y);
-	hist_wr16(3, y);
-	uint32_t f = rd16(e + 8) & 0xff;
-	wr8(sp + S_FRAME, f);
-	wr8(sp + 0x10 + S_FRAME, f);
-	wr8(sp + 0x20 + S_FRAME, f);
-	hist_wr8(0, f);
+	struct map_rec *m = map_rec();
+	struct entry *e = entry_arg(m);
+	m->view_x = e->view_x;
+	m->view_y = e->view_y;
+	struct sprite *sp = sprites_of(m);
+	uint32_t x = e->x;
+	sp[0].x = sp[1].x = sp[2].x = x;
+	hist(0)->x = x;
+	uint32_t y = e->y;
+	sp[0].y = sp[1].y = sp[2].y = y;
+	hist(0)->y = y;
+	uint32_t f = e->frame & 0xff;
+	sp[0].frame = sp[1].frame = sp[2].frame = f;
+	hist(0)->frame = f;
 	history_fill();
-	wr32(m + M_MIN_X, rd32(e + 0xa));
-	uint32_t last = rd32(e + 0xe);
-	wr32(m + M_MAX_X, last);
-	X86_COUNT(60);
+	m->min_x = e->min_x;
+	m->min_y = e->min_y;
+	uint32_t last = e->max_x | ((uint32_t)e->max_y << 16);
+	m->max_x = e->max_x;
+	m->max_y = e->max_y;
+	COST(60);
 	return last;
 }
 
@@ -149,77 +135,76 @@ static uint32_t op_enter(void)
  * is not moved, the walk is not stopped). */
 static uint32_t op_reset_history(void)
 {
-	uint32_t m = map_base();
-	uint32_t e = entry_arg(m);
-	uint32_t sp = SEG1 + rd16(m + M_SPRITES);
-	uint32_t x = rd16(sp + S_X);
-	wr16(sp + 0x10 + S_X, x);
-	wr16(sp + 0x20 + S_X, x);
-	hist_wr16(1, x);
-	uint32_t y = rd16(sp + S_Y);
-	wr16(sp + 0x10 + S_Y, y);
-	wr16(sp + 0x20 + S_Y, y);
-	hist_wr16(3, y);
-	uint32_t f = rd8(sp + S_FRAME);
-	wr8(sp + 0x10 + S_FRAME, f);
-	wr8(sp + 0x20 + S_FRAME, f);
-	hist_wr8(0, f);
+	struct map_rec *m = map_rec();
+	struct entry *e = entry_arg(m);
+	struct sprite *sp = sprites_of(m);
+	uint32_t x = sp[0].x;
+	sp[1].x = sp[2].x = x;
+	hist(0)->x = x;
+	uint32_t y = sp[0].y;
+	sp[1].y = sp[2].y = y;
+	hist(0)->y = y;
+	uint32_t f = sp[0].frame;
+	sp[1].frame = sp[2].frame = f;
+	hist(0)->frame = f;
 	history_fill();
-	wr32(m + M_MIN_X, rd32(e + 0xa));
-	uint32_t last = rd32(e + 0xe);
-	wr32(m + M_MAX_X, last);
-	X86_COUNT(55);
+	m->min_x = e->min_x;
+	m->min_y = e->min_y;
+	uint32_t last = e->max_x | ((uint32_t)e->max_y << 16);
+	m->max_x = e->max_x;
+	m->max_y = e->max_y;
+	COST(55);
 	return last;
 }
 
 /* Sub-op 15, 0x405415: unpack the run-length coded layer at segment
  * offset a over the current layer. Words are tiles; with bit 14 set a
- * word is repeated as many times as the byte after it says. S = the last
+ * word is repeated as many times as the byte after it says. AX = the last
  * word stored. */
 static uint32_t op_unpack(void)
 {
-	uint32_t m = map_base();
-	uint32_t dst = rd16(m + M_LAYER);
+	struct map_rec *m = map_rec();
+	uint32_t dst = m->layer;
 	uint32_t src = MV(args[0]);
-	uint32_t w = rd16(SEG1 + src), h = rd16(SEG1 + src + 2);
-	wr16(SEG1 + dst, w);
-	wr16(SEG1 + dst + 2, h);
+	uint32_t w = seg1_u16(src), h = seg1_u16(src + 2);
+	seg1_set16(dst, w);
+	seg1_set16(dst + 2, h);
 	if (!w || !h)
 		x86_trap(0x405415, "map: unpacking a layer with no cells");
 	src += 4;
 	dst += 4;
 	uint32_t run = 0, v = 0;
-	X86_COUNT(20);
+	COST(20);
 	for (uint32_t n = w * h; n; n--) {
 		if (run) {
-			X86_COUNT(6);
+			COST(6);
 			run--;
 		} else {
-			v = rd16(SEG1 + src);
+			v = seg1_u16(src);
 			src += 2;
 			if (v & 0x4000) {
 				v &= 0xbfff;
-				run = rd8(SEG1 + src) - 1; /* 0 wraps: a run of 4G */
+				run = seg1_u8(src) - 1; /* 0 wraps: a run of 4G */
 				src++;
-				X86_COUNT(14);
+				COST(14);
 			} else {
-				X86_COUNT(10);
+				COST(10);
 			}
 		}
-		wr16(SEG1 + dst, v);
+		seg1_set16(dst, v);
 		dst += 2;
-		X86_POLL(0x405487);
+		POLL(0x405487);
 	}
 	return v;
 }
 
 /* Sub-op 16, 0x40548f: copy the rectangle of layer cells (a, b)-(c, d) to
- * (e, f), row by row, forwards. S = the last cell copied. */
+ * (e, f), row by row, forwards. AX = the last cell copied. */
 static uint32_t op_copy_cells(void)
 {
-	uint32_t m = map_base();
-	uint32_t layer = rd16(m + M_LAYER);
-	uint32_t w = rd16(SEG1 + layer);
+	struct map_rec *m = map_rec();
+	uint32_t layer = m->layer;
+	uint32_t w = seg1_u16(layer);
 	uint32_t stride = w * 2;
 	uint32_t a = MV(args[0]), b = MV(args[1]), c = MV(args[2]), d = MV(args[3]);
 	uint32_t e = MV(args[4]), f = MV(args[5]);
@@ -231,233 +216,203 @@ static uint32_t op_copy_cells(void)
 	if (!rows || !cols)
 		x86_trap(0x40548f, "map: copying an empty rectangle");
 	uint32_t v = 0;
-	X86_COUNT(40);
+	COST(40);
 	for (uint32_t r = 0; r < rows; r++) {
 		uint32_t s = src, t = dst;
-		X86_COUNT(10);
+		COST(10);
 		for (uint32_t k = 0; k < cols; k++) {
-			v = rd16(SEG1 + s);
-			wr16(SEG1 + t, v);
+			v = seg1_u16(s);
+			seg1_set16(t, v);
 			s += 2;
 			t += 2;
-			X86_COUNT(6);
-			X86_POLL(0x405536);
+			COST(6);
+			POLL(0x405536);
 		}
 		src += stride;
 		dst += stride;
-		X86_POLL(0x40553f);
+		POLL(0x40553f);
 	}
 	return v;
 }
 
-/* Sub-op 32, 0x40558f: stop the auto-walk. S = 32. */
+/* Sub-op 32, 0x40558f: stop the auto-walk. */
 static void op_stop_walk(void)
 {
 	MV_SET(autowalk, 0);
-	X86_COUNT(2);
+	COST(2);
 }
 
 /* ---- area trigger and collision */
 
 /* Sub-op 8, 0x404f8c: the area table entry (x0, y0, x1, y1, code; 10 bytes
- * each, ended by x0 = 0xffff) that contains sprite a's cell; AX = its
- * code or 0xffff. Called by the event check. EBX = the last coordinate
- * compared. */
-void game_map_area_trigger(void)
+ * each, ended by x0 = 0xffff) that contains sprite n's cell; AX = its
+ * code or 0xffff. Called by the event check. */
+uint32_t game_map_area_trigger(uint32_t n)
 {
-	uint32_t sel = SV(map_sel);
-	uint32_t areas = rd16(sel + SEG1 + M_AREAS);
-	uint32_t sprites = rd16(sel + SEG1 + M_SPRITES);
-	uint32_t s = ((((MV(args[0]) & 0xffff) << 4) & 0xffff) + sprites) & 0xffff;
-	uint32_t cx = rd16(SEG1 + s + S_X), dx = rd16(SEG1 + s + S_Y);
-	uint32_t bx, ax;
-	X86_COUNT(10);
+	const struct map_rec *m = map_rec();
+	uint32_t areas = m->areas;
+	uint32_t off = ((((n & 0xffff) << 4) & 0xffff) + m->sprites) & 0xffff;
+	const struct sprite *s = sprite_at(off);
+	uint32_t cx = s->x, dx = s->y;
+	uint32_t ax;
+	COST(10);
 	for (;;) {
-		bx = rd16(SEG1 + areas);
+		const struct area *a = area_at(areas);
+		uint32_t bx = a->x0;
 		ax = 0xffff;
-		X86_COUNT(4);
+		COST(4);
 		if (bx == 0xffff) {
-			X86_COUNT(1);
+			COST(1);
 			break;
 		}
-		X86_COUNT(bx == cx ? 2 : 3);
+		COST(bx == cx ? 2 : 3);
 		if (bx <= cx) {
-			bx = rd16(SEG1 + areas + 4);
-			X86_COUNT(3);
+			bx = a->x1;
+			COST(3);
 			if (bx >= cx) {
-				bx = rd16(SEG1 + areas + 2);
-				X86_COUNT(bx == dx ? 3 : 4);
+				bx = a->y0;
+				COST(bx == dx ? 3 : 4);
 				if (bx <= dx) {
-					bx = rd16(SEG1 + areas + 6);
-					X86_COUNT(3);
+					bx = a->y1;
+					COST(3);
 					if (bx >= dx) {
-						ax = rd16(SEG1 + areas + 8);
-						X86_COUNT(2);
+						ax = a->code;
+						COST(2);
 						break;
 					}
 				}
 			}
 		}
 		areas += 10;
-		X86_COUNT(2);
-		X86_POLL(0x405004);
+		COST(2);
+		POLL(0x405004);
 	}
-	set16(EAX, ax);
-	cpu.r[EBX] = bx; /* bx replaces the low word of the movzx'd selector */
-	set16(ECX, cx);
-	set16(EDX, dx);
-	cpu.r[ESI] = s;
-	cpu.r[EDI] = areas;
+	return ax;
 }
 
-/* 0x404e25: does sprite s (an offset in segment 1) collide with another
- * sprite at the cell it is about to enter? The cell is one step ahead in
- * its facing (frame >> 1: up, down, left, right); sprites with a footprint
- * span their width or height along the other axis. Skips itself, sprites
- * 1 and 2 (the player's followers), the ones flagged ghost, solid-not, off
- * or not drawn. Returns the sprite's index or -1; AX/flags as the native
- * code leaves them, and the other registers it uses. */
-int game_map_collide(uint32_t s)
+/* 0x404e25: does sprite s collide with another sprite at the cell it is
+ * about to enter? The cell is one step ahead in its facing (frame >> 1: up,
+ * down, left, right); sprites with a footprint span their width or height
+ * along the other axis. Skips itself, sprites 1 and 2 (the player's
+ * followers), the ones flagged ghost, solid-not, off or not drawn. Returns
+ * the sprite's index or -1. */
+int game_map_collide(const struct sprite *s)
 {
-	uint32_t sp = SEG1 + s;
-	X86_COUNT(2);
-	if (rd8(sp + S_FLAGS) & SPRITE_GHOST) {
-		set16(EAX, 0xffff);
-		(void)f_sub(0xffff, 0xffff, 0, 16);
-		X86_COUNT(3);
+	COST(2);
+	if (s->flags & SPRITE_GHOST) {
+		COST(3);
 		return -1;
 	}
-	uint32_t dir = (rd8(sp + S_FRAME) >> 1) & 0xff;
-	set8l(EAX, dir);
+	uint32_t dir = (s->frame >> 1) & 0xff;
 	MV_SET(dir, dir);
-	uint32_t sel = SV(map_sel);
-	uint32_t base = rd16(SEG1 + sel + M_SPRITES);
-	uint32_t cx = rd16(sp + S_X), dx = rd16(sp + S_Y);
-	uint32_t bx = cpu.r[EBX];
-	X86_COUNT(9);
+	const struct map_rec *m = map_rec();
+	const struct sprite *o = sprites_of(m);
+	uint32_t cx = s->x, dx = s->y;
+	COST(9);
 	if (dir == 0) {
 		dx = (dx - 1) & 0xffff;
-		X86_COUNT(4);
+		COST(4);
 	} else if (dir == 1) {
-		bx = rd8(sp + S_HEIGHT);
-		dx = (dx + bx) & 0xffff;
-		X86_COUNT(8);
+		dx = (dx + s->height) & 0xffff;
+		COST(8);
 	} else if (dir == 2) {
 		cx = (cx - 1) & 0xffff;
-		X86_COUNT(8);
+		COST(8);
 	} else {
-		bx = rd8(sp + S_WIDTH);
-		cx = (cx + bx) & 0xffff;
-		X86_COUNT(9);
+		cx = (cx + s->width) & 0xffff;
+		COST(9);
 	}
-	uint32_t o = base, ax = 0;
-	int found = -1;
-	X86_COUNT(2);
-	if (rd8(SEG1 + o) == SPRITE_END) {
-		ax = 0xffff;
-		X86_COUNT(2 + 4);
-		goto done;
+	uint32_t ax = 0;
+	COST(2);
+	if (o->flags == SPRITE_END) {
+		COST(2 + 4);
+		return -1;
 	}
-	X86_COUNT(1);
+	COST(1);
 	for (;;) {
 		if (s == o) {
-			X86_COUNT(5);
+			COST(5);
 		} else if (ax == 1) {
-			X86_COUNT(7);
+			COST(7);
 		} else if (ax == 2) {
-			X86_COUNT(9);
+			COST(9);
 		} else {
-			uint32_t fl = rd8(SEG1 + o);
-			X86_COUNT(6 + 2);
+			uint32_t fl = o->flags;
+			COST(6 + 2);
 			if (fl == SPRITE_END) {
-				ax = 0xffff;
-				X86_COUNT(2 + 4);
-				break;
+				COST(2 + 4);
+				return -1;
 			}
 			if (fl & SPRITE_SOLID_NOT) {
-				X86_COUNT(2 + 3);
+				COST(2 + 3);
 			} else if (fl & SPRITE_OFF) {
-				X86_COUNT(2 + 2 + 3);
+				COST(2 + 2 + 3);
 			} else if (!(fl & SPRITE_DRAWN)) {
-				X86_COUNT(2 + 2 + 2 + 3);
+				COST(2 + 2 + 2 + 3);
 			} else {
-				X86_COUNT(2 + 2 + 2);
-				bx = rd16(SEG1 + o + S_X);
+				COST(2 + 2 + 2);
+				uint32_t bx = o->x;
 				uint32_t cxa = cx;
-				X86_COUNT(4);
+				COST(4);
 				if (dir < 2) {
-					cxa = (cx + rd8(sp + S_WIDTH) - 1) & 0xffff;
-					X86_COUNT(3);
+					cxa = (cx + s->width - 1) & 0xffff;
+					COST(3);
 				}
-				X86_COUNT(bx == cxa ? 3 : 4);
-				if (bx <= cxa) {
-					bx = (bx + rd8(SEG1 + o + S_WIDTH) - 1) & 0xffff;
-					X86_COUNT(7 + 2);
-					/* bx + width - 1 >= cx */
-					if (!(bx < cx)) {
-						bx = rd16(SEG1 + o + S_Y);
-						uint32_t dxa = dx;
-						X86_COUNT(4);
-						if (dir >= 2) {
-							dxa = (dx + rd8(sp + S_HEIGHT) - 1) & 0xffff;
-							X86_COUNT(3);
-						}
-						X86_COUNT(bx == dxa ? 3 : 4);
-						if (bx <= dxa) {
-							bx = (rd16(SEG1 + o + S_Y) + rd8(SEG1 + o + S_HEIGHT) - 1) & 0xffff;
-							X86_COUNT(7 + 2);
-							if (bx >= dx) {
-								found = (int)ax;
-								X86_COUNT(4);
-								goto fin;
-							}
-							X86_COUNT(3);
-							goto next;
-						}
-						X86_COUNT(3);
-						goto next;
-					}
-					X86_COUNT(3);
+				COST(bx == cxa ? 3 : 4);
+				if (bx > cxa) {
+					COST(3);
 					goto next;
 				}
-				X86_COUNT(3);
-				goto next;
+				bx = (bx + o->width - 1) & 0xffff;
+				COST(7 + 2);
+				/* bx + width - 1 >= cx */
+				if (bx < cx) {
+					COST(3);
+					goto next;
+				}
+				bx = o->y;
+				uint32_t dxa = dx;
+				COST(4);
+				if (dir >= 2) {
+					dxa = (dx + s->height - 1) & 0xffff;
+					COST(3);
+				}
+				COST(bx == dxa ? 3 : 4);
+				if (bx > dxa) {
+					COST(3);
+					goto next;
+				}
+				bx = (o->y + o->height - 1) & 0xffff;
+				COST(7 + 2);
+				if (bx >= dx) {
+					COST(4);
+					return (int)ax;
+				}
+				COST(3);
 			}
 		}
 next:
-		o += SPRITE_SIZE;
+		o++;
 		ax++;
-		X86_POLL(0x404e9f);
+		POLL(0x404e9f);
 	}
-done:
-	X86_COUNT(0);
-fin:
-	set16(EAX, ax);
-	set16(ECX, cx);
-	set16(EDX, dx);
-	set16(EBX, bx);
-	(void)f_sub(ax, 0xffff, 0, 16);
-	return found;
 }
 
-/* Sub-op 9, 0x40500e: collision test for sprite a. AX = the index of the
+/* Sub-op 9, 0x40500e: collision test for sprite n. AX = the index of the
  * sprite in the way, or 0xffff. */
-void game_map_collision(void)
+uint32_t game_map_collision(uint32_t n)
 {
-	uint32_t sel = SV(map_sel);
-	uint32_t n16 = MV(args[0]) << 4;
-	uint32_t s = (n16 & 0xffff0000u) | ((n16 + rd16(sel + SEG1 + M_SPRITES)) & 0xffff);
-	cpu.r[EDI] = sel;
-	cpu.r[ESI] = s;
-	X86_COUNT(6); /* movzx, movzx, shl, add, call, ret */
-	game_map_collide(s);
+	uint32_t n16 = n << 4;
+	uint32_t s = (n16 & 0xffff0000u) | ((n16 + map_rec()->sprites) & 0xffff);
+	COST(6); /* movzx, movzx, shl, add, call, ret */
+	return (uint32_t)game_map_collide(sprite_at(s)) & 0xffff;
 }
 
 /* ---- the dispatcher */
 
-/* The sub-ops that run to their end in one piece; 5, 7 and 12 pump messages
- * and are the pieces of map_pump.c; the table of the native dispatcher has
- * nothing at the other numbers. */
+/* The sub-ops that run to their end without waiting; 5, 7 and 12 wait for
+ * the window (map_pump.c); the table of the native dispatcher has nothing at
+ * the other numbers. */
 int game_map_op_in_c(uint32_t op)
 {
 	switch (op) {
@@ -469,75 +424,68 @@ int game_map_op_in_c(uint32_t op)
 	}
 }
 
-/* 0x403a70 up to its call of the sub-op: ESI = the argument values; copies
- * arguments 1..6 to MAP_ARGS, with the registers the rep movsd leaves
- * (the call of 0x403a70 and of the sub-op are counted here too). */
-void game_map_dispatch_args(void)
+/* 0x403a70 up to its call of the sub-op: copy arguments 1..6 of the list to
+ * G.map.v.args (the call of 0x403a70 and of the sub-op are counted here too) */
+void game_map_load_args(void)
 {
-	uint32_t src = cpu.r[ESI] + 2;
-	for (uint32_t i = 0; i < 3; i++)
-		wr32(MAP_ARGS + 4 * i, rd32(src + 4 * i));
-	cpu.r[ESI] = src + 12;
-	cpu.r[EDI] = MAP_ARGS + 12;
-	cpu.r[ECX] = 0;
-	X86_COUNT(9);
+	memcpy(G.map.v.args, &G.rt.arg_value[1], 12);
+	COST(9);
 }
 
-/* 0x403a70 for the C handler of 04 26 (ops_sys.c game_op_map): EAX = the
- * sub-op, ESI = the argument values. Copies arguments 1..6 to MAP_ARGS and
- * runs the sub-op; AX is its result. */
-void game_map_dispatch(void)
+/* 0x403a70 for the sub-ops that do not wait; returns the AX the sub-op leaves
+ * (the sub-op number if it sets none) */
+uint32_t game_map_op(uint32_t op)
 {
-	uint32_t op = cpu.r[EAX];
-	game_map_dispatch_args();
+	uint32_t eax = op;
+	game_map_load_args();
 	switch (op) {
 	case 0:
-		cpu.r[EAX] = op_init();
+		eax = op_init();
 		break;
 	case 1:
 		op_player_script();
 		break;
 	case 2:
-		game_map_fill_grid();
+		eax = game_map_fill_grid(eax);
 		break;
 	case 3:
-		game_map_overlay_sprites();
+		eax = game_map_overlay_sprites(eax);
 		break;
 	case 4:
-		game_map_redraw_changed();
+		eax = game_map_redraw_changed();
 		break;
 	case 6: /* 0x4042e7 */
-		game_map_fill_grid();
-		game_map_overlay_sprites();
-		game_map_redraw_changed();
-		X86_COUNT(4);
+		eax = game_map_fill_grid(eax);
+		eax = game_map_overlay_sprites(eax);
+		eax = game_map_redraw_changed();
+		COST(4);
 		break;
 	case 8:
-		game_map_area_trigger();
+		eax = game_map_area_trigger(MV(args[0]));
 		break;
 	case 9:
-		game_map_collision();
+		eax = game_map_collision(MV(args[0]));
 		break;
 	case 10:
-		cpu.r[EAX] = op_enter();
+		eax = op_enter();
 		break;
 	case 11:
-		cpu.r[EAX] = op_reset_history();
+		eax = op_reset_history();
 		break;
 	case 13:
-		cpu.r[EAX] = op_sprite_script();
+		eax = op_sprite_script();
 		break;
 	case 14:
-		cpu.r[EAX] = op_sprite_enable();
+		eax = op_sprite_enable();
 		break;
 	case 15:
-		cpu.r[EAX] = op_unpack();
+		eax = op_unpack();
 		break;
 	case 16:
-		cpu.r[EAX] = op_copy_cells();
+		eax = op_copy_cells();
 		break;
 	case 30:
-		cpu.r[EAX] = game_map_op_walk();
+		eax = game_map_op_walk();
 		break;
 	case 32:
 		op_stop_walk();
@@ -545,5 +493,6 @@ void game_map_dispatch(void)
 	default:
 		x86_trap(0x403a7f, "map sub-op left to the native code reached C");
 	}
-	X86_COUNT(2);
+	COST(2);
+	return eax;
 }

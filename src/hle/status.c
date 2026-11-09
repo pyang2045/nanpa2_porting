@@ -289,8 +289,6 @@ static void write_status(void)
 	strftime(started, sizeof started, "%Y-%m-%dT%H:%M:%SZ", gmtime(&start_wall));
 	uint32_t black = ps->last_nonblack ? now - ps->last_nonblack : now - start_ticks;
 	static char buf[8192];
-	char native[600];
-	x86_native_summary(native, sizeof native);
 	snprintf(buf, sizeof buf,
 		"{\n"
 		"  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u, \"stage\": \"running\", \"init_ms\": %u,\n"
@@ -322,7 +320,7 @@ static void write_status(void)
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
 		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
 		now - last_frame_change, active, win32_timer_running(), pc, mips, now - s.tick,
-		SDL_AtomicGet(&logo), music, vq, native[0] ? native : "null", wq, warning_key, warnings, warned);
+		SDL_AtomicGet(&logo), music, vq, "null", wq, warning_key, warnings, warned);
 	write_json(buf);
 }
 

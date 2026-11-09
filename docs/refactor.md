@@ -12,7 +12,7 @@ reimplementation is then no longer byte for byte the original, the differential 
 |---|---|---|
 | R0 | deterministic mode, recordings with state checkpoints, replay and compare, a golden set | done |
 | R1 | game state in C structs instead of emulated memory | done: all of the data area is one C object; what stays addressed and why is listed below |
-| R2 | ordinary C calls instead of register and stack conventions (`cpu.r[]`, `push32`, `go(ra)`, jump units) | not started |
+| R2 | ordinary C calls instead of register and stack conventions (`cpu.r[]`, `push32`, `go(ra)`, jump units) | done: see "R2" below |
 | R3 | real-time pacing that keeps the original speed (no per-unit charges) | not started |
 | R4 | direct calls into the platform layer instead of HLE thunks | not started |
 
@@ -211,8 +211,107 @@ Nothing outside `src/game`, `src/hle` and `src/x86` names `G`.
 
 | Tool | State |
 |---|---|
-| ctest `no_game_bytes`, `asset_only`, `wavcheck`, `selftest`, `start_trace`, `replay_det` | kept, pass on the interp build |
+| ctest `no_game_bytes`, `asset_only`, `wavcheck`, `selftest`, `start_trace`, `replay_det` | kept, pass (R2 removed `start_trace`) |
 | golden replays | the check for every chunk |
 | differential harness (`NANPA2_DIFF`, `diff_replay`, `NANPA2_DIFF_DIR`) | **frozen** at b98343c: it snapshots and compares `x86_mem` directly, which no longer holds aliased state, and the C is no longer meant to equal the lifted original. Not built into any test. |
 | `NANPA2_FUZZ`, `map_fuzz.c`, `NANPA2_LOCKSTEP`, the recomp backend | **frozen**: they share the harness's direct memory access and need the exe; the sources stay for reference and compile, nothing exercises them. Revive by reading memory through `x86_read_virtual`. |
 | `tools/reimpl_status.py` | unchanged (counts what the exe's code still contributes: nothing) |
+
+## R2: ordinary C calls
+
+**Pacing is unchanged in R2.** The game clock follows the instruction counter, so every unit keeps
+its `X86_COUNT` charges and `X86_POLL` backward-jump polls, now spelled `COST(n)` and `POLL(at)`
+(src/game/ctl.h): a plain cost counter that no longer depends on the CPU model. Changing them is R3.
+That is why `li.*`, `raw.icount` and `raw.data` of the golden replays stay equal through all of
+R2 (the goldens are in a scratch folder, recorded on d79f8e0: `golden_r2`).
+
+### Control flow: direct style, the pump is a call
+
+Options weighed: (a) an explicit state machine or resumable VM steps returning to a main loop that
+pumps, (b) a coroutine or a second thread for the game logic, (c) the game calls a pump function
+that returns a quit flag and a quit unwinds. **(c) was chosen.** Every wait in the game (the VM
+loop's pass, frame waits, click waits, the menu loop, the wipe, the map's player step and event
+check, the animation and fade waits) is a loop whose only interaction with the outside is the
+message pump `ctl_pump()`; the platform layer already runs inside that pump on the same thread
+(host events, timer callbacks, presentation), which SDL requires on the main thread on macOS. So:
+
+- (a) would rewrite the hundreds of pieces that R2 removes into hundreds of explicit states, to
+  gain a main loop that already exists inside the pump;
+- (b) needs a context switch per wait: `ucontext` is deprecated on macOS and absent on Windows
+  (fibers there), threads need the event handling on the main thread and a handshake per pump
+  (and make the instruction-count clock nondeterministic unless strictly alternated): platform
+  specific machinery for no gain;
+- (c) is portable C (`setjmp`/`longjmp` is the one non-local exit), deterministic, and keeps the
+  natural shape of the original: nested calls for nested blocks.
+
+`ctl_quit()` (WM_QUIT, the end of the script at the top level, opcodes that end the VM) unwinds to the
+innermost `ctl_catch`; a script restart (04 1e, 04 21 from a nested block) `longjmp`s to the top of the VM
+loop. No frames between hold resources, so the unwinding needs no cleanup; it charges the three
+instructions of the native stack reset and `pop ebp; ret`.
+
+The script VM (src/game/loop.c, ops.c, ops_vm.c): `vm_pc` is the program counter (an offset in
+segment 0, the native ESI), `vm_loop()` is the native loop head and returns the block result, a
+nested block is a nested call of it (`vm_depth` replaces the native test ESP == [top ESP]), handlers
+return -1 (the native `jmp 0x4060f9`) or the block result (the native `ret`).
+
+### What moved off the CPU model, module by module
+
+| Module | Before | After |
+|---|---|---|
+| VM loop, blocks, text, waits, all opcode handlers (loop.c, ops.c, ops_vm.c, ops_sys.c) | pieces returning native pcs, `call_exit`, `push32(ESI)`, EAX/ECX/ZF contracts, jump units | `vm_pc`, nested `vm_loop()`, handlers `int fn(void)` in two opcode tables, locals for what the native handler pushed |
+| map (map*.c) | `cpu.r[ESI]` = sprite, `edi` = cell, `rd16(sp + S_X)`, pump chain `go(ra)` | typed `sprite`, `map_rec`, `cell` views over `G.seg1` / `G.map` (byte-offset indexing keeps the unchecked-index behaviour), movers return values, the chain is direct calls to `game_map_pump()` |
+| graphics (screen.c, text.c, wipe.c) | cdecl words read from the emulated stack, results in EAX, wipe as pieces with a native frame | typed functions; pixel loops on `x86_ptr` pointers; `game_wipe`, `game_palette_wait` plain loops |
+| anim, files, expressions, start-up (anim.c, file.c, expr.c, startup.c) | register conventions, WinMain as pieces, window procedure through `x86_call` | typed functions, `game_main`, `game_wndproc(hwnd, msg, wparam, lparam)` called by the pump |
+| dispatch | `game_units[]` by native address, `hle_jump`, `HLE_GAME_*` lists, an interpreter | none: removed |
+
+### What still uses the CPU model, and why
+
+1. **The HLE boundary** (`hle_invoke` in ctl.c, the FILE/path buffers and COM/GDI scratch that
+   file.c, startup.c and screen.c place on the emulated stack with `cpu.r[ESP]`): Win32,
+   DirectDraw, DirectSound, GDI and C runtime thunks take their arguments from the emulated stack
+   by native address and return EAX, and their objects (FILE handles, surfaces, COM objects) live
+   on the emulated heap. R4 replaces them with direct calls.
+2. **The emulated address space**: `G` is reached through an alias, `x86_ptr()` converts the guest
+   addresses that remain in state (segment bases, animation `start`/`pc`, locked pixel pointers,
+   `top_esp`, surface and DirectDraw objects) to host pointers. The *values* in `G` are kept
+   identical because the FLAG image and `raw.data` need them; the code holds C pointers or offsets
+   where it works on them (map, wipe, blits, picture). `top_esp` is written (as natively) but
+   nothing reads it: it is dead state kept for `raw.data` until the goldens are re-recorded in R3.
+3. **The instruction counter and the poll countdown** (`COST`, `POLL`, `x86_icount`): the game's
+   clock, R3.
+4. `cpu.r[ECX] = cpu.r[EDX] = 0` after the pump (`ctl_pump`), and `win32.c` saving the CPU around the
+   window procedure, are what the HLE override did for the native pump; nothing in C reads them.
+
+### Verification of R2, and which raw keys change
+
+Every chunk was checked by the four goldens (`newgame` 271, `town` 301, `saveload` 33, `menu` 161
+checkpoints, recorded on d79f8e0 with the same inputs as the R1 goldens) with
+`NANPA2_REPLAY_CHECK=li,raw.icount,raw.data`: all `li.*` keys, the instruction count and the whole
+data area equal at every checkpoint. `NANPA2_REPLAY_CHECK` now takes a comma-separated list of key
+prefixes (`li` is every `li.*`). Expected to change in R2, and not compared: `raw.cpu` (registers
+are no longer the state), `raw.stack` (the emulated stack holds only HLE argument frames) and
+`raw.heap` (same), and `raw.pg` follows `raw.data`. `raw.icount` and `raw.data` are equal because pacing
+and the data layout are unchanged; R3 changes the first, so after R3 the goldens are re-recorded.
+`NANPA2_HLETRACE=2` prefixes each HLE call with the instruction count: with equal pacing two builds
+give the same trace (checked on saveload and menu against d79f8e0 after dropping the lines of
+calls that became direct C calls and the stack garbage that parameterless thunks print).
+
+### Tooling after R2
+
+| Tool | State |
+|---|---|
+| ctest `no_game_bytes`, `asset_only`, `wavcheck`, `selftest`, `replay_det` | kept, pass |
+| ctest `start_trace` | removed: it compared the C start-up with the original WinMain run as an oracle |
+| differential harness, fuzzers, lockstep, the recomp backend, `tools/recomp.py`, `tools/liveness.py`, `tools/reimpl_status.py`, the x86 interpreter | removed (nothing runs native game code; the units are no longer register-level functions an oracle could be compared with). `NANPA2_FROZEN_TESTS` is gone |
+| golden replays | the check; `NANPA2_REPLAY_CHECK` selects keys |
+
+### Left for R3 and R4
+
+- **R3**: replace `COST`/`POLL` and the instruction-count clock by real-time pacing with the original's
+  speed (the timer callback, frame waits, fades, text delay as time); re-record the goldens; drop
+  `x86_icount`, `raw.icount`, the poll countdown and the 25 MIPS model; then `top_esp` and the `ECX/EDX`
+  zeroing go.
+- **R4**: replace `hle_invoke` and the thunks by direct calls (FILE handles as `FILE *`, surfaces as
+  platform objects, COM objects gone), then the emulated stack, heap and address space can go: `G`
+  stops being aliased and its pointer-valued fields (segment bases, animation `start`/`pc`,
+  locked pixel pointers) become indices or C pointers with conversion at the FLAG save and load.

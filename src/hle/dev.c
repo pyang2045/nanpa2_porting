@@ -27,6 +27,7 @@
 #include <string.h>
 
 #include "explore.h"
+#include "game/file.h"
 #include "game/state.h"
 #include "hle.h"
 #include "platform/present.h"
@@ -326,15 +327,16 @@ void dev_inject(void)
  * names (its slots are FLAG0-6). */
 int dev_save_selftest(void)
 {
-	uint32_t name = x86_malloc(16), src = x86_malloc(0xc00), dst = x86_malloc(0x1000);
-	memcpy(x86_ptr(name, 6), "FLAG9", 6);
+	/* the state object's scratch: the name in the VM's string buffer, the
+	 * image and its copy in the picture buffer (nothing runs yet) */
+	char *name = (char *)G.rt.string_buf;
+	uint8_t *src = G.img, *dst = G.img + 0x1000;
+	memcpy(name, "FLAG9", 6);
 	for (uint32_t i = 0; i < 0xc00; i++)
-		wr8(src + i, (i * 7 + 3) & 0xff);
-	uint32_t args[3] = { name, src, 0xc00 };
-	x86_call(0x401160, 3, args);
-	uint32_t largs[2] = { name, dst };
-	x86_call(0x401050, 2, largs);
-	int ok = !memcmp(x86_ptr(src, 0xc00), x86_ptr(dst, 0xc00), 0xc00);
+		src[i] = (uint8_t)((i * 7 + 3) & 0xff);
+	game_file_save(name, src, 0xc00);
+	game_file_load(name, dst);
+	int ok = !memcmp(src, dst, 0xc00);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
 	/* the message pump (0x401bf0) must leave ECX changed like the native
 	 * PeekMessageA does: script op 0x1f restores with "mov cx, N; rep

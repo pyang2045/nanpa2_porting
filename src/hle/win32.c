@@ -10,6 +10,7 @@
 #include "dev.h"
 #include "status.h"
 #include "platform/present.h"
+#include "game/startup.h"
 #include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
@@ -312,7 +313,10 @@ static uint32_t dispatch(const struct msg *m)
 	if (!win32_wndproc)
 		return 0;
 	uint32_t args[4] = { HWND_MAIN, m->msg, m->wparam, m->lparam };
-	uint32_t r = x86_call(win32_wndproc, 4, args);
+	/* the window procedure leaves the CPU as it found it, as x86_call did */
+	struct cpu saved = cpu;
+	uint32_t r = game_wndproc(args[0], args[1], args[2], args[3]);
+	cpu = saved;
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
 			RT(input_bits), RT(frame));
@@ -393,32 +397,33 @@ void x86_throttle(void)
 	}
 }
 
+void probe_vm_fetch(uint32_t off)
+{
+	static int vm = -1;
+	if (vm < 0)
+		vm = getenv("NANPA2_VMTRACE") != NULL;
+	dev_vm_fetch(off);
+	if (vm)
+		fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", off, rd8(0x435e78 + off),
+			rd8(0x435e79 + off), rd8(0x435e7a + off), RT(frame), (unsigned long long)x86_icount);
+}
+
+void probe_hit_table(uint32_t table)
+{
+	dev_hit_table(table);
+}
+
 void x86_probe(uint32_t pc)
 {
-	static int on = -1, vm = -1;
-	if (on < 0) {
+	static int on = -1;
+	if (on < 0)
 		on = getenv("NANPA2_PROBE") != NULL;
-		vm = getenv("NANPA2_VMTRACE") != NULL;
-	}
-	if (pc == 0x40616e) { /* script VM opcode fetch: esi = offset in 0x435e78 */
-		dev_vm_fetch(cpu.r[ESI]);
-		if (vm)
-			fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", cpu.r[ESI],
-				rd8(0x435e78 + cpu.r[ESI]), rd8(0x435e79 + cpu.r[ESI]),
-				rd8(0x435e7a + cpu.r[ESI]), RT(frame), (unsigned long long)x86_icount);
-		return;
-	}
-	if (pc == 0x4071bb) { /* script hit test 0x4071a4: edi = rectangle table */
-		dev_hit_table(cpu.r[EDI]);
-		return;
-	}
 	if (on)
 		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), RT(frame), (unsigned long long)x86_icount);
 }
 
 void x86_poll(void)
 {
-	X86_LOCKSTEP_POINT(LS_POLL, x86_poll_pc); /* before the timer writes memory */
 	static uint32_t last_log;
 	static int log = -1;
 	if (log < 0)

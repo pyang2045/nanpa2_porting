@@ -29,48 +29,44 @@ addresses.
 
 ## Layout
 
-The game code of `nanpa2.exe` (0x401000-0x407800) runs on an emulated 32-bit address space
-(`src/x86/`); calls to imports, COM methods, CRT functions and the overridden game functions go
-to `hle_call`. Two backends (`-DNANPA2_BACKEND`): **interp** (default, the build to share) is
-the interpreter `src/x86/interp.c`. No native game instruction runs any more, so the game needs
-only the exe's built-in data (tables, strings, import directory, globals' start values), which
+The game logic is C (`src/game/`, ordinary calls and typed state: `docs/refactor.md`, R2). The
+only thing of the original machine it still touches is the emulated address space (`src/x86/`) that
+its state `G` (`src/game/state.h`, the whole data area 0x431000-0x4c0000 in native layout) is aliased
+into, and the thunk layer below: Win32, DirectDraw, COM and C runtime calls are made by native
+address through `hle_invoke` (`src/game/ctl.h`), which pushes the arguments on the emulated stack and
+calls `hle_call`. No game instruction runs: nothing decodes `nanpa2.exe` code. The game needs only
+the exe's built-in data (tables, strings, import directory, globals' start values), which
 `src/x86/asset.c` cuts once from the player's `nanpa2.exe` into `nanpa2.dat` (first launch or
 `nanpa2 --make-assets`; local, gitignored, never shipped; no code bytes). The game then runs
-without the exe, which the differential harness, the oracle modes (`NANPA2_DIFF`, `_FUZZ`,
-`_START_ORACLE`, `_INTERP`) and `--exe` still need (`src/assets.c` decides). The build needs
-neither the exe nor capstone and the binary holds nothing of the game (ctest `no_game_bytes`,
-`asset_only`). **recomp** (development and reference, never share) has
-`tools/recomp.py` (capstone, in `tools/.venv`) lift `game/nanpa2.exe` to `build/gen/recomp.c`
-at build time (generated, never committed); it also holds the interpreter (`NANPA2_INTERP=1`)
-and the block-by-block comparison of the two (`NANPA2_LOCKSTEP=1`, `src/x86/lockstep.c`).
-`src/hle/overrides.h` is the one list of overrides, game overrides and probes for both.
+without the exe (`--exe` and `NANPA2_INTERP=1` still load the whole exe; `src/assets.c` decides).
+The build needs neither the exe nor capstone and the binary holds nothing of the game (ctest
+`no_game_bytes`, `asset_only`). The recomp backend, the interpreter, lockstep and the differential
+harness were removed in R2.
 
-- `src/x86/`: CPU state, memory, flags, heap, `x86_call`, poll hook for backward jumps,
-  `interp.c`/`interp_core.h` (interpreter), `lockstep.c` (recomp builds), `asset.c`
-  (`nanpa2.dat` writer and loader; `src/assets.c` picks asset or exe).
-- `src/hle/`: `hle.c` (import/COM thunks, overridden game functions by native address),
-  `win32.c` (message queue, SDL events to WM_*, timer), `ddraw.c` (surfaces, Blt, palette),
-  `text.c` (GDI text via stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3),
-  `crt.c` (MSVC CRT by address), `dev.c` (scripted input and screenshots).
-- `src/game/`: game logic reimplemented in C (`docs/reimpl.md`): units overriding native
-  functions (`HLE_GAME_OVERRIDE` in `src/hle/overrides.h`, originals kept as the oracle),
-  `vm.h` accessors for native globals, `expr.c` script expressions, `game.c`/`trace.c`/
-  `diff.c` the differential harness (`NANPA2_DIFF=1`, `NANPA2_DIFF_DIR`; replay
-  `build/diff_replay`). `tools/reimpl_status.py` prints the share replaced.
+- `src/x86/`: the emulated address space (memory, aliases onto `G`, heap, stack), the CPU registers
+  the HLE layer reads its arguments from, the instruction counter and poll hook that pace the game,
+  `asset.c` (`nanpa2.dat` writer and loader; `src/assets.c` picks asset or exe).
+- `src/hle/`: `hle.c` (import/COM thunks, HLE overrides by native address), `win32.c` (message queue,
+  SDL events to WM_*, timer, the pump), `ddraw.c` (surfaces, Blt, palette), `text.c` (GDI text via
+  stb_truetype, Big5), `sound.c` (SDL audio, MP3 via minimp3), `crt.c` (MSVC CRT by address),
+  `dev.c` (scripted input and screenshots), `replay.c` (record and replay).
+- `src/game/`: the game: `ctl.h` (cost, poll, pump, quit, the HLE boundary), `loop.c`/`ops*.c`/`vm.c`
+  (the script VM: `vm_pc`, nested `vm_loop()`, handlers in opcode tables), `expr.c`, `text.c`,
+  `screen.c`/`wipe.c`/`anim.c` (graphics), `file.c`, `startup.c` (`game_main`, window procedure),
+  `map*.c` (town map), `state.h` (G).
 - `src/`: `lzh.c` (GP4/ANI decompressor), `gp4.c`, `fsys.c` (case-insensitive files), `main.c`,
   `launch.c` (game folder lookup and picker, remembered path, log file for Finder launches),
   `platform/present_metal.m` (macOS, CRT shader), `platform/present_sdl.c`,
   `platform/dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
-- `tools/`: `recomp.py`, `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
+- `tools/`: `disasm.py` (table-aware objdump to `decomp/game.asm`), `peek.py`,
   `lzh.py` + `gp4png.py`, `sheet.py` (contact sheet of BMP shots), `bundle_macos.sh`
-  (target `nanpa2_app`: `build/同級生２.app` with SDL inside; a recomp app is local use only,
-  never share it).
+  (target `nanpa2_app`: `build/同級生２.app` with SDL inside).
 - `ghidra_scripts/DecompileAll.java`; `tests/decode_all.c`; `third_party/` (stb_truetype,
   minimp3, public domain).
 
 Refactor (docs/refactor.md): replay is the check for every step (`--record FILE`, `--replay FILE`,
-`NANPA2_DETERMINISTIC=1`); game state is moving into the structs of `src/game/state.h`; the diff harness,
-fuzz, lockstep and recomp are frozen.
+`NANPA2_DETERMINISTIC=1`); the game state is the struct `G` of `src/game/state.h` (R1), the
+logic runs as ordinary C calls (R2), pacing (R3) and the platform calls (R4) are next.
 
 Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +

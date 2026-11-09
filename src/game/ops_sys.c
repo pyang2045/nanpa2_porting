@@ -1,56 +1,38 @@
 /*
- * Opcode handlers that drive the other subsystems (jump units, stage 3):
- * text window, rectangles on the surfaces, the cursor, palette, pictures,
- * files, music and voice, animation slots, the map, and op 19's sub-ops.
+ * Opcode handlers that drive the other subsystems (R2: direct style): text
+ * window, rectangles on the surfaces, the cursor, palette, pictures, files,
+ * music and voice, animation slots, and op 19's sub-ops.
  *
- * Each is the native handler's own work in C (argument parsing, the
- * argument registers and stack words, the branches between sub-ops) around
- * the C routine that does the drawing or loading (screen.c, file.c, anim.c)
- * or, where a handler reaches a routine that is a unit for its native
- * callers too, around a call as the native `call` makes it (ncall below).
+ * Each is the native handler's own work in C (argument parsing, the branches
+ * between sub-ops) around the C routine that does the drawing or loading
+ * (screen.c, file.c, anim.c, wipe.c), with the routine's typed arguments
+ * where the native handler pushed words. Contract as the other handlers
+ * (ops.c): entered with vm_pc past the opcode bytes, they return -1 (on with
+ * the loop). The routines that wait (the wipe, the fade wait, the animation
+ * slot wait) are plain calls: they pump through ctl_pump() themselves.
  *
- * Handlers that wait on the timer or pump messages are pieces joined by
- * call exits: op 19 sub-op 4, the dissolve wipe (wipe.c), op 1a sub-op 4
- * (anim.c), ext 16 mode 3 (game_palette_wait_piece) and ext 26 sub-ops 5, 7
- * and 12 (map_pump.c). Since stage 6 no handler leaves a case to the
- * native code.
+ * Costs and polls are the native handlers': the instruction counts of the
+ * pushes and stack clean-up that the typed calls no longer make stay as
+ * COST(n).
  *
  * Semantics: re-notes.md "Script opcodes".
  */
+#include "game/ctl.h"
 #include "game/file.h"
 #include "game/map.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 #include "game/state.h"
 
-/* ---- the native handler's register-level steps */
-
-/* call 0x40741b: the argument list at ESI, registers as the parser leaves
- * them (ESI, EAX, ECX = count, EBX, EDI); returns EAX */
-static uint32_t parse(void)
+/* call 0x40741b: the argument list at vm_pc; returns argument 0's value (the
+ * native EAX), *count = the number of arguments (the native ECX) */
+static uint32_t parse(uint32_t *count)
 {
-	game_parse_args_regs();
-	X86_COUNT(1);
-	return cpu.r[EAX];
-}
-
-/* `call addr` into native game code (or an HLE routine): the callee runs
- * on the emulated stack with the CPU as it is, and leaves it as it does.
- * Arguments are pushed by the caller, which also pops them (cdecl). None
- * of the callees used here can leave by the VM's stack reset (0x40638d). */
-static void ncall(uint32_t addr)
-{
-	uint32_t esp = cpu.r[ESP];
-	push32(X86_RET_SENTINEL);
-	x86_exec(addr);
-	if (cpu.r[ESP] != esp)
-		x86_trap(addr, "native routine called by an opcode handler did not return");
-}
-
-static void drop(uint32_t words)
-{
-	cpu.r[ESP] += 4 * words;
-	X86_COUNT(1);
+	uint32_t a, n = vm_parse_args(&vm_pc, &a);
+	COST(1);
+	if (count)
+		*count = n;
+	return a;
 }
 
 /* EAX with its low word replaced (`mov ax, ...`) */
@@ -59,11 +41,11 @@ static uint32_t ax_(uint32_t eax, uint32_t v)
 	return (eax & 0xffff0000u) | (v & 0xffffu);
 }
 
-/* `jmp 0x4060f9` at native_pc (backward: polls), ESI as it is */
-static uint32_t loop_at(uint32_t native_pc)
+/* `jmp 0x4060f9` at native_pc (backward: polls) */
+static int loop_at(uint32_t native_pc)
 {
-	X86_POLL(native_pc);
-	return VM_LOOP;
+	POLL(native_pc);
+	return -1;
 }
 
 /* argument values (0x445d06 + 2i) */
@@ -71,19 +53,20 @@ static uint32_t loop_at(uint32_t native_pc)
 #define STRING_BUF 0x445d26u     /* file names for ext 1c, 1d, 25 */
 
 /* The rectangle arguments x0 y0 x1 y1 (args 0-3, x in units of 8 pixels)
- * pushed as the native code does: height, width * 8, y0, x0 * 8, all built
- * in AX over the upper half EAX already has (the `shl eax, 3` carries bits
- * into it). Returns EAX. */
-static uint32_t push_rect(uint32_t eax)
+ * as the native code builds them to push: r = { x0 * 8, y0, width * 8,
+ * height }, each built in AX over the upper half EAX already has (the
+ * `shl eax, 3` carries bits into it). All 32 bits are real (the rectangle
+ * routines store them whole). Returns EAX. */
+static uint32_t push_rect(uint32_t eax, uint32_t r[4])
 {
 	eax = ax_(eax, rd16(ARG(3)) - rd16(ARG(1)) + 1);
-	push32(eax);
+	r[3] = eax;
 	eax = ax_(eax, rd16(ARG(2)) - rd16(ARG(0)) + 1) << 3;
-	push32(eax);
+	r[2] = eax;
 	eax = ax_(eax, rd16(ARG(1)));
-	push32(eax);
+	r[1] = eax;
 	eax = ax_(eax, rd16(ARG(0))) << 3;
-	push32(eax);
+	r[0] = eax;
 	return eax;
 }
 
@@ -91,39 +74,38 @@ static uint32_t push_rect(uint32_t eax)
 
 /* 17 [c]: clear the text window (0x406b24) in colour c (c << 4 as the
  * fill routine wants it), or in the text colour with no argument. */
-uint32_t game_op_clear_text(void)
+int vm_op_clear_text(void)
 {
-	uint32_t a = parse();
-	cpu.r[EBX] = SV(text_colour);
-	if (cpu.r[ECX])
-		cpu.r[EBX] = cpu.r[EAX] = a << 4;
-	X86_COUNT(5);
-	game_clear_text_window();
+	uint32_t n, a = parse(&n);
+	uint32_t colour = SV(text_colour);
+	if (n)
+		colour = a << 4;
+	COST(5);
+	game_clear_text_window(colour);
 	return loop_at(0x406b1f);
 }
 
 /* 04 17 / 04 18 x0 y0 x1 y1: fill (0x4017b0) or XOR (0x401870) the
  * rectangle of surface @[6] with the text colour. */
-static uint32_t colour_rect(void (*fn)(void), uint32_t exit_pc)
+static int colour_rect(void (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t),
+                       uint32_t exit_pc)
 {
-	parse();
-	uint32_t eax = SV(surface_select);
-	push32(eax);
-	eax = ax_(eax, SV(text_colour));
-	push32(eax);
-	push_rect(eax);
-	X86_COUNT(20);
-	fn();
-	drop(6);
+	parse(NULL);
+	uint32_t surf = SV(surface_select);
+	uint32_t colour = ax_(surf, SV(text_colour)), r[4];
+	push_rect(colour, r);
+	COST(20);
+	fn(r[0], r[1], r[2], r[3], colour, surf);
+	COST(1); /* add esp, 24 */
 	return loop_at(exit_pc);
 }
 
-uint32_t game_op_fill_rect(void)
+int vm_op_fill_rect(void)
 {
 	return colour_rect(game_fill_rect, 0x406bc6);
 }
 
-uint32_t game_op_xor_rect(void)
+int vm_op_xor_rect(void)
 {
 	return colour_rect(game_xor_rect, 0x406c1b);
 }
@@ -132,65 +114,61 @@ uint32_t game_op_xor_rect(void)
  * (0x401670) or masked copy (0x4014f0) the rectangle of surface s to (dx,
  * dy) of surface d. The two surface numbers go in one word (s << 8 | d,
  * the low bytes of args 4 and 7). */
-static void push_blit(void)
+typedef void (*blit_fn)(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                        uint8_t src, uint8_t dst);
+
+/* the blit's arguments as the native handler builds them (dx, dy, sx, sy,
+ * w, h are the 32-bit words it pushes) */
+static void run_blit(blit_fn fn)
 {
-	uint32_t eax = rd8(ARG(4)) << 8 | rd8(ARG(7));
-	push32(eax);
-	eax = push_rect(eax);
+	uint32_t eax = rd8(ARG(4)) << 8 | rd8(ARG(7)), r[4];
+	eax = push_rect(eax, r);
 	eax = ax_(eax, rd16(ARG(6)));
-	push32(eax);
+	uint32_t dy = eax;
 	eax = ax_(eax, rd16(ARG(5))) << 3;
-	push32(eax);
-	X86_COUNT(24);
+	COST(24);
+	fn(eax, dy, r[0], r[1], r[2], r[3], rd8(ARG(4)), rd8(ARG(7)));
 }
 
-static uint32_t blit(void (*fn)(void), uint32_t exit_pc)
+static int blit(blit_fn fn, uint32_t exit_pc)
 {
-	parse();
-	push_blit();
-	fn();
-	drop(7);
+	parse(NULL);
+	run_blit(fn);
+	COST(1); /* add esp, 28 */
 	return loop_at(exit_pc);
 }
 
-uint32_t game_op_copy_rect(void)
+int vm_op_copy_rect(void)
 {
 	return blit(game_blit_copy, 0x406c80);
 }
 
-uint32_t game_op_swap_rect(void)
+int vm_op_swap_rect(void)
 {
 	return blit(game_blit_swap, 0x406ce5);
 }
 
 /* With no arguments 04 1b draws the last picture's rectangle (0x44538a-
  * 0x445390, set by 0x406e20) onto itself, surfaces 1 -> 2. */
-uint32_t game_op_masked_rect(void)
+int vm_op_masked_rect(void)
 {
-	parse();
-	if (cpu.r[ECX]) {
-		push_blit();
-		game_blit_masked();
-		drop(7);
+	uint32_t n;
+	parse(&n);
+	if (n) {
+		run_blit(game_blit_masked);
+		COST(1); /* add esp, 28 */
 		return loop_at(0x406d4e);
 	}
 	uint32_t eax = 0x102;
-	push32(eax);
 	eax = ax_(eax, SV(pic_rect[3]));
-	push32(eax);
+	uint32_t h = eax;
 	eax = ax_(eax, SV(pic_rect[2])) << 3;
-	push32(eax);
+	uint32_t w = eax;
 	eax = ax_(eax, SV(pic_rect[1]));
-	push32(eax);
-	uint32_t ecx = ax_(cpu.r[ECX], SV(pic_rect[0])) << 3;
-	push32(ecx);
-	push32(eax);
-	push32(ecx);
-	cpu.r[EAX] = eax;
-	cpu.r[ECX] = ecx;
-	X86_COUNT(16);
-	game_blit_masked();
-	drop(7);
+	uint32_t ecx = ax_(0 /* the count n = 0 */, SV(pic_rect[0])) << 3;
+	COST(16);
+	game_blit_masked(ecx, eax, ecx, eax, w, h, 1, 2);
+	COST(1); /* add esp, 28 */
 	return loop_at(0x406d86);
 }
 
@@ -199,76 +177,63 @@ uint32_t game_op_masked_rect(void)
  * table at @[22] (0x4452fa, an offset in segment 0) with {text offset,
  * item number} pairs: the first [0x445300] visible items after skipping
  * [0x4452fe]. The table is cleared first ([0x445300] dwords). The item
- * step 0x4068e1 is game_menu_item_regs; its AL is the item's guard value
- * (low byte), -1 at the list's end. */
+ * step 0x4068e1 is vm_menu_item; its result is the item's guard value
+ * (low byte), 0xff at the list's end. */
 #define MENU_START 0x445e0cu
 
-static void menu_item(void)
+int vm_op_menu_items(void)
 {
-	game_menu_item_regs();
-	X86_COUNT(2);
-}
-
-uint32_t game_op_menu_items(void)
-{
-	uint32_t a = parse(), esi = cpu.r[ESI];
+	uint32_t a = parse(NULL), pc, text;
 	if (a == 1) {
 		uint32_t n = 0;
-		cpu.r[ESI] = rd16(MENU_START);
-		X86_COUNT(6);
+		pc = rd16(MENU_START);
+		COST(6);
 		for (;;) {
-			menu_item();
-			uint32_t al = cpu.r[EAX] & 0xff;
-			X86_COUNT(5);
+			uint32_t al = vm_menu_item(&pc, &text);
+			COST(2);
+			COST(5);
 			if (al == 0xff)
 				break;
 			if (al != 0)
 				n++;
-			X86_POLL(al ? 0x4068d2 : 0x4068cf);
+			POLL(al ? 0x4068d2 : 0x4068cf);
 		}
 		SV_SET(menu_count, n);
-		cpu.r[ECX] = n;
-		cpu.r[ESI] = esi;
-		X86_COUNT(3);
+		COST(3);
 		return loop_at(0x4068dc);
 	}
 	uint32_t rows = SV(menu_rows);
 	uint32_t table = VM_SCRIPT + SV(menu_list_ptr);
 	for (uint32_t i = 0; i < rows; i++)
 		wr32(table + 4 * i, 0);
-	X86_COUNT(9 + rows);
-	cpu.r[EAX] = 0;
+	COST(9 + rows);
 	uint8_t left = (uint8_t)SV(menu_rows), skip = (uint8_t)SV(menu_skip);
 	uint32_t item = 0, edi = VM_SCRIPT + SV(menu_list_ptr);
-	cpu.r[ESI] = rd16(MENU_START);
+	pc = rd16(MENU_START);
 	for (;;) {
 		item++;
-		menu_item();
-		uint32_t al = cpu.r[EAX] & 0xff;
-		X86_COUNT(10);
+		uint32_t al = vm_menu_item(&pc, &text);
+		COST(2);
+		COST(10);
 		if (al == 0xff)
 			break;
 		if (al == 0) {
-			X86_POLL(0x406899);
+			POLL(0x406899);
 			continue;
 		}
 		if (skip) {
 			skip--;
-			X86_POLL(0x4068a2);
+			POLL(0x4068a2);
 			continue;
 		}
-		wr16(edi, cpu.r[EBX]);
+		wr16(edi, text);
 		wr16(edi + 2, item);
 		edi += 4;
-		X86_COUNT(4);
+		COST(4);
 		if (!--left)
 			break;
-		X86_POLL(0x4068b0);
+		POLL(0x4068b0);
 	}
-	cpu.r[ECX] = (uint32_t)skip << 8 | left;
-	cpu.r[EDX] = item;
-	cpu.r[EDI] = edi;
-	cpu.r[ESI] = esi;
 	return loop_at(0x4068b3);
 }
 
@@ -276,56 +241,48 @@ uint32_t game_op_menu_items(void)
  * each only if not already so; 2 nothing; 3 x, y: move the mouse
  * (0x401c80); 4 off: load the 32x32 AND/XOR cursor bitmap (128 dwords,
  * byte-swapped) from offset off of segment @[7] to 0x4be900. */
-uint32_t game_op_cursor(void)
+int vm_op_cursor(void)
 {
-	uint32_t a = parse();
+	uint32_t a = parse(NULL);
 	switch (a) {
 	case 0:
-		X86_COUNT(3);
+		COST(3);
 		if (RT(cursor_shown))
 			return loop_at(0x40693d);
 		game_cursor_show();
 		RT_SET(cursor_shown, 1);
-		X86_COUNT(1);
+		COST(1);
 		return loop_at(0x40694f);
 	case 1:
-		X86_COUNT(3);
+		COST(3);
 		if (!RT(cursor_shown))
 			return loop_at(0x40695b);
 		game_cursor_hide();
 		RT_SET(cursor_shown, 0);
-		X86_COUNT(1);
+		COST(1);
 		return loop_at(0x40696d);
 	case 2:
-		X86_COUNT(1);
-		return VM_LOOP; /* the table entry itself: no backward jump */
-	case 3: {
-		uint32_t eax = rd16(ARG(2));
-		push32(eax);
-		eax = ax_(eax, rd16(ARG(1)));
-		push32(eax);
-		cpu.r[EAX] = eax;
-		X86_COUNT(6);
-		game_cursor_setpos();
-		drop(2);
+		COST(1);
+		return -1; /* the table entry itself: no backward jump */
+	case 3:
+		COST(6);
+		game_cursor_setpos(rd16(ARG(1)), rd16(ARG(2)));
+		COST(1); /* add esp, 8 */
 		return loop_at(0x406989);
-	}
 	case 4: {
-		uint32_t src = vm_segment_base(vm_segment_select()) + rd16(ARG(1)), dst = 0, v = 0;
-		X86_COUNT(9);
+		uint32_t src = vm_segment_base(vm_segment_select()) + rd16(ARG(1)), dst = 0, v;
+		COST(9);
 		for (int i = 0; i < 0x80; i++) {
 			v = rd32(src);
 			v = v >> 24 | (v >> 8 & 0xff00u) | (v << 8 & 0xff0000u) | v << 24;
 			memcpy((uint8_t *)&G.cursor_bits + dst, &v, 4);
 			src += 4;
 			dst += 4;
-			X86_COUNT(4);
+			COST(4);
 			if (i < 0x7f)
-				X86_POLL(0x4069b5);
+				POLL(0x4069b5);
 		}
-		cpu.r[EAX] = v;
-		cpu.r[ECX] = 0;
-		X86_COUNT(2);
+		COST(2);
 		return loop_at(0x4069b9);
 	}
 	}
@@ -336,124 +293,93 @@ uint32_t game_op_cursor(void)
  * palette, or with v from all entries = v (0x40754d); the tables are saved
  * before (0x40756c) and restored after (0x407599). 3: the same, but fade
  * to it (0x401d30) and wait until the timer has finished the fade
- * (game_palette_wait_piece, 0x406f41); others do nothing. */
-uint32_t game_op_palette(void)
+ * (game_palette_wait, 0x406f41); others do nothing. */
+int vm_op_palette(void)
 {
-	uint32_t a = parse();
-	X86_COUNT(a == 2 ? 2 : 4); /* the compares with 2 and 3 */
+	uint32_t a = parse(NULL);
+	COST(a == 2 ? 2 : 4); /* the compares with 2 and 3 */
 	if (a != 2 && a != 3)
 		return loop_at(0x406f13);
-	X86_COUNT(1); /* call 0x40756c */
+	COST(1); /* call 0x40756c */
 	game_palette_save();
-	X86_COUNT(2);
+	COST(2);
 	if (rd8(VM_ARG_TYPES + 1) == VM_ARG_EXPR) {
-		cpu.r[EAX] = ax_(cpu.r[EAX], rd16(ARG(1)));
-		X86_COUNT(2);
-		game_palette_fill(cpu.r[EAX]);
+		COST(2);
+		game_palette_fill(rd16(ARG(1)));
 	}
 	if (a == 3) {
 		RT_SET(fade_steps, 1);
-		X86_COUNT(2);
+		COST(2);
 		game_fade_start();
-		return 0x406f41;
+		game_palette_wait(); /* 0x406f41 */
+		return loop_at(0x406f4f);
 	}
-	X86_COUNT(2);
+	COST(2);
 	game_palette_upload();
 	game_palette_restore();
 	return loop_at(0x406f77);
 }
 
-/* 0x406f41: while the fade runs the native code asks again (a backward
- * jump: game_jump polls for the piece that returns itself); then it puts
- * the tables back. */
-uint32_t game_palette_wait_piece(void)
-{
-	cpu.r[EAX] = game_fade_active();
-	X86_COUNT(3);
-	if (cpu.r[EAX])
-		return 0x406f41;
-	game_palette_restore();
-	X86_COUNT(1);
-	return loop_at(0x406f4f);
-}
-
 /* 04 1c name, off: load a file into segment @[7] at off (0x401050). */
-uint32_t game_op_load_file(void)
+int vm_op_load_file(void)
 {
-	parse();
-	cpu.r[EDI] = STRING_BUF;
-	game_string_arg_regs();
-	uint32_t eax = vm_segment_base(vm_segment_select()) + rd16(ARG(1));
-	cpu.r[EAX] = eax;
-	cpu.r[EBX] = rd16(ARG(1));
-	push32(eax);
-	push32(STRING_BUF);
-	X86_COUNT(9);
-	game_file_load(rd32(cpu.r[ESP]), rd32(cpu.r[ESP] + 4));
-	drop(2);
+	parse(NULL);
+	uint32_t src, last;
+	vm_string_arg(STRING_BUF, &src, &last);
+	uint32_t buf = vm_segment_base(vm_segment_select()) + rd16(ARG(1));
+	COST(9);
+	game_file_load_at(STRING_BUF, buf);
+	COST(1); /* add esp, 8 */
 	return loop_at(0x406dbf);
 }
 
 /* 04 1d [name]: picture to surface @[6] (0x406e20; with no argument the
  * one already in 0x4662be). */
-uint32_t game_op_picture(void)
+int vm_op_picture(void)
 {
-	parse();
-	game_picture_load();
+	uint32_t n;
+	parse(&n);
+	game_picture_load(n != 0);
 	return loop_at(0x406e1b);
 }
 
 /* 04 24 n, m: n = 0 plays music m (0x402cb0), anything else stops it
  * (0x4032c0). */
-uint32_t game_op_music(void)
+int vm_op_music(void)
 {
-	uint32_t a = parse();
-	X86_COUNT(2);
+	uint32_t a = parse(NULL);
+	COST(2);
 	if (a) {
-		ncall(0x4032c0);
+		HLE0(0x4032c0);
 		return loop_at(0x4073b4);
 	}
-	cpu.r[EAX] = ax_(a, rd16(ARG(1)));
-	push32(cpu.r[EAX]);
-	X86_COUNT(2);
-	ncall(0x402cb0);
-	drop(1);
+	COST(2);
+	HLE(0x402cb0, rd16(ARG(1)));
+	COST(1); /* add esp, 4 */
 	return loop_at(0x4073c8);
 }
 
 /* 04 25 name: play a voice clip (0x403360). */
-uint32_t game_op_voice(void)
+int vm_op_voice(void)
 {
-	parse();
-	cpu.r[EDI] = STRING_BUF;
-	game_string_arg_regs();
-	push32(STRING_BUF);
-	X86_COUNT(3);
-	ncall(0x403360);
-	drop(1);
+	parse(NULL);
+	uint32_t src, last;
+	vm_string_arg(STRING_BUF, &src, &last);
+	COST(3);
+	HLE(0x403360, STRING_BUF);
+	COST(1); /* add esp, 4 */
 	return loop_at(0x4073e9);
 }
 
-/* 1a n, slot, a, b: animation slot control 0x403510 (EAX sub-op, EBX
- * slot, ECX, EDX), a call exit (0x4070b1, return 0x4070b6): the control
- * is the jump unit game_anim_control_piece, which for sub-op 4 goes on in
- * the wait loop 0x4035b5 until the slot has stopped. */
-uint32_t game_op_anim(void)
+/* 1a n, slot, a, b: animation slot control 0x403510 (sub-op n, the slot and
+ * two operands), run directly (anim.c): sub-op 4 waits in its loop until the
+ * slot has stopped (that loop does not pump). */
+int vm_op_anim(void)
 {
-	parse();
-	push32(cpu.r[ESI]);
-	cpu.r[EBX] = rd16(ARG(1));
-	cpu.r[ECX] = rd16(ARG(2));
-	cpu.r[EDX] = rd16(ARG(3));
-	push32(0x4070b6);
-	X86_COUNT(5);
-	return 0x403510;
-}
-
-uint32_t game_op_anim_done(void) /* 0x4070b6 */
-{
-	cpu.r[ESI] = pop32();
-	X86_COUNT(1);
+	uint32_t a = parse(NULL);
+	COST(5);
+	game_anim_control(a, rd16(ARG(1)), rd16(ARG(2)), rd16(ARG(3)));
+	COST(1); /* pop esi */
 	return loop_at(0x4070b7);
 }
 
@@ -466,7 +392,7 @@ uint32_t game_op_anim_done(void) /* 0x4070b6 */
  *      since the stopwatch, else whether a fade runs (0x401e10); other a:
  *      b = 0 start the stopwatch, 1 the fade length, 2 S = a - 1;
  *   3 y: swap 512 bytes of row y + 0x40 bytes between surfaces 0 and 1;
- *   4: dissolve wipe (wipe.c: pieces 0x401a50 / 0x401b90, back at 0x40738b);
+ *   4: dissolve wipe (wipe.c);
  *   5 a: S = a. */
 static uint32_t misc_restore(void)
 {
@@ -478,25 +404,18 @@ static uint32_t misc_restore(void)
 	uint32_t w = rd16(esi + 4), ecx = rd16(esi + 6) * w + 0x208;
 	edi = 0x4662be + ecx - 1;
 	esi = esi + ecx - 1;
-	X86_COUNT(15 + n + ecx);
+	COST(15 + n + ecx);
 	for (uint32_t i = 0; i < ecx; i++)
 		wr8(edi--, rd8(esi--));
-	uint32_t edx = ax_(cpu.r[EDX], SV(surface_select));
+	uint32_t surface = SV(surface_select);
 	SV_SET(surface_select, 1);
 	SV_SET(vflags, SV(vflags) | 1);
-	cpu.r[EAX] = w;
-	cpu.r[ESI] = esi;
-	cpu.r[EDI] = edi;
-	cpu.r[ECX] = 0;
-	cpu.r[EDX] = edx;
-	push32(edx);
-	X86_COUNT(7);
-	game_picture_load();
-	cpu.r[EDX] = pop32();
+	COST(7);
+	uint32_t eax = game_picture_load(0);
 	SV_SET(vflags, SV(vflags) & 0xfe);
-	SV_SET(surface_select, cpu.r[EDX]);
-	X86_COUNT(4);
-	return cpu.r[EAX];
+	SV_SET(surface_select, surface);
+	COST(4);
+	return eax;
 }
 
 static uint32_t misc_row_swap(void)
@@ -504,108 +423,73 @@ static uint32_t misc_row_swap(void)
 	uint32_t y = rd16(ARG(1));
 	uint64_t m0 = (uint64_t)y * rd32(0x4462ae), m1 = (uint64_t)y * rd32(0x4462b2);
 	uint32_t off0 = (uint32_t)m0 + 0x40, off1 = (uint32_t)m1 + 0x40;
-	cpu.r[EDX] = (uint32_t)(m1 >> 32);
-	push32(off0);
-	push32(off1);
-	push32(rd32(0x44629e));
-	cpu.r[EAX] = off1;
-	X86_COUNT(9);
-	game_lock_regs();
-	drop(1);
-	uint32_t esi = cpu.r[EAX];
-	push32(rd32(0x4462a2));
-	X86_COUNT(2);
-	game_lock_regs();
-	drop(1);
-	uint32_t edi = cpu.r[EAX];
-	edi += pop32();
-	esi += pop32();
-	X86_COUNT(5);
-	uint32_t a = 0, b = 0;
+	COST(9);
+	uint32_t esi = game_surface_lock(rd32(0x44629e));
+	COST(1 + 2);
+	uint32_t edi = game_surface_lock(rd32(0x4462a2));
+	COST(1);
+	edi += off1;
+	esi += off0;
+	COST(5);
+	uint8_t *pa = x86_ptr(esi, 0x200), *pb = x86_ptr(edi, 0x200);
 	for (int i = 0; i < 0x80; i++) {
-		a = rd32(esi);
-		b = rd32(edi);
-		wr32(esi, b);
-		wr32(edi, a);
-		esi += 4;
-		edi += 4;
-		X86_COUNT(7);
+		uint32_t a, b;
+		memcpy(&a, pa + 4 * i, 4);
+		memcpy(&b, pb + 4 * i, 4);
+		memcpy(pa + 4 * i, &b, 4);
+		memcpy(pb + 4 * i, &a, 4);
+		COST(7);
 		if (i < 0x7f)
-			X86_POLL(0x40735f);
+			POLL(0x40735f);
 	}
-	cpu.r[ESI] = esi;
-	cpu.r[EDI] = edi;
-	cpu.r[EBX] = b;
-	cpu.r[ECX] = 0;
-	push32(rd32(0x44629e));
-	X86_COUNT(2);
-	game_unlock_regs();
-	drop(1);
-	push32(rd32(0x4462a2));
-	X86_COUNT(2);
-	game_unlock_regs();
-	drop(1);
-	return cpu.r[EAX];
+	COST(2);
+	game_surface_unlock(rd32(0x44629e));
+	COST(1 + 2);
+	uint32_t r = game_surface_unlock(rd32(0x4462a2));
+	COST(1);
+	return r;
 }
 
-/* 0x40738b: after the wipe: add esp, 8; the handler's tail */
-uint32_t game_op_wipe_done(void)
+int vm_op_misc(void)
 {
-	cpu.r[ESP] += 8;
-	uint32_t esi = pop32();
-	vm_set_reg(VM_REG_S, cpu.r[EAX]);
-	cpu.r[ESI] = esi;
-	X86_COUNT(5); /* add esp, jmp, mov [S], pop esi, jmp 0x4060f9 */
-	return loop_at(0x407235);
-}
-
-uint32_t game_op_misc(void)
-{
-	uint32_t n = parse(), eax;
-	uint32_t esi = cpu.r[ESI];
-	cpu.r[ESI] = ARG(1); /* the sub-ops address their arguments from ESI */
-	X86_COUNT(3);
+	uint32_t n = parse(NULL), eax = n;
+	COST(3);
 	switch (n) {
 	case 0:
 		eax = misc_restore();
 		break;
 	case 1:
-		eax = ax_(cpu.r[EAX], 0xff);
-		X86_COUNT(2);
+		eax = ax_(eax, 0xff);
+		COST(2);
 		break;
 	case 2: {
 		uint32_t a = (rd16(ARG(1)) - 1) & 0xffff;
-		eax = ax_(cpu.r[EAX], a);
-		X86_COUNT(3);
+		eax = ax_(eax, a);
+		COST(3);
 		if (a & 0x8000) { /* js: a was 0 (or above 0x8000) */
-			cpu.r[EAX] = eax;
-			game_fade_start();
-			eax = cpu.r[EAX];
-			X86_COUNT(1);
+			eax = game_fade_start();
+			COST(1);
 		} else if (a == 0) {
-			X86_COUNT(2);
+			COST(2);
 			if (rd16(ARG(2)) == 1) {
 				eax = RT(frame) - RT(stopwatch);
-				X86_COUNT(3);
+				COST(3);
 			} else {
-				cpu.r[EAX] = eax;
-				game_fade_active();
-				eax = cpu.r[EAX];
-				X86_COUNT(1);
+				eax = game_fade_active();
+				COST(1);
 			}
 		} else {
 			uint32_t b = rd16(ARG(2));
-			cpu.r[EBX] = b;
-			X86_COUNT(2);
+			COST(2);
 			if (b == 0) {
 				eax = RT(frame);
 				RT_SET(stopwatch, eax);
-				X86_COUNT(3);
+				COST(3);
 			} else if (b == 1) {
 				eax = RT(fade_steps);
-				X86_COUNT(2);
+				COST(2);
 			} else if (b == 2) {
-				X86_COUNT(1);
+				COST(1);
 			} else {
 				x86_trap(0x4072b0, "op 19 2: sub-op out of the table");
 			}
@@ -616,22 +500,19 @@ uint32_t game_op_misc(void)
 		eax = misc_row_swap();
 		break;
 	case 5:
-		eax = ax_(cpu.r[EAX], rd16(ARG(1)));
-		X86_COUNT(2);
+		eax = ax_(eax, rd16(ARG(1)));
+		COST(2);
 		break;
 	case 4: /* the dissolve wipe: push esi (saved), 2, 0 and call 0x401a50 */
-		push32(esi);
-		push32(2);
-		push32(0);
-		push32(0x40738b);
-		X86_COUNT(3 + 1);
-		return 0x401a50;
+		COST(3 + 1);
+		eax = game_wipe(0, 2);
+		vm_set_reg(VM_REG_S, eax);
+		COST(5); /* add esp, jmp, mov [S], pop esi, jmp 0x4060f9 */
+		return loop_at(0x407235);
 	default:
 		x86_trap(0x40720f, "op 19: sub-op out of the table");
 	}
 	vm_set_reg(VM_REG_S, eax);
-	cpu.r[EAX] = eax;
-	cpu.r[ESI] = esi;
-	X86_COUNT(2);
+	COST(2);
 	return loop_at(0x407235);
 }
