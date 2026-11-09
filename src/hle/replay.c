@@ -7,10 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "clock.h"
+#include "game/pace.h"
 #include "game/state_view.h"
 #include "hle.h"
 
-#define VIRT_IPS 25000000ull /* the game clock: instructions per second */
 #define WM_QUIT_MSG 0x12u
 #define PAGE 4096u
 
@@ -21,8 +22,9 @@ static uint64_t cp_ticks = 250;
 static uint32_t cur_tick, cur_k;
 static uint64_t last_cp_idx;
 static char save_root[1024];
-/* NANPA2_REPLAY_CHECK=li[,raw.icount,raw.data,...]: compare only the keys that start
- * with one of the comma-separated prefixes ("li" = every li.* key); unset = all keys */
+/* NANPA2_REPLAY_CHECK=li[,raw.clock,raw.data,...]: compare only the keys that start
+ * with one of the comma-separated prefixes ("li" = every li.* key); unset = all keys;
+ * "none" = replay the messages without any checkpoint comparison */
 static const char *check_keys;
 static int key_checked(const char *tok, size_t kl)
 {
@@ -73,7 +75,7 @@ int replay_replaying(void)
 
 uint64_t replay_ms(void)
 {
-	return x86_icount / (VIRT_IPS / 1000);
+	return clock_us() / 1000;
 }
 
 /* ---- hashing: 8 bytes a step, multiply and rotate ---- */
@@ -189,7 +191,7 @@ static int build_cp(char *out, size_t cap)
 	ADD(" li.files=%d/%016" PRIx64, (int)nfiles, files_hash);
 	ADD(" li.vm=%" PRIu64 "/%" PRIx64, vm_ops, vm_last);
 	ADD(" li.flags=%d/%016" PRIx64, nsaves, sv);
-	ADD(" raw.icount=%" PRIu64, (uint64_t)x86_icount);
+	ADD(" raw.clock=%" PRIu64, (uint64_t)clock_us());
 	ADD(" raw.cpu=%016" PRIx64, replay_hash(&cpu.r[0], sizeof cpu.r, 0));
 	static uint8_t data[DATA_HI - DATA_LO];
 	x86_read_virtual(DATA_LO, data, sizeof data);
@@ -263,6 +265,8 @@ static void checkpoint(int fin)
 	}
 	if (!replaying)
 		return;
+	if (check_keys && !strcmp(check_keys, "none"))
+		return; /* messages only: recorded input on a build with other timing */
 	size_t at = next_rcp;
 	if (at >= nrcps || rcps[at].fin != fin) {
 		/* the recording has no checkpoint here (a longer run than it) */
@@ -348,13 +352,15 @@ static int load_replay(const char *path)
 	char *line = NULL;
 	size_t cap = 0;
 	ssize_t len;
-	int ok = 0;
+	int ok = 0, pace_ok = 0;
 	while ((len = getline(&line, &cap, f)) > 0) {
 		while (len && (line[len - 1] == '\n' || line[len - 1] == '\r'))
 			line[--len] = 0;
 		uint32_t t, k, m, w, l;
 		if (!strncmp(line, "nanpa2-replay ", 14)) {
-			ok = atoi(line + 14) == 1;
+			ok = atoi(line + 14) == 2;
+		} else if (!strncmp(line, "pace ", 5)) {
+			pace_ok = atoi(line + 5) == PACE_VERSION;
 		} else if (!strncmp(line, "cp_ticks ", 9)) {
 			cp_ticks = strtoull(line + 9, NULL, 10);
 		} else if (!strncmp(line, "saves ", 6)) {
@@ -375,8 +381,9 @@ static int load_replay(const char *path)
 	}
 	free(line);
 	fclose(f);
+	ok = ok && pace_ok;
 	if (!ok)
-		fprintf(stderr, "replay: %s is not a recording of this version\n", path);
+		fprintf(stderr, "replay: %s is not a recording of this version (format 2, pace %d)\n", path, PACE_VERSION);
 	return ok;
 }
 
@@ -414,7 +421,7 @@ void replay_init(const char *save_dir)
 		}
 		char now[64];
 		saves_line(now, sizeof now);
-		fprintf(rec, "nanpa2-replay 1\nvirt_ips %llu\ncp_ticks %u\nsaves %s\n", VIRT_IPS, (unsigned)cp_ticks,
+		fprintf(rec, "nanpa2-replay 2\npace %d\ncp_ticks %u\nsaves %s\n", PACE_VERSION, (unsigned)cp_ticks,
 			now);
 		fflush(rec);
 		recording = 1;

@@ -17,9 +17,8 @@ void script_set_flag(uint32_t n, uint32_t v);
  * expression ends it at once: *bare_token gets it (else -1) and it is the
  * value returned. Malformed
  * expressions (stack underflow, leftover values, an unknown token after a
- * value) trap: the native code would return into garbage. *insns is the
- * number of instructions the native loop runs for it (CPU-time estimate). */
-uint32_t script_eval(uint32_t *pc, int *bare_token, uint32_t *insns);
+ * value) trap: the native code would return into garbage. */
+uint32_t script_eval(uint32_t *pc, int *bare_token);
 /* tokens seen by script_eval, by value (the replay's coverage report) */
 extern uint64_t script_eval_coverage[256];
 

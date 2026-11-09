@@ -89,7 +89,6 @@
 
 static uint32_t stdcall(uint32_t fn, int n, const uint32_t *a)
 {
-	X86_COUNT((uint64_t)n + 1);
 	return hle_invoke(fn, n, a);
 }
 
@@ -103,7 +102,6 @@ static uint32_t stdcall(uint32_t fn, int n, const uint32_t *a)
 /* a cdecl call of a routine in the C runtime replacement */
 static uint32_t cdecl_call(uint32_t addr, int n, const uint32_t *a)
 {
-	X86_COUNT((uint64_t)n + 2); /* pushes, call, add esp */
 	return hle_invoke(addr, n, a);
 }
 
@@ -117,38 +115,28 @@ static uint32_t cd_search(void)
 	uint32_t esp = cpu.r[ESP];
 	cpu.r[ESP] -= 0x28;
 	uint32_t local = cpu.r[ESP];
-	X86_COUNT(6);
 	uint32_t found = 0;
 	for (uint32_t drive = 0; drive < 0x1a; drive++) {
 		wr8(CD_PREFIX, 'A' + drive);
-		X86_COUNT(5);
 		if (IMPORT(IAT_GETDRIVETYPE, CD_PREFIX) != 5) {
-			X86_COUNT(5);
 			continue;
 		}
-		X86_COUNT(2);
 		cdecl_call(0x412c90, 3, (const uint32_t[]){ local, CD_FMT, CD_PREFIX });
-		X86_COUNT(2);
 		uint32_t f = cdecl_call(0x412d13, 2, (const uint32_t[]){ local, MODE_READ });
-		X86_COUNT(2);
 		if (f) {
 			found = f;
 			break;
 		}
-		X86_COUNT(3);
 	}
 	if (!found) {
 		wr8(CD_PREFIX, 0);
 		found = cdecl_call(0x412d13, 2, (const uint32_t[]){ CD_FALLBACK_FILE, MODE_READ });
-		X86_COUNT(3);
 		if (!found) {
-			X86_COUNT(5);
 			cpu.r[ESP] = esp;
 			return 0;
 		}
 	}
 	cdecl_call(0x412d6e, 1, (const uint32_t[]){ found });
-	X86_COUNT(7);
 	cpu.r[ESP] = esp;
 	return 1;
 }
@@ -166,25 +154,20 @@ static uint32_t display_init(void)
 	uint32_t esp = cpu.r[ESP];
 	cpu.r[ESP] -= 8; /* the colour key {8, 8} */
 	uint32_t key = cpu.r[ESP];
-	X86_COUNT(4);
 	IMPORT(IAT_SHOWCURSOR, 1);
 	/* DirectSound: the HLE 0x402ad0 (cdecl, the window) */
 	cdecl_call(0x402ad0, 1, (const uint32_t[]){ SC(hwnd) });
-	X86_COUNT(2);
 	if (IMPORT(IAT_DDRAWCREATE, 0, DDRAW, 0) != 0) {
 		message_box(MSG_DD_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
-		X86_COUNT(5);
 		return 0;
 	}
 	uint32_t dd = SC(ddraw);
-	X86_COUNT(2);
 	COM(dd, DD_SETCOOPERATIVELEVEL, SC(hwnd), 0x11);
 	dd = SC(ddraw);
 	if (COM(dd, DD_SETDISPLAYMODE, 640, 480, 8) != 0) {
 		message_box(MSG_MODE_ERROR, MSG_TITLE_ERROR);
 		cpu.r[ESP] = esp;
-		X86_COUNT(5);
 		return 0;
 	}
 	/* the screen: a primary surface */
@@ -192,7 +175,6 @@ static uint32_t display_init(void)
 	wr32(SURFACE_DESC, 0x6c);
 	wr32(DESC_FLAGS, 1);
 	wr32(DESC_CAPS, 0x200);
-	X86_COUNT(5);
 	dd = SC(ddraw);
 	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES, 0);
 	uint32_t screen = rd32(SURFACES);
@@ -200,50 +182,41 @@ static uint32_t display_init(void)
 	COM(screen, SURF_LOCK, 0, SURFACE_DESC, 1, 0);
 	wr32(PITCHES, rd32(DESC_PITCH));
 	COM(screen, SURF_UNLOCK, 0);
-	X86_COUNT(3);
 	/* transparent colour 8 */
 	wr32(key, 8);
 	wr32(key + 4, 8);
 	COM(screen, SURF_SETCOLORKEY, 8, key);
-	X86_COUNT(5);
 	/* the palette: all black, shared by the screen */
 	for (uint32_t i = 0; i < 256; i++)
 		wr32(PALETTE_ENTRIES + 4 * i, 0);
-	X86_COUNT(5 + 256);
 	dd = SC(ddraw);
 	COM(dd, DD_CREATEPALETTE, 0x44, PALETTE_ENTRIES, PALETTE_OBJ, 0);
 	COM(rd32(SURFACES), SURF_SETPALETTE, SC(palette_obj));
-	X86_COUNT(4);
 	/* three off-screen surfaces 640 x 400 (system memory, colour key 8) */
 	wr32(DESC_FLAGS, 7);
 	wr32(DESC_CAPS, 0x840);
 	wr32(DESC_WIDTH, 640);
 	wr32(DESC_HEIGHT, 400);
-	X86_COUNT(5);
 	for (uint32_t i = 0; i < 3; i++) {
 		dd = SC(ddraw);
 		COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES + 4 + 4 * i, 0);
 		COM(rd32(SURFACES + 4 + 4 * i), SURF_SETCOLORKEY, 8, key);
 		wr32(PITCHES + 4 + 4 * i, 640);
-		X86_COUNT(8);
 	}
 	/* the 640 x 480 scratch surface the text is drawn into */
 	wr32(DESC_HEIGHT, 480);
 	dd = SC(ddraw);
 	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SCRATCH_SURFACE, 0);
-	X86_COUNT(6);
 	/* fonts by size: 15, 24 and 32 pixels, Big5 */
 	static const struct { int32_t height, weight; } fonts[3] = { { -15, 700 }, { -24, 700 }, { -32, 400 } };
 	for (int i = 0; i < 3; i++) {
 		uint32_t f = IMPORT(0x41b018, (uint32_t)fonts[i].height, 0, 0, 0, (uint32_t)fonts[i].weight, 0, 0, 0,
 		                    0x88, 0, 0, 0, 0, FONT_FACE);
 		wr32(FONTS + 4 * (uint32_t)i, f);
-		X86_COUNT(7);
 	}
 	/* the 16 ms timer: the callback 0x4028c0 is the HLE */
 	SC_SET(timer_id, IMPORT(IAT_TIMESETEVENT, 0x10, 0x10, 0x4028c0, 0, 1));
 	IMPORT(IAT_SHOWCURSOR, 0);
-	X86_COUNT(8);
 	cpu.r[ESP] = esp;
 	return 1;
 }
@@ -253,34 +226,27 @@ static uint32_t display_init(void)
 static void release_at(uint32_t slot)
 {
 	uint32_t obj = rd32(slot);
-	X86_COUNT(2);
 	if (obj) {
 		COM1(obj, DD_RELEASE);
 		wr32(slot, 0);
-		X86_COUNT(2);
 	}
 }
 
 static void shutdown(void)
 {
-	X86_COUNT(2);
 	if (SC(timer_id))
 		IMPORT(IAT_TIMEKILLEVENT, SC(timer_id));
 	for (int i = 2; i >= 0; i--)
 		IMPORT(IAT_DELETEOBJECT, rd32(FONTS + 4 * (uint32_t)i));
-	X86_COUNT(5);
 	release_at(PALETTE_OBJ);
 	release_at(SCRATCH_SURFACE);
 	for (uint32_t i = 0; i < 4; i++) {
 		release_at(SURFACES + 4 * i);
-		X86_COUNT(3);
 	}
 	release_at(DDRAW);
 	/* DirectSound: the HLE 0x402c70 */
-	X86_COUNT(1);
 	HLE0(0x402c70);
 	IMPORT(IAT_SHOWCURSOR, 1);
-	X86_COUNT(1);
 }
 
 /* ---- WinMain (0x402090) ---- */
@@ -290,14 +256,12 @@ static void shutdown(void)
  * VM (0x4060d4) and shut down when it ends. Returns WinMain's result: -1 the
  * class could not be registered, 0 no CD or no display, 1 the game ran.
  * The emulated stack keeps the native frame (4 argument and return words, the
- * 40-byte WNDCLASS, the saved EDI): the VM records its stack top
- * (RT.top_esp, part of the data area) from it. */
+ * 40-byte WNDCLASS, the saved EDI). */
 uint32_t game_main(uint32_t hinst)
 {
 	uint32_t esp0 = cpu.r[ESP];
 	uint32_t wc = esp0 - 8 - 0x28;
 	cpu.r[ESP] = wc - 4;
-	X86_COUNT(5);
 	SC_SET(hinstance, hinst);
 	/* the class: style 0, window procedure 0x4021c0, no extra bytes */
 	wr32(wc + 0, 0);
@@ -310,50 +274,32 @@ uint32_t game_main(uint32_t hinst)
 	wr32(wc + 28, IMPORT(IAT_GETSTOCKOBJECT, 4));
 	wr32(wc + 32, 0);
 	wr32(wc + 36, WND_CLASS);
-	X86_COUNT(12);
 	uint32_t result;
 	if ((IMPORT(IAT_REGISTERCLASS, wc) & 0xffff) == 0) {
-		X86_COUNT(3);
 		result = 0xffffffffu;
 		goto leave;
 	}
-	X86_COUNT(10);
 	uint32_t height = IMPORT(IAT_GETSYSMETRICS, 1);
 	uint32_t width = IMPORT(IAT_GETSYSMETRICS, 0);
 	wr32(HWND_MAIN, IMPORT(IAT_CREATEWINDOW, 0, WND_CLASS, WND_CLASS, 0x80000000u, 0, 0, width, height, 0, 0,
 	                       SC(hinstance), 0));
-	X86_COUNT(3);
 	if (!cd_search()) {
 		message_box(MSG_NO_CD, MSG_NO_CD_TITLE);
-		X86_COUNT(3);
 		result = 0;
 		goto leave;
 	}
-	X86_COUNT(3);
 	cdecl_call(0x401e20, 1, (const uint32_t[]){ LOGO_ARG }); /* the logo player (HLE) */
 	uint32_t ok = display_init();
-	X86_COUNT(2);
 	if (!ok) {
-		X86_COUNT(1);
 		result = 0;
 		goto leave;
 	}
 	IMPORT(IAT_SHOWWINDOW, SC(hwnd), 5);
 	IMPORT(IAT_UPDATEWINDOW, SC(hwnd));
-	X86_COUNT(2);
-	X86_COUNT(1); /* call */
-	/* 0x4060d4: the VM's entry saves EBP and records its stack top (data
-	 * area word RT.top_esp), below the return address into WinMain */
-	cpu.r[ESP] -= 4;
-	push32(cpu.r[EBP]);
-	RT_SET(top_esp, cpu.r[ESP]);
-	X86_COUNT(3);
 	game_vm_run();
 	shutdown();
-	X86_COUNT(1);
 	result = 1;
 leave:
-	X86_COUNT(4); /* pop edi, add esp, ret 0x10 */
 	cpu.r[ESP] = esp0;
 	return result;
 }
@@ -380,7 +326,6 @@ static uint32_t key_bit(uint32_t vk)
 
 static void voice_stop(void)
 {
-	X86_COUNT(1);
 	HLE0(0x403440);
 }
 
@@ -391,9 +336,7 @@ static void paint(void)
 {
 	uint32_t dd = SC(ddraw);
 	COM(dd, DD_WAITVBLANK, 1, 0);
-	X86_COUNT(2);
 	game_cursor_restore();
-	X86_COUNT(2);
 	game_cursor_draw();
 }
 
@@ -409,86 +352,68 @@ static void host_call(uint32_t slot, int n, const uint32_t *a)
 uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
 	uint32_t result = 0;
-	X86_COUNT(5);
 	if (msg == 0x200) { /* WM_MOUSEMOVE */
 		uint32_t x = lparam & 0xffff, y = lparam >> 16;
 		SC_SET(cursor_x, x);
 		SV_SET(mouse_x, x);
 		SC_SET(cursor_y, y);
-		X86_COUNT(15);
 		if (SC(letterbox)) {
 			y = (y - 0x28) & 0xffff;
-			X86_COUNT(4);
 			if ((int16_t)y < 0) {
 				y = 0;
-				X86_COUNT(2);
 			} else if ((int16_t)y > 0x18f) {
 				y = 0x18f;
-				X86_COUNT(3);
 			} else {
-				X86_COUNT(2);
 			}
 		}
 		SV_SET(mouse_y, y);
-		X86_COUNT(2);
 		if (SC(cursor_on)) {
-			X86_COUNT(1);
 			paint();
 		}
 		goto done;
 	}
 	if (msg > 0x200) { /* mouse buttons */
-		X86_COUNT(5);
 		switch (msg) {
 		case 0x201: /* left button down: stop the voice, OK pressed */
 		case 0x204: { /* right button down: cancel pressed */
 			voice_stop();
 			RT_SET(input_bits, RT(input_bits) | (msg == 0x201 ? 0x10 : 0x20));
-			X86_COUNT(4);
 			goto done;
 		}
 		case 0x202:
 		case 0x205:
 			RT_SET(input_bits, RT(input_bits) & ~(msg == 0x202 ? 0x10 : 0x20));
-			X86_COUNT(4);
 			goto done;
 		}
 		goto def;
 	}
 	if (msg == 0x100) { /* WM_KEYDOWN */
-		X86_COUNT(5);
 		if (wparam - 0xd > 0x63)
 			goto done;
 		if (wparam == 0x70) { /* F1 */
-			X86_COUNT(5);
 			host_call(IAT_DESTROYWINDOW, 1, (const uint32_t[]){ SC(hwnd) });
 			goto done;
 		}
 		uint32_t bit = key_bit(wparam);
-		X86_COUNT(5);
 		if (bit)
 			RT_SET(input_bits, RT(input_bits) | bit);
 		goto done;
 	}
 	if (msg > 0x100) {
-		X86_COUNT(3);
 		if (msg != 0x101)
 			goto def;
 		/* WM_KEYUP */
 		if (wparam - 0xd > 0x20)
 			goto done;
 		uint32_t bit = key_bit(wparam);
-		X86_COUNT(8);
 		if (bit == 0x10 || bit == 0x20)
 			voice_stop(); /* Enter, Space, Escape, Insert */
 		if (bit)
 			RT_SET(input_bits, RT(input_bits) & ~bit);
 		goto done;
 	}
-	X86_COUNT(3);
 	if (msg == 2) { /* WM_DESTROY */
 		host_call(IAT_POSTQUIT, 1, (const uint32_t[]){ 0 });
-		X86_COUNT(2);
 		goto done;
 	}
 	if (msg != 0x1c) /* WM_ACTIVATEAPP */
@@ -496,25 +421,18 @@ uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lpa
 	if (wparam == 0) { /* deactivated: pause the sound, stop the game's clock */
 		SC_SET(paused, 1);
 		SC_SET(active, 0);
-		X86_COUNT(5);
 		voice_stop();
-		X86_COUNT(1);
 		HLE0(0x403220); /* music pause (HLE) */
 		goto done;
 	}
-	X86_COUNT(3);
 	if (SC(paused)) {
-		X86_COUNT(1);
 		HLE0(0x403250); /* music resume (HLE) */
 	}
 	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ hwnd });
 	SC_SET(active, 1);
-	X86_COUNT(5);
 	goto done;
 def:
-	X86_COUNT(5);
 	result = stdcall(rd32(IAT_DEFWINDOWPROC), 4, (const uint32_t[]){ hwnd, msg, wparam, lparam });
 done:
-	X86_COUNT(3);
 	return result;
 }

@@ -11,16 +11,18 @@
 #include <stdio.h>
 
 #include "game/expr.h"
+#include "game/ctl.h"
+#include "game/pace.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 #include "game/state.h"
 
 uint32_t vm_eval(uint32_t *pc)
 {
-	uint32_t start = *pc, insns;
+	uint32_t start = *pc;
 	int bare;
-	uint32_t v = script_eval(pc, &bare, &insns);
-	X86_COUNT(insns);
+	uint32_t v = script_eval(pc, &bare);
+	ctl_work_us(PACE_EVAL_US);
 	if (bare >= 0) {
 		/* natively the value would be the token in AL over whatever EAX
 		 * held; no script needs that */
@@ -37,7 +39,6 @@ uint32_t vm_skip_block(uint32_t pc)
 	while (vm_script_byte(pc) != VM_BLOCK_OPEN)
 		pc++;
 	pc++;
-	uint32_t body = pc;
 	/* the native depth counter is AH: 8 bits, wrapping */
 	uint8_t depth = 1;
 	for (;;) {
@@ -48,7 +49,7 @@ uint32_t vm_skip_block(uint32_t pc)
 			break;
 	}
 	/* 4 instructions a byte up to the 01, about 6 a byte in the block */
-	X86_COUNT(4 + 4 * (body - start) + 6 * (pc - body));
+	ctl_work_us(PACE_SKIP_US(pc - start));
 	return pc;
 }
 
@@ -64,7 +65,6 @@ uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax)
 	uint32_t p = *pc, n = 0, a = 0;
 	for (uint32_t i = 0; i < VM_ARG_TYPES_CLEARED; i += 4)
 		wr32(VM_ARG_TYPES + i, 0);
-	X86_COUNT(14);
 	for (;;) {
 		uint32_t b = vm_script_byte(p);
 		/* type and value go to entry n with no bound check: past 16
@@ -73,36 +73,30 @@ uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax)
 			wr8(VM_ARG_TYPES + n, VM_ARG_STRING);
 			wr16(VM_ARG_VALUES + 2 * n, p);
 			n++;
-			uint32_t s = ++p;
+			p++;
 			do
 				a = (a & ~0xffu) | vm_script_byte(p++);
 			while ((a & 0xff) != VM_STRING);
-			X86_COUNT(8 + 4 * (p - s));
 		} else if (b == VM_BLOCK_OPEN) {
 			wr8(VM_ARG_TYPES + n, VM_ARG_BLOCK);
 			wr16(VM_ARG_VALUES + 2 * n, p);
 			n++;
 			p = vm_skip_block(p);
 			a &= ~0xffffu; /* 0x4061d4 leaves AX = 0 */
-			X86_COUNT(8);
 		} else if (!starts_expression(b)) {
 			a = (a & ~0xffu) | 0xff; /* AL = -1 from 0x4074a3 */
-			X86_COUNT(14);
 			break;
 		} else {
 			a = vm_eval(&p);
 			wr8(VM_ARG_TYPES + n, VM_ARG_EXPR);
 			wr16(VM_ARG_VALUES + 2 * n, a);
 			n++;
-			X86_COUNT(26);
 		}
 		if (vm_script_byte(p) != VM_SEPARATOR) {
 			a = vm_arg(0);
-			X86_COUNT(4);
 			break;
 		}
 		p++;
-		X86_COUNT(4);
 	}
 	*pc = p;
 	*eax = a;
@@ -122,7 +116,6 @@ void vm_init(void)
 	G.save.n.segment[3] = VM_SEGMENT2;
 	G.save.n.w0_4[0] = (uint16_t)(VM_ARRAY0_BUFFER - VM_SCRIPT);
 	SV_SET(menu_list_ptr, VM_MENU_LIST - VM_SCRIPT);
-	X86_COUNT(17);
 }
 
 /* 0x4068e1: one item of a menu list ("02 [0f expr 03] text", ended by 00),
@@ -133,24 +126,19 @@ uint32_t vm_menu_item(uint32_t *pcp, uint32_t *text)
 {
 	uint32_t pc = *pcp, al = 1;
 	if (vm_script_byte(pc) == VM_BLOCK_END) {
-		X86_COUNT(4);
 		return 0xff;
 	}
 	pc++; /* the 02 (any byte, in fact) */
 	if (vm_script_byte(pc) == VM_IF) {
 		pc++;
-		uint32_t insns;
 		int bare;
-		uint32_t v = script_eval(&pc, &bare, &insns);
-		X86_COUNT(insns);
+		uint32_t v = script_eval(&pc, &bare);
 		al = v & 0xff;
 	}
 	*text = pc;
-	uint32_t start = pc;
 	while (vm_script_byte(pc) != VM_BLOCK_END && vm_script_byte(pc) != VM_SEPARATOR)
 		pc++;
 	*pcp = pc;
-	X86_COUNT(10 + 6 * (pc - start));
 	return al;
 }
 
@@ -163,7 +151,6 @@ uint32_t vm_menu_item(uint32_t *pcp, uint32_t *text)
 uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last)
 {
 	uint32_t src = vm_arg(0), b;
-	uint32_t start = dst;
 	if (rd8(VM_ARG_TYPES) == VM_ARG_EXPR) {
 		do {
 			b = vm_script_byte(src++);
@@ -175,7 +162,6 @@ uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last)
 			wr8(dst++, b);
 		wr8(dst, 0);
 	}
-	X86_COUNT(6 + 6 * (dst - start));
 	*src_end = src;
 	*last = b;
 	return dst;

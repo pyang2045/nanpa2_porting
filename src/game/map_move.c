@@ -35,7 +35,6 @@ struct mv {
 static uint32_t cell_addr(const struct mv *c, uint32_t x, uint32_t y)
 {
 	uint32_t w2 = (c->m->map_w * 2) & 0xffff;
-	COST(9); /* call, movzx, add, mul, add, add, add, add, ret */
 	return (((w2 * (y & 0xffff)) & 0xffff) + x + x + c->m->layer + 4) & 0xffff;
 }
 
@@ -50,15 +49,11 @@ static int wall(uint32_t a)
 static void face(const struct mv *c, uint32_t dir2)
 {
 	c->s->frame = (c->s->frame & 1) + dir2;
-	COST(dir2 ? 4 : 3);
 }
 
 static int blocked(const struct mv *c)
 {
-	COST(2); /* call, jne */
 	int r = game_map_collide(c->s) != -1;
-	if (r)
-		COST(2); /* mov al, 0; ret */
 	return r;
 }
 
@@ -74,7 +69,6 @@ static uint32_t foot_row(const struct mv *c, int adjust)
 static int tail_end(int scrolled, int at_limit)
 {
 	/* mov al, -1; ret, and the dec + jmp of a scroll */
-	COST(scrolled && !at_limit ? 4 : 2);
 	return 0xff;
 }
 
@@ -82,17 +76,14 @@ static int up_tail(const struct mv *c)
 {
 	uint32_t y = (c->s->y - 1) & 0xffff;
 	c->s->y = y;
-	COST(3);
 	if (!(c->s->flags & SPRITE_SCROLL))
 		return tail_end(0, 0);
 	uint32_t vy = c->m->view_y;
 	uint32_t d = ((c->s->y - vy + 1) & 0xffff);
 	uint32_t margin = c->m->margin_t;
-	COST(d == margin ? 7 : 8);
 	if (d > margin)
 		return tail_end(0, 0);
 	vy = c->m->view_y;
-	COST(3);
 	if (vy == c->m->min_y)
 		return tail_end(0, 0);
 	c->m->view_y = (vy - 1) & 0xffff;
@@ -103,16 +94,13 @@ static int down_tail(const struct mv *c)
 {
 	uint32_t y = (c->s->y + 1) & 0xffff;
 	c->s->y = y;
-	COST(3);
 	if (!(c->s->flags & SPRITE_SCROLL))
 		return tail_end(0, 0);
 	uint32_t vy = c->m->view_y;
 	uint32_t d = (c->s->y + c->s->height - vy + c->m->margin_b - 1) & 0xffff;
-	COST(12);
 	if (d < c->m->view_h)
 		return tail_end(0, 0);
 	vy = (c->m->view_y + c->m->view_h - 1) & 0xffff;
-	COST(5);
 	if (vy == c->m->max_y)
 		return tail_end(0, 0);
 	c->m->view_y = (c->m->view_y + 1) & 0xffff;
@@ -123,17 +111,14 @@ static int left_tail(const struct mv *c)
 {
 	uint32_t x = (c->s->x - 1) & 0xffff;
 	c->s->x = x;
-	COST(3);
 	if (!(c->s->flags & SPRITE_SCROLL))
 		return tail_end(0, 0);
 	uint32_t vx = c->m->view_x;
 	uint32_t d = ((c->s->x - vx + 1) & 0xffff);
 	uint32_t margin = c->m->margin_l;
-	COST(d == margin ? 7 : 8);
 	if (d > margin)
 		return tail_end(0, 0);
 	vx = c->m->view_x;
-	COST(3);
 	if (vx == c->m->min_x)
 		return tail_end(0, 0);
 	c->m->view_x = (vx - 1) & 0xffff;
@@ -144,16 +129,13 @@ static int right_tail(const struct mv *c)
 {
 	uint32_t x = (c->s->x + 1) & 0xffff;
 	c->s->x = x;
-	COST(3);
 	if (!(c->s->flags & SPRITE_SCROLL))
 		return tail_end(0, 0);
 	uint32_t vx = c->m->view_x;
 	uint32_t d = (c->s->x + c->s->width - vx + c->m->margin_r - 1) & 0xffff;
-	COST(12);
 	if (d < c->m->view_w)
 		return tail_end(0, 0);
 	vx = (c->m->view_x + c->m->view_w - 1) & 0xffff;
-	COST(5);
 	if (vx == c->m->max_x)
 		return tail_end(0, 0);
 	c->m->view_x = (c->m->view_x + 1) & 0xffff;
@@ -165,42 +147,32 @@ static int right_tail(const struct mv *c)
 static int left_face(const struct mv *c)
 {
 	face(c, 4);
-	COST(3);
 	if (c->s->x == 0) {
-		COST(2);
 		return 0;
 	}
 	if (blocked(c))
 		return 0;
 	uint32_t a = cell_addr(c, (c->s->x - 1) & 0xffff, foot_row(c, -1));
-	COST(7 + 3);
 	if (wall(a)) {
-		COST(2);
 		return 0;
 	}
-	COST(1);
 	return left_tail(c);
 }
 
 static int right_face(const struct mv *c)
 {
 	face(c, 6);
-	COST(6);
 	/* the native test adds the sprite's height, not its width (0x4048d7) */
 	if (((c->s->x + c->s->height) & 0xffff) == c->m->map_w) {
-		COST(2);
 		return 0;
 	}
 	if (blocked(c))
 		return 0;
 	uint32_t x = (c->s->x + c->s->width) & 0xffff;
 	uint32_t a = cell_addr(c, x, foot_row(c, -1));
-	COST(9 + 3);
 	if (wall(a)) {
-		COST(2);
 		return 0;
 	}
-	COST(1);
 	return right_tail(c);
 }
 
@@ -209,48 +181,36 @@ static int right_face(const struct mv *c)
 static int up_face(const struct mv *c)
 {
 	c->s->frame = c->s->frame & 1;
-	COST(3 + 3);
 	if (c->s->y == 0) {
-		COST(2);
 		return 0;
 	}
 	if (blocked(c))
 		return 0;
 	uint32_t a = cell_addr(c, c->s->x, foot_row(c, -2));
-	COST(6 + 2);
 	for (uint32_t n = c->s->width; n; n--) {
-		COST(5);
 		if (wall(a)) {
-			COST(2);
 			return 0;
 		}
 		a += 2;
 	}
-	COST(1);
 	return up_tail(c);
 }
 
 static int down_face(const struct mv *c)
 {
 	face(c, 2);
-	COST(6);
 	if (((c->s->y + c->s->height) & 0xffff) == c->m->map_h) {
-		COST(2);
 		return 0;
 	}
 	if (blocked(c))
 		return 0;
 	uint32_t a = cell_addr(c, c->s->x, foot_row(c, 0));
-	COST(5 + 2);
 	for (uint32_t n = c->s->width; n; n--) {
-		COST(5);
 		if (wall(a)) {
-			COST(2);
 			return 0;
 		}
 		a += 2;
 	}
-	COST(1);
 	return down_tail(c);
 }
 
@@ -263,23 +223,18 @@ static int down_face(const struct mv *c)
 static int slide_sideways(const struct mv *c, uint32_t row, int setup)
 {
 	uint32_t a = cell_addr(c, (c->s->x - 1) & 0xffff, row);
-	COST(setup + 3);
 	if (!wall(a))
 		return left_face(c);
 	a += 2;
-	COST(3);
 	if (!wall(a))
 		return left_face(c);
 	uint32_t w = c->s->width;
 	a = (a & 0xffff0000u) | ((a + 2 * ((w - 1) & 0xffff)) & 0xffff);
-	COST(7);
 	if (!wall(a))
 		return right_face(c);
 	a += 2;
-	COST(3);
 	if (!wall(a))
 		return right_face(c);
-	COST(3);
 	return 0;
 }
 
@@ -289,24 +244,19 @@ static int slide_sideways(const struct mv *c, uint32_t row, int setup)
 static int slide_vertically(const struct mv *c, uint32_t x, int setup)
 {
 	uint32_t a = cell_addr(c, x, foot_row(c, -3));
-	COST(setup + 3);
 	if (!wall(a))
 		return up_face(c);
 	uint32_t step = c->m->map_w * 2;
 	a += step;
-	COST(5);
 	if (!wall(a))
 		return up_face(c);
 	a += step;
 	a += step;
-	COST(4);
 	if (!wall(a))
 		return down_face(c);
 	a += step;
-	COST(3);
 	if (!wall(a))
 		return down_face(c);
-	COST(3);
 	return 0;
 }
 
@@ -315,17 +265,13 @@ static int slide_vertically(const struct mv *c, uint32_t x, int setup)
 static int mv_up(const struct mv *c)
 {
 	face(c, 0);
-	COST(3);
 	if (c->s->y == 0)
 		return slide_sideways(c, foot_row(c, -2), 7);
 	if (blocked(c))
 		return 0;
-	COST(2);
 	if (!(c->s->flags & SPRITE_SLIDE)) {
 		uint32_t a = cell_addr(c, c->s->x, foot_row(c, -2));
-		COST(6 + 2);
 		for (uint32_t n = c->s->width; n; n--) {
-			COST(5);
 			if (wall(a))
 				return slide_sideways(c, foot_row(c, -2), 7);
 			a += 2;
@@ -337,17 +283,13 @@ static int mv_up(const struct mv *c)
 static int mv_down(const struct mv *c)
 {
 	face(c, 2);
-	COST(6);
 	if (((c->s->y + c->s->height) & 0xffff) == c->m->map_h)
 		return slide_sideways(c, foot_row(c, 0), 6);
 	if (blocked(c))
 		return 0;
-	COST(2);
 	if (!(c->s->flags & SPRITE_SLIDE)) {
 		uint32_t a = cell_addr(c, c->s->x, foot_row(c, 0));
-		COST(5 + 2);
 		for (uint32_t n = c->s->width; n; n--) {
-			COST(5);
 			if (wall(a))
 				return slide_sideways(c, foot_row(c, 0), 6);
 			a += 2;
@@ -359,16 +301,13 @@ static int mv_down(const struct mv *c)
 static int mv_left(const struct mv *c)
 {
 	face(c, 4);
-	COST(3);
 	if (c->s->x == 0)
 		return slide_vertically(c, (c->s->x - 1) & 0xffff, 7);
 	if (blocked(c))
 		return 0;
-	COST(2);
 	if (!(c->s->flags & SPRITE_SLIDE)) {
 		uint32_t x = (c->s->x - 1) & 0xffff;
 		uint32_t a = cell_addr(c, x, foot_row(c, -1));
-		COST(7 + 3);
 		if (wall(a))
 			return slide_vertically(c, x, 7);
 	}
@@ -378,17 +317,14 @@ static int mv_left(const struct mv *c)
 static int mv_right(const struct mv *c)
 {
 	face(c, 6);
-	COST(6);
 	/* the edge test adds the height (0x404cb8), the cell tested below the width */
 	if (((c->s->x + c->s->height) & 0xffff) == c->m->map_w)
 		return slide_vertically(c, (c->s->x + c->s->width) & 0xffff, 9);
 	if (blocked(c))
 		return 0;
-	COST(2);
 	if (!(c->s->flags & SPRITE_SLIDE)) {
 		uint32_t x = (c->s->x + c->s->width) & 0xffff;
 		uint32_t a = cell_addr(c, x, foot_row(c, -1));
-		COST(9 + 3);
 		if (wall(a))
 			return slide_vertically(c, x, 9);
 	}

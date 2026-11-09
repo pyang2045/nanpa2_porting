@@ -16,8 +16,8 @@ void status_early(void);
  * shown in the file until the game runs (stage "running"). */
 void status_stage(const char *name);
 /* The game starts (starts the thread too if status_early was not called).
- * mips: the throttle setting. */
-void status_init(SDL_Window *win, double mips);
+ * speed: the game speed setting (1.0 = the original's, 0 = unthrottled). */
+void status_init(SDL_Window *win, double speed);
 /* Main-thread heartbeat: cheap; refreshes the window and presenter numbers
  * a few times a second (they must be read on the main thread). */
 void status_main(void);

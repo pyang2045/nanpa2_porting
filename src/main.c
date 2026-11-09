@@ -10,7 +10,8 @@
  *                                                       (0x0: the window's drawable)
  *   nanpa2 --view-bmp SHOT.bmp --crt-shot OUT.bmp      the same for a 640x480
  *                                                       screenshot (NANPA2_SHOT_DIR)
- *   --cpu-mips N (or NANPA2_CPU_MIPS=N)                 emulated CPU speed, 0 = unthrottled
+ *   --speed X (or NANPA2_SPEED=X)                       game speed, 1.0 = the original's, 0 = as fast as
+ *                                                       the host can (virtual clock)
  *   --no-crt                                            plain pixels (F12 toggles)
  *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
  *   --logo (or NANPA2_LOGO=1)                           play the LOGO.AVI publisher
@@ -45,6 +46,7 @@
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
+#include "hle/clock.h"
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "hle/logo.h"
@@ -187,12 +189,9 @@ static void save_bmp(const char *path)
 	SDL_FreeSurface(s);
 }
 
-/* 486DX2-66 class: 66 MHz at about 2.6 clocks per instruction for this
- * kind of integer code (memory operands, cache misses, Windows 95 around
- * it) gives about 25 million instructions per second. */
-#define NANPA2_DEFAULT_MIPS 25.0
-static double cpu_mips = NANPA2_DEFAULT_MIPS;
-static int cpu_mips_set;
+/* the game speed: 1.0 is the original's (the time model of game/pace.h at real time) */
+static double game_speed = 1.0;
+static int game_speed_set;
 
 static SDL_Window *game_window;
 
@@ -204,7 +203,6 @@ static int run_game(const char *game, const char *exe, const char *font)
 		return 1;
 	}
 	state_init();
-	SDL_Log("CPU: %s", "engine");
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
@@ -215,12 +213,12 @@ static int run_game(const char *game, const char *exe, const char *font)
 	text_init(font);
 	dev_init();
 	replay_init(save_env ? save_env : save ? save : ".");
-	status_init(game_window, cpu_mips);
-	x86_set_speed(cpu_mips * 1e6);
+	status_init(game_window, game_speed);
+	clock_init(game_speed);
 	if (getenv("NANPA2_SAVETEST"))
 		return dev_save_selftest();
-	if (replay_replaying() && !getenv("NANPA2_CPU_MIPS") && !cpu_mips_set)
-		x86_set_speed(0); /* a replay runs as fast as the host can */
+	if (replay_replaying() && !game_speed_set)
+		clock_init(0); /* a replay runs as fast as the host can */
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint32_t hinstance = MEM_BASE;
@@ -231,11 +229,10 @@ static int run_game(const char *game, const char *exe, const char *font)
 		return 4;
 	replay_finish();
 	SDL_free(save);
-	/* raw speed with NANPA2_CPU_MIPS=0: everything the game executed,
-	 * HLE time included */
+	/* with NANPA2_SPEED=0: the game time against the host's, HLE time included */
 	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
-	SDL_Log("CPU: %s, %llu instructions in %.1f s (%.1f MIPS)", "engine",
-		(unsigned long long)x86_icount, secs, secs > 0 ? (double)x86_icount / secs / 1e6 : 0.0);
+	double game_secs = (double)clock_us() / 1e6;
+	SDL_Log("Game: %.1f s of game time in %.1f s (%.2fx)", game_secs, secs, secs > 0 ? game_secs / secs : 0.0);
 	return 0;
 }
 
@@ -246,13 +243,16 @@ int main(int argc, char **argv)
 	int make_assets = 0;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
-	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
-	double mips = NANPA2_DEFAULT_MIPS;
+	double speed = 1.0;
+	int speed_set = 0;
 	if (argc > 2 && !strcmp(argv[1], "--wav-check"))
 		return sound_wav_check(argc - 2, argv + 2) ? 1 : 0;
 	launch_log_init(argc, argv);
-	if (getenv("NANPA2_CPU_MIPS"))
-		mips = atof(getenv("NANPA2_CPU_MIPS"));
+	/* NANPA2_TURBO=N is the old name of NANPA2_SPEED=N */
+	if (getenv("NANPA2_SPEED"))
+		speed = atof(getenv("NANPA2_SPEED")), speed_set = 1;
+	else if (getenv("NANPA2_TURBO") && atoi(getenv("NANPA2_TURBO")) > 1)
+		speed = atoi(getenv("NANPA2_TURBO")), speed_set = 1;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "--game") && i + 1 < argc)
 			game = argv[++i];
@@ -289,8 +289,8 @@ int main(int argc, char **argv)
 			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
 		else if (!strcmp(argv[i], "--fullscreen"))
 			fullscreen = 1;
-		else if (!strcmp(argv[i], "--cpu-mips") && i + 1 < argc)
-			mips = atof(argv[++i]), cpu_mips_set = 1;
+		else if (!strcmp(argv[i], "--speed") && i + 1 < argc)
+			speed = atof(argv[++i]), speed_set = 1;
 		else if (!strcmp(argv[i], "--record") && i + 1 < argc)
 			SDL_setenv("NANPA2_RECORD", argv[++i], 1);
 		else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
@@ -414,7 +414,8 @@ int main(int argc, char **argv)
 
 	int rc = 0;
 	if (!viewer) {
-		cpu_mips = mips;
+		game_speed = speed;
+		game_speed_set = speed_set;
 		game_window = win;
 		rc = run_game(game, exe, font);
 		status_shutdown();

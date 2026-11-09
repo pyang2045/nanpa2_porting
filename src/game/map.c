@@ -32,7 +32,6 @@ static uint32_t op_init(void)
 	MV_SET(last_sprite, 0xffff);
 	MV_SET(last_click, 0xffff);
 	MV_SET(last_area, 0xffff);
-	COST(26);
 	return (size & 0xffff0000u) | grid; /* EAX: the size's height over the offset */
 }
 
@@ -47,7 +46,6 @@ static void op_player_script(void)
 	MV_SET(last_sprite, 0xffff);
 	MV_SET(last_click, 0xffff);
 	MV_SET(last_area, 0xffff);
-	COST(15);
 }
 
 /* the sprite table entry of argument 1 */
@@ -66,7 +64,6 @@ static uint32_t op_sprite_script(void)
 	s->script_pc = 0;
 	s->kind = 0;
 	s->count = 0;
-	COST(16);
 	return b;
 }
 
@@ -80,7 +77,6 @@ static uint32_t op_sprite_enable(void)
 		s->flags &= (uint8_t)~SPRITE_OFF;
 	else
 		s->flags |= SPRITE_OFF;
-	COST(15);
 	return b;
 }
 
@@ -96,9 +92,7 @@ static void history_fill(void)
 {
 	for (uint32_t i = 1; i < HISTORY_LEN; i++) {
 		*hist(i) = *hist(0);
-		POLL(0x4050f6);
 	}
-	COST(5 + 9 * 6);
 }
 
 /* Sub-op 10, 0x40502c: put the view and the first three sprites at entry
@@ -127,7 +121,6 @@ static uint32_t op_enter(void)
 	uint32_t last = e->max_x | ((uint32_t)e->max_y << 16);
 	m->max_x = e->max_x;
 	m->max_y = e->max_y;
-	COST(60);
 	return last;
 }
 
@@ -153,7 +146,6 @@ static uint32_t op_reset_history(void)
 	uint32_t last = e->max_x | ((uint32_t)e->max_y << 16);
 	m->max_x = e->max_x;
 	m->max_y = e->max_y;
-	COST(55);
 	return last;
 }
 
@@ -174,10 +166,8 @@ static uint32_t op_unpack(void)
 	src += 4;
 	dst += 4;
 	uint32_t run = 0, v = 0;
-	COST(20);
 	for (uint32_t n = w * h; n; n--) {
 		if (run) {
-			COST(6);
 			run--;
 		} else {
 			v = seg1_u16(src);
@@ -186,14 +176,11 @@ static uint32_t op_unpack(void)
 				v &= 0xbfff;
 				run = seg1_u8(src) - 1; /* 0 wraps: a run of 4G */
 				src++;
-				COST(14);
 			} else {
-				COST(10);
 			}
 		}
 		seg1_set16(dst, v);
 		dst += 2;
-		POLL(0x405487);
 	}
 	return v;
 }
@@ -216,21 +203,16 @@ static uint32_t op_copy_cells(void)
 	if (!rows || !cols)
 		x86_trap(0x40548f, "map: copying an empty rectangle");
 	uint32_t v = 0;
-	COST(40);
 	for (uint32_t r = 0; r < rows; r++) {
 		uint32_t s = src, t = dst;
-		COST(10);
 		for (uint32_t k = 0; k < cols; k++) {
 			v = seg1_u16(s);
 			seg1_set16(t, v);
 			s += 2;
 			t += 2;
-			COST(6);
-			POLL(0x405536);
 		}
 		src += stride;
 		dst += stride;
-		POLL(0x40553f);
 	}
 	return v;
 }
@@ -239,7 +221,6 @@ static uint32_t op_copy_cells(void)
 static void op_stop_walk(void)
 {
 	MV_SET(autowalk, 0);
-	COST(2);
 }
 
 /* ---- area trigger and collision */
@@ -255,37 +236,27 @@ uint32_t game_map_area_trigger(uint32_t n)
 	const struct sprite *s = sprite_at(off);
 	uint32_t cx = s->x, dx = s->y;
 	uint32_t ax;
-	COST(10);
 	for (;;) {
 		const struct area *a = area_at(areas);
 		uint32_t bx = a->x0;
 		ax = 0xffff;
-		COST(4);
 		if (bx == 0xffff) {
-			COST(1);
 			break;
 		}
-		COST(bx == cx ? 2 : 3);
 		if (bx <= cx) {
 			bx = a->x1;
-			COST(3);
 			if (bx >= cx) {
 				bx = a->y0;
-				COST(bx == dx ? 3 : 4);
 				if (bx <= dx) {
 					bx = a->y1;
-					COST(3);
 					if (bx >= dx) {
 						ax = a->code;
-						COST(2);
 						break;
 					}
 				}
 			}
 		}
 		areas += 10;
-		COST(2);
-		POLL(0x405004);
 	}
 	return ax;
 }
@@ -298,9 +269,7 @@ uint32_t game_map_area_trigger(uint32_t n)
  * the sprite's index or -1. */
 int game_map_collide(const struct sprite *s)
 {
-	COST(2);
 	if (s->flags & SPRITE_GHOST) {
-		COST(3);
 		return -1;
 	}
 	uint32_t dir = (s->frame >> 1) & 0xff;
@@ -308,93 +277,62 @@ int game_map_collide(const struct sprite *s)
 	const struct map_rec *m = map_rec();
 	const struct sprite *o = sprites_of(m);
 	uint32_t cx = s->x, dx = s->y;
-	COST(9);
 	if (dir == 0) {
 		dx = (dx - 1) & 0xffff;
-		COST(4);
 	} else if (dir == 1) {
 		dx = (dx + s->height) & 0xffff;
-		COST(8);
 	} else if (dir == 2) {
 		cx = (cx - 1) & 0xffff;
-		COST(8);
 	} else {
 		cx = (cx + s->width) & 0xffff;
-		COST(9);
 	}
 	uint32_t ax = 0;
-	COST(2);
 	if (o->flags == SPRITE_END) {
-		COST(2 + 4);
 		return -1;
 	}
-	COST(1);
 	for (;;) {
 		if (s == o) {
-			COST(5);
 		} else if (ax == 1) {
-			COST(7);
 		} else if (ax == 2) {
-			COST(9);
 		} else {
 			uint32_t fl = o->flags;
-			COST(6 + 2);
 			if (fl == SPRITE_END) {
-				COST(2 + 4);
 				return -1;
 			}
 			if (fl & SPRITE_SOLID_NOT) {
-				COST(2 + 3);
 			} else if (fl & SPRITE_OFF) {
-				COST(2 + 2 + 3);
 			} else if (!(fl & SPRITE_DRAWN)) {
-				COST(2 + 2 + 2 + 3);
 			} else {
-				COST(2 + 2 + 2);
 				uint32_t bx = o->x;
 				uint32_t cxa = cx;
-				COST(4);
 				if (dir < 2) {
 					cxa = (cx + s->width - 1) & 0xffff;
-					COST(3);
 				}
-				COST(bx == cxa ? 3 : 4);
 				if (bx > cxa) {
-					COST(3);
 					goto next;
 				}
 				bx = (bx + o->width - 1) & 0xffff;
-				COST(7 + 2);
 				/* bx + width - 1 >= cx */
 				if (bx < cx) {
-					COST(3);
 					goto next;
 				}
 				bx = o->y;
 				uint32_t dxa = dx;
-				COST(4);
 				if (dir >= 2) {
 					dxa = (dx + s->height - 1) & 0xffff;
-					COST(3);
 				}
-				COST(bx == dxa ? 3 : 4);
 				if (bx > dxa) {
-					COST(3);
 					goto next;
 				}
 				bx = (o->y + o->height - 1) & 0xffff;
-				COST(7 + 2);
 				if (bx >= dx) {
-					COST(4);
 					return (int)ax;
 				}
-				COST(3);
 			}
 		}
 next:
 		o++;
 		ax++;
-		POLL(0x404e9f);
 	}
 }
 
@@ -404,7 +342,6 @@ uint32_t game_map_collision(uint32_t n)
 {
 	uint32_t n16 = n << 4;
 	uint32_t s = (n16 & 0xffff0000u) | ((n16 + map_rec()->sprites) & 0xffff);
-	COST(6); /* movzx, movzx, shl, add, call, ret */
 	return (uint32_t)game_map_collide(sprite_at(s)) & 0xffff;
 }
 
@@ -429,7 +366,6 @@ int game_map_op_in_c(uint32_t op)
 void game_map_load_args(void)
 {
 	memcpy(G.map.v.args, &G.rt.arg_value[1], 12);
-	COST(9);
 }
 
 /* 0x403a70 for the sub-ops that do not wait; returns the AX the sub-op leaves
@@ -458,7 +394,6 @@ uint32_t game_map_op(uint32_t op)
 		eax = game_map_fill_grid(eax);
 		eax = game_map_overlay_sprites(eax);
 		eax = game_map_redraw_changed();
-		COST(4);
 		break;
 	case 8:
 		eax = game_map_area_trigger(MV(args[0]));
@@ -493,6 +428,5 @@ uint32_t game_map_op(uint32_t op)
 	default:
 		x86_trap(0x403a7f, "map sub-op left to the native code reached C");
 	}
-	COST(2);
 	return eax;
 }

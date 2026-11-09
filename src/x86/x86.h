@@ -4,8 +4,7 @@
  * emulated stack and heap) with the game state aliased onto the C object G, and
  * the eight registers the HLE layer reads its arguments from. No game code runs
  * on it any more (R2): what is left is the Win32/DirectDraw/CRT thunk layer
- * (src/hle), which R4 replaces, and the instruction counter that paces the
- * game (R3 replaces it).
+ * (src/hle), which R4 replaces.
  */
 #ifndef NANPA2_X86_H
 #define NANPA2_X86_H
@@ -90,23 +89,6 @@ static inline uint32_t pop32(void) { uint32_t v = rd32(cpu.r[ESP]); cpu.r[ESP] +
 void x86_divide_error(void);
 
 /* ---------------------------------------------------------------- host */
-
-/* Called by lifted code on backward jumps: runs due timer ticks and
- * presents the screen, as the native timer thread and DirectDraw would. */
-extern int x86_poll_countdown;
-extern uint32_t x86_poll_pc;
-void x86_poll(void);
-#define X86_POLL(pc) do { if (--x86_poll_countdown <= 0) { x86_poll_pc = (pc); x86_poll(); } } while (0)
-
-/* Emulated CPU speed. Lifted code adds each basic block's instruction count
- * (rep string ops: one per iteration) to x86_icount; x86_poll sleeps when the
- * count runs ahead of real time at the configured rate (win32.c). */
-extern uint64_t x86_icount;
-#define X86_COUNT(n) (x86_icount += (n))
-
-/* Instructions per second; 0 = unthrottled. */
-void x86_set_speed(double ips);
-void x86_throttle(void);
 
 /* Timing probe run before selected instructions (src/hle/overrides.h
  * HLE_PROBE); logs a timestamp with NANPA2_PROBE=1. */

@@ -44,7 +44,7 @@ The build needs neither the exe nor capstone and the binary holds nothing of the
 harness were removed in R2.
 
 - `src/x86/`: the emulated address space (memory, aliases onto `G`, heap, stack), the CPU registers
-  the HLE layer reads its arguments from, the instruction counter and poll hook that pace the game,
+  the HLE layer reads its arguments from, and
   `asset.c` (`nanpa2.dat` writer and loader; `src/assets.c` picks asset or exe).
 - `src/hle/`: `hle.c` (import/COM thunks, HLE overrides by native address), `win32.c` (message queue,
   SDL events to WM_*, timer, the pump), `ddraw.c` (surfaces, Blt, palette), `text.c` (GDI text via

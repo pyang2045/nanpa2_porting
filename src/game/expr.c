@@ -117,47 +117,14 @@ static _Noreturn void bad_expression(uint32_t pc, const char *why)
 	x86_trap(0x4037fc, msg);
 }
 
-/* Instructions the native loop (0x4037fc) runs for token t, counted on its
- * paths: the compare chain from 0x403803 and the token's own code (0x403a06
- * digits, 0x403a12 07, 0x403a22 08, 0x403a42 09, 0x40383d registers,
- * 0x403866 the operator table, 0x4038ad a bare token). */
-static uint32_t token_insns(uint32_t t)
-{
-	if (t == TOK_END)
-		return 6;
-	if (t >= TOK_DIGIT && t < TOK_DIGIT + 16)
-		return 14;
-	if (t == TOK_BYTE)
-		return 15;
-	if (t == TOK_WORD12)
-		return 20;
-	if (t == TOK_WORD18)
-		return 29;
-	if (t >= TOK_REG && t < TOK_REG + VM_REG_COUNT)
-		return 23;
-	if (t >= TOK_OP && t < TOK_OP + 16) {
-		switch (t - TOK_OP) { /* 21 to reach the operator's code */
-		case OP_FLAG: return 40;
-		case OP_RANDOM: return 42;
-		case OP_FLAG_AT: return 31;
-		case OP_WORD_AT: return 33;
-		case OP_BYTE_AT: return 29;
-		default: return 27;
-		}
-	}
-	return 17;
-}
-
-uint32_t script_eval(uint32_t *pc, int *bare_token, uint32_t *insns)
+uint32_t script_eval(uint32_t *pc, int *bare_token)
 {
 	uint32_t stack[STACK_MAX];
 	int depth = 0;
 	uint32_t start = *pc;
 	*bare_token = -1;
-	*insns = 0;
 	for (;;) {
 		uint32_t t = vm_script_byte(*pc), v;
-		*insns += token_insns(t);
 		script_eval_coverage[t]++;
 		if (t == TOK_END) {
 			++*pc;

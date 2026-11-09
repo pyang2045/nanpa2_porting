@@ -2,6 +2,8 @@
  * palette, BltFast with colour keys, GetDC for text. The primary surface is
  * what the window shows. */
 #include "hle.h"
+#include "game/ctl.h"
+#include "game/pace.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -133,7 +135,7 @@ static uint32_t create_surface(uint32_t desc, uint32_t out)
 static void blit_cost(int w, int h, int keyed)
 {
 	if (w > 0 && h > 0)
-		X86_COUNT((uint64_t)w * (uint64_t)h / (keyed ? 1u : 4u) + 200u);
+		ctl_work_us(PACE_BLIT_US(w, h, keyed));
 }
 
 static void blt_fast(struct surf *d, int x, int y, struct surf *s, uint32_t rect, uint32_t flags)

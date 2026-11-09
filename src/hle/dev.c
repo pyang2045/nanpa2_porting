@@ -16,8 +16,8 @@
  *       shot,MS       save the next frame as dir/ev_NNN.bmp
  *   NANPA2_INPUT_CLOCK=frames  MS counts game time (16 ms ticks of 0x446292)
  *       instead of wall-clock time, for repeatable runs
- *   NANPA2_TURBO=N  run the game timer and the emulated CPU N times faster
- *       (win32.c), for long scripted runs
+ *   NANPA2_SPEED=N  run the game N times faster than the original (clock.c; 0 = as
+ *       fast as the host can; NANPA2_TURBO is the old name), for long scripted runs
  *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
 #include "dev.h"
 
@@ -214,6 +214,7 @@ static void sync_check(const char *name, int vm, uint32_t off)
 
 void dev_file_opened(const char *name)
 {
+	{ extern void ctl_tlog(const char *, uint32_t); ctl_tlog(name, 0); }
 	explore_file(name);
 	sync_check(name, 0, 0);
 }
@@ -338,14 +339,5 @@ int dev_save_selftest(void)
 	game_file_load(name, dst);
 	int ok = !memcmp(src, dst, 0xc00);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
-	/* the message pump (0x401bf0) must leave ECX changed like the native
-	 * PeekMessageA does: script op 0x1f restores with "mov cx, N; rep
-	 * movsd" right after it (0x40705e) */
-	cpu.r[ECX] = 0x01040000u;
-	push32(0); /* return address, popped by hle_call (x86_call would
-		    * restore ECX) */
-	hle_call(0x401bf0);
-	int pump = (cpu.r[ECX] >> 16) == 0;
-	fprintf(stderr, "pump selftest: %s\n", pump ? "ok" : "ECX KEPT");
-	return ok && pump ? 0 : 1;
+	return ok ? 0 : 1;
 }

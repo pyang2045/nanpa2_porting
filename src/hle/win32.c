@@ -1,5 +1,8 @@
 /* USER32/GDI32/KERNEL32/WINMM imports, the message queue, the 16 ms timer. */
 #include "hle.h"
+#include "game/ctl.h"
+#include "game/pace.h"
+#include "clock.h"
 #include "replay.h"
 
 #include <SDL.h>
@@ -27,10 +30,7 @@
 
 uint32_t win32_wndproc;
 static int timer_on;
-static uint64_t timer_next; /* in 1/turbo ms */
-/* NANPA2_TURBO=N (testing): the 16 ms timer, which is the game's clock, and the
- * emulated CPU run N times faster than real time, so long scripted runs finish sooner */
-static int turbo = 1;
+static uint64_t timer_next; /* game ms (clock_timer_ms) */
 /* the native ShowCursor display counter (0 at start; shown while >= 0) */
 static int cursor_count;
 static int cursor_shown = -1, cursor_over; /* host cursor state last set */
@@ -313,10 +313,7 @@ static uint32_t dispatch(const struct msg *m)
 	if (!win32_wndproc)
 		return 0;
 	uint32_t args[4] = { HWND_MAIN, m->msg, m->wparam, m->lparam };
-	/* the window procedure leaves the CPU as it found it, as x86_call did */
-	struct cpu saved = cpu;
 	uint32_t r = game_wndproc(args[0], args[1], args[2], args[3]);
-	cpu = saved;
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
 			RT(input_bits), RT(frame));
@@ -332,7 +329,7 @@ int win32_timer_running(void)
 	return timer_on;
 }
 
-/* game-timer clock in 1/turbo ms (SDL_GetTicks wraps only after 49 days) */
+/* number of timer callbacks run so far */
 static uint32_t timer_ticks;
 
 uint32_t win32_timer_ticks(void)
@@ -340,21 +337,14 @@ uint32_t win32_timer_ticks(void)
 	return timer_ticks;
 }
 
-static uint64_t timer_now(void)
-{
-	/* deterministic mode: the instruction count is the clock (turbo off) */
-	if (replay_det())
-		return replay_ms();
-	return (uint64_t)SDL_GetTicks() * (uint64_t)turbo;
-}
-
 void win32_run_timer(void)
 {
 	if (!timer_on)
 		return;
-	uint64_t now = timer_now();
-	int n = 0;
-	while (now >= timer_next && n < 8 * turbo) {
+	uint64_t now = clock_timer_ms();
+	/* at most 8 ticks of catching up (more at higher speeds) */
+	int n = 0, max = 8 * (clock_speed() > 1 ? (int)clock_speed() + 1 : 1);
+	while (now >= timer_next && n < max) {
 		hle_timer_callback();
 		timer_ticks++;
 		timer_next += 16;
@@ -364,39 +354,6 @@ void win32_run_timer(void)
 		timer_next = now + 16; /* fell far behind: drop ticks */
 }
 
-/* ---- emulated CPU speed ----
- * Budget: instructions executed since the base point may not exceed the
- * real time elapsed times the rate. Ahead of it, sleep; far behind (HLE
- * work, a stall, an unthrottled stretch), move the base point so the game
- * never bursts to catch up. Timer-paced waits (frame counter 0x446292) are
- * unaffected: they spin, throttled, until the real-time timer ticks. */
-static double cpu_ips;
-static uint64_t base_count, base_ticks;
-
-void x86_set_speed(double ips)
-{
-	cpu_ips = ips * turbo;
-	base_count = x86_icount;
-	base_ticks = SDL_GetPerformanceCounter();
-}
-
-void x86_throttle(void)
-{
-	if (cpu_ips <= 0 || replay_replaying())
-		return;
-	uint64_t now = SDL_GetPerformanceCounter();
-	double freq = (double)SDL_GetPerformanceFrequency();
-	double real = (double)(now - base_ticks) / freq;
-	double virt = (double)(x86_icount - base_count) / cpu_ips;
-	double ahead = virt - real;
-	if (ahead >= 0.002) {
-		SDL_Delay((uint32_t)(ahead * 1000.0));
-	} else if (ahead < -0.05) {
-		base_ticks = now;
-		base_count = x86_icount;
-	}
-}
-
 void probe_vm_fetch(uint32_t off)
 {
 	static int vm = -1;
@@ -404,8 +361,8 @@ void probe_vm_fetch(uint32_t off)
 		vm = getenv("NANPA2_VMTRACE") != NULL;
 	dev_vm_fetch(off);
 	if (vm)
-		fprintf(stderr, "vm %04x op %02x %02x %02x frame %u ic %llu\n", off, rd8(0x435e78 + off),
-			rd8(0x435e79 + off), rd8(0x435e7a + off), RT(frame), (unsigned long long)x86_icount);
+		fprintf(stderr, "vm %04x op %02x %02x %02x frame %u us %llu\n", off, rd8(0x435e78 + off),
+			rd8(0x435e79 + off), rd8(0x435e7a + off), RT(frame), (unsigned long long)clock_us());
 }
 
 void probe_hit_table(uint32_t table)
@@ -419,25 +376,7 @@ void x86_probe(uint32_t pc)
 	if (on < 0)
 		on = getenv("NANPA2_PROBE") != NULL;
 	if (on)
-		fprintf(stderr, "probe %06x %u ms frame %u icount %llu\n", pc, dev_now(), RT(frame), (unsigned long long)x86_icount);
-}
-
-void x86_poll(void)
-{
-	static uint32_t last_log;
-	static int log = -1;
-	if (log < 0)
-		log = getenv("NANPA2_LOG") != NULL;
-	if (log && SDL_GetTicks() - last_log > 1000) {
-		last_log = SDL_GetTicks();
-		fprintf(stderr, "poll at %08x frame %u esi %08x eax %08x [esp] %08x\n", x86_poll_pc, RT(frame), cpu.r[ESI], cpu.r[EAX], rd32(cpu.r[ESP]));
-	}
-	x86_poll_countdown = 2000;
-	status_main();
-	x86_throttle();
-	win32_run_timer();
-	ddraw_present(0);
-	SDL_PumpEvents();
+		fprintf(stderr, "probe %06x %u ms frame %u us %llu\n", pc, dev_now(), RT(frame), (unsigned long long)clock_us());
 }
 
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
@@ -446,9 +385,9 @@ int win32_pump(void)
 	/* PeekMessage on Windows 95 costs a 486 some hundreds of instructions;
 	 * charging it keeps the throttle from running the game's pump loops
 	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
-	X86_COUNT(500);
+	clock_add(PACE_PUMP_US);
 	status_main();
-	x86_throttle();
+	clock_throttle();
 	win32_run_timer();
 	replay_pump();
 	ddraw_present(0);
@@ -473,8 +412,6 @@ void win32_init(void)
 {
 	cursor_count = 0;
 	cursor_shown = -1;
-	const char *t = getenv("NANPA2_TURBO");
-	turbo = t && atoi(t) > 1 && !replay_det() ? atoi(t) : 1;
 }
 
 int win32_call_import(int id)
@@ -556,7 +493,7 @@ int win32_call_import(int id)
 	case F_TextOutA:
 		/* emulated CPU time: GDI TrueType text on Windows 95 / 486, about
 		 * 0.2 ms a (cached) glyph */
-		X86_COUNT(5000u * hle_arg(4));
+		ctl_work_us(PACE_GLYPH_US * hle_arg(4));
 		text_out(hle_arg(0), (int)hle_arg(1), (int)hle_arg(2), hle_arg(3), (int)hle_arg(4));
 		r = 1;
 		break;
@@ -584,7 +521,7 @@ int win32_call_import(int id)
 		break;
 	case F_timeSetEvent:
 		timer_on = 1;
-		timer_next = timer_now() + 16;
+		timer_next = clock_timer_ms() + 16;
 		r = 1;
 		break;
 	case F_timeKillEvent:

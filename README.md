@@ -9,7 +9,7 @@ Linux and Windows. It needs your own copy of the game CD; no game data is in thi
 Playable from boot through the full Prologue and into the first town. Working: boot, the
 `LOGO.AVI` intro (off by default, `--logo`), name entry, the full Prologue, OPEN1 and walking around the town, save and
 load, MP3 music and Chinese voice, the Metal FD Trinitron CRT shader (window and fullscreen), pacing
-at 486 speed, and a macOS `.app` bundle. See `NOTES.md` for the dated log.
+at the original 486 speed (`--speed`), and a macOS `.app` bundle. See `NOTES.md` for the dated log.
 
 Tested: an exploration bot has reached 140 of the 470 MES script files, and it found the
 script op 0x1f trap (fixed in e3635ff).
@@ -107,17 +107,29 @@ there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the 
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
 
+### Game speed
+
+The game runs at the speed it had on the 486-class PC of the Taiwan release: its animation, fades
+and text delays follow the 16 ms timer in real time, and its busy work (script expressions, GDI text,
+picture decoding, the dissolve wipe) takes the time it took there (`src/game/pace.h`, derived in
+docs/refactor.md "R3"; a dissolve is 4.1 s, 1.1 s with a button held). `--speed X` (or
+`NANPA2_SPEED=X`) scales all of it: 1.0 is the original's, 2.0 twice as fast, 0 as fast as the host can
+(the game clock is then the model's virtual time, as in deterministic mode; for tests and long scripted
+runs). `NANPA2_TURBO=N` is the old name of `NANPA2_SPEED=N`; `--cpu-mips` is gone. `NANPA2_TIMELOG=1`
+prints a line per fade, wipe, text character, player step and file open with the game time in ms.
+
 ### Recording and replay (development)
 
 ```sh
 ./build/nanpa2 --game game --record play.rec        # play (or script) and record
 ./build/nanpa2 --game game --replay play.rec        # replay, compare every checkpoint
 tools/replay_diff.py a.rec b.rec                    # compare two recordings
+tools/replay_diff.py --sequence a.rec b.rec          # by content, for runs with different pacing
 ```
 
 `--record FILE` (`NANPA2_RECORD`) and `--replay FILE` (`NANPA2_REPLAY`) switch on the
 deterministic mode (`--deterministic`, `NANPA2_DETERMINISTIC=1`): the game clock follows the
-emulated CPU (25 MIPS) instead of the host, so two runs of the same input are identical. A
+virtual time of the pacing model (below) instead of the host's, so two runs of the same input are identical. A
 recording holds the input messages by game tick and a hash of the game state every
 `NANPA2_CP_TICKS` ticks (250); a replay needs the save folder as it was at the start and stops
 at the first checkpoint that differs (exit code 3, naming the key). `NANPA2_REPLAY_CHECK=li`
@@ -190,7 +202,7 @@ drawable / size 0, worst `nextDrawable` wait, mean luminance of the last frame, 
 screen has been black, and the offscreen probe: while presents are skipped because the
 window is covered, the skipped frame is rendered through the Metal pipeline offscreen, CRT
 off, about once a second and its luminance recorded), the game (frame counter 0x446292 and how long it has stood still,
-active flag 0x4ac4ec, timer, last poll pc, CPU MIPS), the logo movie, music and voice. A
+active flag 0x4ac4ec, timer, game speed), the logo movie, music and voice. A
 watchdog logs one `WARNING:` line, and fills `warning`, when the screen stays black or
 nothing reaches the window for 8 s, the frame counter stops while the window is visible, the
 main thread stalls, or a headless run shows a window; it names the likely cause (e.g.

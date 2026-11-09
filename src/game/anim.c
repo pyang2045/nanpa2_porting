@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "game/ctl.h"
+#include "game/pace.h"
 #include "game/state.h"
 #include "game/vm.h"
 #include "x86/x86.h"
@@ -56,7 +57,6 @@ void game_palette_copy(const uint16_t *src)
 {
 	memcpy(G.save.n.palette, src, 32);
 	memcpy(G.rt.palette_picture, src + 16, 480);
-	X86_COUNT(14 + 8 + 0x78);
 }
 
 void game_palette_copy_at(uint32_t src)
@@ -77,9 +77,7 @@ static void blit(int masked, uint32_t rect)
 {
 	uint16_t v[6];
 	memcpy(v, x86_ptr(rect, sizeof v), sizeof v);
-	X86_COUNT(17);
 	(masked ? game_blit_masked : game_blit_copy)(v[0], v[1], v[2], v[3], v[4], v[5], 1, 0);
-	X86_COUNT(1);
 }
 
 /* 0x403661: run a slot for this frame. A stopped slot does nothing; a
@@ -88,43 +86,33 @@ static void blit(int masked, uint32_t rect)
 static void run_slot(struct anim_slot *s)
 {
 	for (;;) {
-		X86_COUNT(2);
 		uint32_t state = s->state;
 		if (state == SLOT_STOPPED) {
-			X86_COUNT(1);
 			return;
 		}
-		X86_COUNT(2);
 		if (s->delay) {
 			s->delay--;
-			X86_COUNT(2);
 			return;
 		}
 		uint32_t pc = s->pc;
 		const uint8_t *ip = x86_ptr(pc, 3); /* the instruction: opcode, operand */
 		uint32_t op = ip[0];
 		pc++;
-		X86_COUNT(4);
 		switch (op) {
 		case ANI_END:
 			s->state = SLOT_STOPPED;
-			X86_COUNT(2);
 			break;
 		case ANI_MARK:
-			X86_COUNT(2);
 			if (state == SLOT_TO_MARK) {
 				s->state = SLOT_STOPPED;
-				X86_COUNT(2);
 			}
 			break;
 		case ANI_DELAY:
 			s->delay = ip[1];
 			pc++;
-			X86_COUNT(4);
 			break;
 		case ANI_RESTART:
 			pc = s->start;
-			X86_COUNT(2);
 			break;
 		case ANI_LOOP_A:
 		case ANI_LOOP_B: {
@@ -132,7 +120,6 @@ static void run_slot(struct anim_slot *s)
 			s->count[b] = ip[1];
 			pc++;
 			s->loop[b] = pc;
-			X86_COUNT(5);
 			break;
 		}
 		case ANI_NEXT_A:
@@ -140,10 +127,8 @@ static void run_slot(struct anim_slot *s)
 			uint32_t b = op == ANI_NEXT_B;
 			uint32_t n = (s->count[b] - 1u) & 0xff;
 			s->count[b] = (uint8_t)n;
-			X86_COUNT(2);
 			if (n) {
 				pc = s->loop[b];
-				X86_COUNT(2);
 			}
 			break;
 		}
@@ -153,27 +138,20 @@ static void run_slot(struct anim_slot *s)
 			memcpy(&off, ip + 1, 2);
 			blit(op != ANI_COPY, ANIM_DATA + off);
 			s->pc = pc + 2;
-			X86_COUNT(2);
-			X86_POLL(op == ANI_COPY ? 0x403787 : 0x4037c8);
 			continue;
 		}
 		case ANI_PALETTE: {
 			uint16_t off;
 			memcpy(&off, ip + 1, 2);
-			X86_COUNT(6);
 			game_palette_copy_at(ANIM_DATA + off);
-			X86_COUNT(2);
 			game_palette_upload();
 			s->pc = pc + 2;
-			X86_COUNT(2);
-			X86_POLL(0x4037ed);
 			continue;
 		}
 		default:
 			x86_trap(0x403684, "ANI instruction outside the native table");
 		}
 		s->pc = pc;
-		X86_COUNT(2);
 		return;
 	}
 }
@@ -182,51 +160,35 @@ static void run_slot(struct anim_slot *s)
  * in order. */
 void game_anim_step(void)
 {
-	X86_COUNT(2);
 	if (SV(vflags) & 2) {
-		X86_COUNT(1);
 		return;
 	}
 	uint32_t frame = RT(frame);
-	X86_COUNT(3);
 	if (frame == AN(last_frame)) {
-		X86_COUNT(1);
 		return;
 	}
 	AN_SET(last_frame, frame);
-	X86_COUNT(3);
 	for (uint32_t i = 0; i < ANIM_SLOT_COUNT; i++) {
-		X86_COUNT(8);
 		run_slot(&G.an.slot[i]);
-		X86_COUNT(2);
-		if (i < ANIM_SLOT_COUNT - 1)
-			X86_POLL(0x40365d);
 	}
-	X86_COUNT(2);
 }
 
 /* 0x4035b5, the loop of sub-op 4: wait for a new frame, run the slot, and
  * again until its state is stopped. The native loop does not pump: it spins
- * on the frame counter, which the timer (run at each backward jump, POLL)
- * advances. */
+ * on the frame counter, which the timer callback advances (each round of the
+ * spin passes PACE_SPIN_US of game time, and runs the timer when it is due). */
 static void wait_slot(struct anim_slot *s)
 {
 	for (;;) {
 		uint32_t frame = RT(frame);
-		X86_COUNT(3);
 		if (frame == AN(last_frame)) {
-			X86_POLL(0x4035b5);
+			ctl_work_us(PACE_SPIN_US);
 			continue;
 		}
 		AN_SET(last_frame, frame);
-		X86_COUNT(2);
 		run_slot(s);
-		X86_COUNT(2);
-		if (s->state) {
-			X86_POLL(0x4035b5);
+		if (s->state)
 			continue;
-		}
-		X86_COUNT(1); /* ret */
 		return;
 	}
 }
@@ -236,7 +198,6 @@ static void wait_slot(struct anim_slot *s)
 static void control(uint32_t op, uint32_t n, uint32_t a, uint32_t b)
 {
 	struct anim_slot *s = slot_at(n);
-	X86_COUNT(5);
 	switch (op) {
 	case 0: {
 		uint16_t off;
@@ -249,53 +210,36 @@ static void control(uint32_t op, uint32_t n, uint32_t a, uint32_t b)
 		s->count[0] = s->count[1] = 0;
 		s->x = 0;
 		s->y = 0;
-		X86_COUNT(10);
 		break;
 	}
 	case 1:
 		s->state = SLOT_RUNNING;
 		s->pc = s->start;
-		X86_COUNT(4);
 		break;
 	case 2:
-		X86_COUNT(3);
 		if (s->state != SLOT_STOPPED) {
 			s->state = SLOT_TO_MARK;
-			X86_COUNT(1);
 		}
 		break;
 	case 3:
 		s->state = SLOT_STOPPED;
-		X86_COUNT(2);
 		break;
 	case 5:
 		s->x = (uint16_t)a;
 		s->y = (uint16_t)b;
-		X86_COUNT(3);
 		break;
 	case 6:
-		X86_COUNT(2);
 		for (uint32_t i = 1; i <= 7; i++) {
-			X86_COUNT(4);
 			if (G.an.slot[i].state != SLOT_STOPPED) {
 				G.an.slot[i].state = SLOT_TO_MARK;
-				X86_COUNT(1);
 			}
-			if (i < 7)
-				X86_POLL(0x403602);
 		}
-		X86_COUNT(1);
 		break;
 	case 7:
-		X86_COUNT(2);
 		for (uint32_t i = 0; i < ANIM_SLOT_COUNT; i++) {
 			G.an.slot[i].state = SLOT_STOPPED;
 			G.an.slot[i].start = ANIM_IDLE;
-			X86_COUNT(5);
-			if (i < ANIM_SLOT_COUNT - 1)
-				X86_POLL(0x403621);
 		}
-		X86_COUNT(1);
 		break;
 	default:
 		x86_trap(0x40351a, "animation sub-op outside the native table");
@@ -318,18 +262,14 @@ void game_anim_control(uint32_t op, uint32_t n, uint32_t a, uint32_t b)
 		struct anim_slot *s = slot_at(n);
 		s->state = SLOT_RUNNING;
 		s->pc = s->start;
-		X86_COUNT(5 + 4);
 		wait_slot(s);
 		return;
 	}
 	control(op, n, a, b);
-	X86_COUNT(1); /* ret */
 }
 
 /* 0x406dff: reset all slots (sub-op 7, slot 0). */
 void game_anim_reset(void)
 {
-	X86_COUNT(4);
 	control(7, 0, 0, 0);
-	X86_COUNT(2);
 }

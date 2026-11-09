@@ -11,10 +11,11 @@
  * are ordinary functions that call game_map_pump(); a WM_QUIT inside it
  * leaves for the catch of the handler's ctl_piece (ctl.h).
  *
- * The instruction counts follow the native paths (0x403a70 argument copy and
- * table call, 0x4042f7 sprite loop, 0x404450 the player, 0x4051c2 sub-op 12,
- * 0x405216 the event check, 0x403e30 sub-op 5, 0x405597 right click, 0x40609c
- * the pump), so the clock the instruction count drives is unchanged.
+ * The native paths are 0x403a70 (argument copy and table call), 0x4042f7 (sprite
+ * loop), 0x404450 (the player), 0x4051c2 (sub-op 12), 0x405216 (the event check),
+ * 0x403e30 (sub-op 5), 0x405597 (right click) and 0x40609c (the pump). The map's
+ * own work costs no game time (R3: under 0.1 % of the Prologue and town runs); a
+ * step of the player is paced by the frame waits.
  *
  * What the script register S gets (the handler's tail writes AX there) is
  * whatever the last code leaves: sub-op 12 the event or 0xfffe while the
@@ -37,16 +38,13 @@ static uint32_t rol16(uint32_t v, unsigned n)
  * (ctl_quit). */
 struct pump_state game_map_pump(void)
 {
-	COST(2); /* pushad, call 0x401bf0 */
 	int ok = ctl_pump();
-	COST(2);
 	if (!ok)
 		ctl_quit();
 	uint32_t bits = RT(input_bits);
 	uint32_t bl = (bits & 0x10) ? 1 : 0, bh = (bits & 0x20) ? 1 : 0;
 	bh <<= 1;
 	bl |= bh;
-	COST(11);
 	return (struct pump_state){ bl | bh << 8, SV(mouse_x), SV(mouse_y) };
 }
 
@@ -56,36 +54,27 @@ struct pump_state game_map_pump(void)
  * cell under it (0x405966), else stop the walk */
 static void right_click(struct sprite *player)
 {
-	COST(2); /* pushad, call */
 	struct pump_state p = game_map_pump();
 	const struct map_rec *m = map_rec();
-	COST(1);
 	uint32_t ax = (m->screen_x << 4) & 0xffff;
-	COST(4);
 	if (p.x < ax)
 		goto outside;
 	ax = ((m->screen_x + m->view_w - 1) << 4) & 0xffff;
-	COST(6);
 	if (ax < p.x)
 		goto outside;
 	ax = m->screen_y;
-	COST(3);
 	if (p.y < ax)
 		goto outside;
 	ax = (((m->view_h << 4) & 0xffff) + m->screen_y) & 0xffff;
-	COST(5);
 	if (ax < p.y)
 		goto outside;
 	uint32_t gx = (p.x >> 4) - m->screen_x + m->view_x;
 	uint32_t gy = (((p.y - m->screen_y) & 0xffff) >> 4) + m->view_y;
 	MV_SET(approach, 0);
-	COST(8);
 	game_map_plan_walk(player, gx, gy);
-	COST(2);
 	return;
 outside:
 	MV_SET(autowalk, 0);
-	COST(3);
 }
 
 /* ---- the player 0x404450 (sprite kind 6) ---- */
@@ -94,12 +83,9 @@ outside:
  * right, up, down), a mover each. Returns what the movers moved (0xff or 0) */
 static uint32_t player_keys(struct sprite *s)
 {
-	COST(2);
 	int ok = ctl_pump();
-	COST(2);
 	if (!ok)
 		ctl_quit();
-	COST(2);
 	static const struct {
 		uint32_t mask;
 		int (*mover)(struct sprite *);
@@ -110,14 +96,11 @@ static uint32_t player_keys(struct sprite *s)
 	uint32_t ch = 0;
 	for (int k = 0; k < 4; k++) {
 		uint32_t al = 0;
-		COST(4);
 		if (RT(input_bits) & keys[k].mask) {
 			al = (uint32_t)keys[k].mover(s) & 0xff;
 			MV_SET(moved, 0xff);
-			COST(2);
 		}
 		ch = (ch | al) & 0xff;
-		COST(2);
 	}
 	return ch;
 }
@@ -127,24 +110,17 @@ static uint32_t player_keys(struct sprite *s)
  * shifts by one record, the old position first */
 static void player_end(struct sprite *s, uint32_t ch, uint32_t frame0, uint32_t x0, uint32_t y0)
 {
-	COST(5);
 	if (ch == 0) {
-		COST(1); /* ret at 0x40444f */
 		return;
 	}
 	MV_SET(autowalk, 0);
 	s->frame ^= 1;
-	COST(10);
 	for (int i = 0; i < 9; i++) {
 		*hist(8 - i + 1) = *hist(8 - i);
-		COST(9);
-		if (i < 8)
-			POLL(0x40469c);
 	}
 	hist(0)->frame = frame0;
 	hist(0)->x = x0;
 	hist(0)->y = y0;
-	COST(9);
 }
 
 /* 0x40453a / 0x404527 / 0x404514 / ...: the mover, then the end (the step
@@ -153,14 +129,12 @@ static uint32_t click_mover(struct sprite *s, int (*mover)(struct sprite *))
 {
 	mover(s);
 	MV_SET(moved, 0xff);
-	COST(4);
 	return 1;
 }
 
 static uint32_t click_none(void) /* 0x4045d7 */
 {
 	MV_SET(moved, 0xff);
-	COST(3);
 	return 0;
 }
 
@@ -170,32 +144,24 @@ static uint32_t click_sideways(const struct map_rec *m, struct sprite *s, struct
 {
 	MV_SET(scrolled, 0);
 	uint32_t ax = (rol16(s->y - m->view_y, 4) + m->screen_y) & 0xffff;
-	COST(7);
 	uint32_t before = ax;
 	ax = (ax - 0x30) & 0xffff;
 	if (before < 0x30) { /* sub ax, 0x30 borrowed: jae not taken */
 		ax = (ax + 0x30) & 0xffff;
 		MV_SET(scrolled, 0xff);
-		COST(2);
 	}
-	COST(2);
 	if (p.y < ax)
 		return click_none();
 	ax = (ax + 0x20 + 0x60) & 0xffff;
-	COST(4);
 	if (MV(scrolled) != 0) {
 		ax = (ax - 0x30) & 0xffff;
-		COST(1);
 	}
-	COST(2);
 	if (ax < p.y)
 		return click_none();
 	ax = rol16(s->x + m->screen_x - m->view_x, 4);
-	COST(6);
 	if (p.x < ax)
 		return click_mover(s, game_map_move_left);
 	ax = (ax + 0x20) & 0xffff;
-	COST(3);
 	if (p.x < ax)
 		return click_none();
 	return click_mover(s, game_map_move_right);
@@ -209,19 +175,15 @@ static uint32_t player_click(struct sprite *s, struct pump_state p)
 	const struct map_rec *m = map_rec();
 	uint32_t ax = (s->x + m->screen_x - m->view_x) & 0xffff;
 	ax = (rol16(ax, 4) - 0x30) & 0xffff;
-	COST(8);
 	if (p.x < ax)
 		return click_sideways(m, s, p);
 	ax = (ax + 0x20 + 0x60) & 0xffff;
-	COST(4);
 	if (ax < p.x)
 		return click_sideways(m, s, p);
 	ax = (rol16(s->y - m->view_y, 4) + m->screen_y) & 0xffff;
-	COST(6);
 	if (p.y < ax)
 		return click_mover(s, game_map_move_up);
 	ax = (ax + 0x20) & 0xffff;
-	COST(3);
 	if (p.y < ax)
 		return click_sideways(m, s, p);
 	return click_mover(s, game_map_move_down);
@@ -234,36 +196,27 @@ static uint32_t player_click(struct sprite *s, struct pump_state p)
 void game_map_player_step(struct sprite *s, uint32_t *eax)
 {
 	MV_SET(moved, 0);
+	ctl_tlog("step", 0);
 	uint32_t frame0 = s->frame, x0 = s->x, y0 = s->y;
 	uint32_t ch;
-	COST(9);
 	if (RT(cursor_shown) == 0) {
 		ch = player_keys(s);
 	} else {
 		struct pump_state p;
-		COST(3); /* pushad */
 		if (MV(autowalk) == 0xff) { /* 0x404497 */
 			uint32_t scratch = 0;
 			game_map_walk_step(s, &scratch);
 			s->frame ^= 1;
-			COST(2);
 		} else {
-			COST(1);
 			p = game_map_pump(); /* 0x40448b: the right button starts a walk */
-			COST(2);
 			if (p.bx & 2) {
-				COST(1);
 				right_click(s);
-				COST(1); /* jmp 0x4044a3 */
 			}
 		}
-		COST(2); /* 0x4044a3: popad, call the pump */
 		p = game_map_pump(); /* 0x4044a9: the left button; without it the keyboard */
-		COST(2);
 		if (!(p.bx & 1)) {
 			ch = player_keys(s);
 		} else {
-			COST(1);
 			p = game_map_pump();
 			ch = player_click(s, p);
 		}
@@ -280,20 +233,14 @@ static uint32_t event_end(uint32_t ax)
 {
 	const struct map_rec *m = map_rec();
 	MV_SET(last_sprite, sprites_of(m)->frame >> 1);
-	COST(10);
 	if (ax == 0xffff) {
-		COST(1);
 		return ax;
 	}
 	for (;;) {
-		COST(2);
 		struct pump_state p = game_map_pump(); /* 0x40539f: until the button is up */
-		COST(3);
 		if (!(p.bx & 1))
 			break;
-		POLL(0x4053a3);
 	}
-	COST(1);
 	return ax;
 }
 
@@ -301,30 +248,22 @@ static uint32_t event_end(uint32_t ax)
 static uint32_t event_area(void)
 {
 	MV_SET(args[0], 0);
-	COST(2);
 	uint32_t ax = game_map_area_trigger(0);
-	COST(3);
 	if (ax == 0xffff) {
 		MV_SET(last_area, 0xffff);
-		COST(2);
 		return event_end(ax);
 	}
-	COST(2);
 	if (MV(last_area) != ax) {
 		MV_SET(last_area, ax);
 		ax = (ax + 0x32) & 0xffff;
-		COST(3);
 		return event_end(ax);
 	}
 	/* 0x405340 */
 	ax = sprites_of(map_rec())->frame >> 1;
-	COST(7);
 	if (ax == MV(last_sprite)) {
 		ax = 0xffff;
-		COST(1);
 	} else {
 		ax = (MV(last_area) + 0x32) & 0xffff;
-		COST(3);
 	}
 	return event_end(ax);
 }
@@ -333,11 +272,9 @@ static uint32_t event_area(void)
 static uint32_t event_click(uint32_t bx)
 {
 	uint32_t ax = bx & 0xffff;
-	COST(3);
 	if (MV(last_click) == ax)
 		return event_area();
 	MV_SET(last_click, ax);
-	COST(2);
 	return event_end(ax);
 }
 
@@ -345,7 +282,6 @@ static uint32_t event_click(uint32_t bx)
 static uint32_t event_on_player(uint32_t ax)
 {
 	MV_SET(last_click, ax);
-	COST(3);
 	return event_end(ax);
 }
 
@@ -356,27 +292,20 @@ static uint32_t event_second(struct pump_state p, uint32_t ax)
 	const struct map_rec *m = map_rec();
 	const struct sprite *s = sprites_of(m);
 	uint32_t a = (rol16(s->x + m->screen_x - m->view_x, 4) - 0x30) & 0xffff;
-	COST(9);
 	int off = p.x < a;
 	if (!off) {
 		a = (a + 0x20 + 0x60) & 0xffff;
-		COST(4);
 		off = a < p.x;
 		if (!off) {
-			COST(1);
 			return event_on_player(ax);
 		}
 	}
 	a = (rol16(s->y - m->view_y, 4) + m->screen_y - 0x30) & 0xffff;
-	COST(7);
 	if (p.y < a) {
-		COST(2); /* 0x4052ed */
 		return event_click(ax);
 	}
 	a = (a + 0x20 + 0x60) & 0xffff;
-	COST(4);
 	if (a < p.y) {
-		COST(2);
 		return event_click(ax);
 	}
 	return event_on_player(ax);
@@ -388,33 +317,22 @@ static uint32_t event_second(struct pump_state p, uint32_t ax)
 uint32_t game_map_event_check(void)
 {
 	MV_SET(args[0], 0);
-	COST(2);
 	uint32_t ax = game_map_collision(0);
-	COST(3);
 	if (ax == 0xffff) {
 		MV_SET(last_click, ax); /* 0x405305 */
-		COST(1);
 		return event_area();
 	}
-	COST(2);
 	struct pump_state p = game_map_pump(); /* 0x405233 */
-	COST(3);
 	if (!(p.bx & 1)) {
-		COST(4);
 		if (RT(input_bits) == 0)
 			return event_click(ax);
-		COST(3);
 		if (MV(moved) != 0xff)
 			return event_click(ax);
-		COST(1);
 		MV_SET(last_click, ax); /* 0x4052e2 */
-		COST(2);
 		return event_end(ax);
 	}
-	COST(2);
 	if (MV(moved) != 0xff)
 		return event_click(p.bx);
-	COST(2);
 	p = game_map_pump();
 	return event_second(p, ax);
 }
@@ -430,18 +348,12 @@ static void event_check_only(void)
 static void sprites_step(uint32_t *eax)
 {
 	uint32_t off = map_rec()->sprites;
-	COST(2);
 	for (;;) {
-		COST(2);
 		if (seg1_u8(off) == SPRITE_END) {
-			COST(1);
 			return;
 		}
-		COST(2);
 		game_map_sprite_step(sprite_at(off), eax);
 		off += sizeof(struct sprite);
-		COST(3);
-		POLL(0x404318);
 	}
 }
 
@@ -452,38 +364,26 @@ static uint32_t subop_frame(void)
 {
 	uint32_t eax = 12;
 	MV_SET(moved, 0);
-	COST(2);
 	sprites_step(&eax);
 	eax = game_map_fill_grid(eax);
 	eax = game_map_overlay_sprites(eax);
 	game_map_redraw_changed();
-	COST(5);
 	struct pump_state p = game_map_pump(); /* 0x4051e3 */
-	COST(3);
 	if (!(p.bx & 1))
 		return game_map_event_check();
-	COST(2);
 	if (p.x < 0xf8)
 		return game_map_event_check();
-	COST(2);
 	if (p.x >= 0x188)
 		return game_map_event_check();
-	COST(2);
 	if (p.y < 0x120)
 		return game_map_event_check();
-	COST(2);
 	if (p.y >= 0x140)
 		return game_map_event_check();
-	COST(3);
 	for (;;) {
 		p = game_map_pump(); /* 0x40520f: until the button is up */
-		COST(3);
 		if (!(p.bx & 1))
 			break;
-		POLL(0x405213);
-		COST(2);
 	}
-	COST(1);
 	return 0xfffe;
 }
 
@@ -496,17 +396,12 @@ int vm_op_map(void)
 {
 	uint32_t pc = vm_pc, a;
 	vm_parse_args(&pc, &a);
-	COST(1);
-	COST(2);
 	if (a == 5 || a == 4) {
 		game_anim_reset();
-		COST(2);
 	}
-	COST(2);
 	uint32_t ax;
 	if (game_map_op_in_c(a)) {
 		ax = game_map_op(a);
-		COST(1); /* pop esi */
 	} else {
 		if (a != 5 && a != 7 && a != 12)
 			x86_trap(0x403a7f, "04 26: sub-op outside the dispatch table");
@@ -523,12 +418,8 @@ int vm_op_map(void)
 			ax = subop_frame();
 			break;
 		}
-		COST(1); /* the ret of 0x403a86 */
-		COST(1); /* pop esi */
 	}
 	vm_pc = pc;
 	vm_set_reg(VM_REG_S, ax);
-	COST(2); /* mov [S], ax; jmp 0x4060f9 */
-	POLL(0x407416);
 	return -1;
 }
