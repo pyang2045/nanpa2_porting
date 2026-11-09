@@ -208,7 +208,7 @@ uint32_t game_op_wait_clear(void)
 {
 	cpu.r[EBX] = SV(text_colour);
 	X86_COUNT(2);
-	game_clear_text_window(); /* 0x406b24: draws, no waiting */
+	game_clear_text_window(cpu.r[EBX]); /* 0x406b24: draws, no waiting */
 	return loop_at(0x406607);
 }
 

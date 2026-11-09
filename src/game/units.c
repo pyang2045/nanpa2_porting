@@ -43,13 +43,8 @@ const struct game_unit game_units[] = {
 	CALL_SYS(0x401160, "file_save", game_file_save_regs, FILE_SCRATCH),
 	/* Stage 5B (src/game/screen.c): the units that native code still calls */
 	CALL_SYS(0x401190, "surface_lock", game_lock_regs, 0),
-	CALL_SYS(0x4011f0, "cursor_restore", game_cursor_restore_regs, 0),
 	CALL_SYS(0x4012b0, "surface_unlock", game_unlock_regs, 0),
-	CALL_SYS(0x401900, "text_draw_char", game_draw_char_regs,
-		REG_BIT(EAX) | REG_BIT(ECX) | REG_BIT(EDX)),
 	/* Stage 6: the dissolve wipe, pieces around its message pump (wipe.c) */
-	PIECE(0x401a50, "wipe", game_wipe, 0, 0, 0, 1, NULL),
-	PIECE(0x401b90, "wipe_pumped", game_wipe_pumped, 0, 0x12, 0, 1, NULL),
 	/* Stage 5B startup/input/file; WinMain's pieces run uncompared (game.c) */
 	PIECE(0x402090, "winmain", game_winmain, REG_BIT(ECX) | REG_BIT(EDX), 0, 0, 1, NULL),
 	PIECE(0x4021a3, "winmain_done", game_winmain_done, REG_BIT(ECX) | REG_BIT(EDX), 11, 0, 1, NULL),
@@ -108,7 +103,6 @@ const struct game_unit game_units[] = {
 	PIECE(0x406315, "vm_string_next", game_vm_string_next, AT_FETCH, 0, 0, 1, NULL),
 	PIECE(0x406383, "vm_big5_next", game_vm_big5_next, AT_LOOP, 0, 0, 0, NULL),
 	CALL(0x406395, "vm_init", game_vm_init_regs, REG_BIT(EAX), 0),
-	CALL(0x4063ee, "text_advance", game_text_advance, 0, 0),
 	CALL(0x406455, "script_set_flag", game_set_flag_regs, 0, 0),
 	JUMP(0x406491, "op_0a_set_flags", game_op_set_flags, AT_LOOP),
 	JUMP(0x4064b5, "op_0b_set_flags_expr", game_op_set_flags_expr, AT_LOOP),
@@ -168,7 +162,6 @@ const struct game_unit game_units[] = {
 	PIECE(0x406afb, "wait_click_release_framed", game_wait_click_release_framed, 0, 0, 0, 0, NULL),
 	PIECE(0x406b02, "wait_click_release_tested", game_wait_click_release_tested, 0, 0, 0, 0, NULL),
 	JUMP_SYS(0x406b05, "op_17_clear_text", game_op_clear_text, NULL),
-	CALL_SYS(0x406b24, "text_clear_window", game_clear_text_window, 0),
 	JUMP_SYS(0x406b76, "op_0417_fill_rect", game_op_fill_rect, NULL),
 	JUMP_SYS(0x406bcb, "op_0418_xor_rect", game_op_xor_rect, NULL),
 	JUMP_SYS(0x406c20, "op_0419_copy_rect", game_op_copy_rect, NULL),
@@ -179,7 +172,6 @@ const struct game_unit game_units[] = {
 	CALL(0x406dff, "anim_reset", game_anim_reset, 0, 0),
 	JUMP_SYS(0x406e11, "op_041d_picture", game_op_picture, NULL),
 	JUMP_SYS(0x406f06, "op_0416_palette", game_op_palette, NULL),
-	SPIN(0x406f41, "palette_wait", game_palette_wait_piece, AT_LOOP),
 	JUMP_SYS(0x406f7c, "op_041e_jump_mes", game_op_jump_mes, NULL),
 	JUMP_SYS(0x406fcd, "op_041f_call_mes", game_op_call_mes, NULL),
 	/* ECX's upper half is the count's (`mov cx, 0x1e`) */
