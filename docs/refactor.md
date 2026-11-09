@@ -623,6 +623,11 @@ dev variables: `NANPA2_DATA_CHECK`, `NANPA2_HLETRACE` (the HLE call trace),
 `NANPA2_IMAGE_TRACE` (which bytes of the exe the run touched) and `NANPA2_INTERP` (now
 `NANPA2_LOAD_EXE=1`: the data from the whole exe instead of nanpa2.dat, for the asset test).
 
+The asset shrank after R4 (asset version 2): `state_init` is its only consumer and reads only
+0x431000-0x4c0000, and `G` traps below 0x431000, so the PE header page and .rdata (82 KB) left it; it
+holds the initialized .data only (12,170 bytes in 18 ranges, about 13 KB stored). Poisoning the image
+outside `G` before `state_init` left all four goldens matching. Version 1 files are still read.
+
 ### Architecture summary (R4 and after)
 
 ```

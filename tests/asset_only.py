@@ -72,7 +72,7 @@ if p.returncode != 0 or not os.path.exists(asset):
     fail("--make-assets: " + p.stdout + p.stderr)
 a = open(asset, "rb").read()
 magic, ver, stamp, isize, esize, n, ehash, chash, payload, _ = struct.unpack_from("<4sIIIIIQQII", a, 0)
-if magic != b"N2AS" or ver != 1 or stamp != 0x39697C6A or isize != 0xC1000:
+if magic != b"N2AS" or ver != 2 or stamp != 0x39697C6A or isize != 0xC1000:
     fail("bad header")
 tab = struct.unpack_from("<%dI" % (3 * n), a, 48)
 rng = [(tab[3 * i], tab[3 * i + 1], tab[3 * i + 2]) for i in range(n)]
@@ -81,6 +81,8 @@ if 48 + 12 * n + payload != len(a):
 for va, sz, kind in rng:
     if va < 0x400000 or va + sz > 0x400000 + isize:
         fail("range outside the image: %x+%x" % (va, sz))
+    if va < 0x431000 or va + sz > 0x4AB000:
+        fail("range %x+%x outside the initialised .data 0x431000-0x4ab000" % (va, sz))
     if va < 0x407800 and va + sz > 0x401000:
         fail("range %x+%x overlaps the game code" % (va, sz))
 e = open(src_exe, "rb").read()
@@ -89,6 +91,8 @@ runs = {text[o:o + 64] for o in range(0, len(text) - 63, 16) if len(set(text[o:o
 bad = [o for o in range(len(a) - 63) if a[o:o + 64] in runs]
 if bad:
     fail("the asset holds 64-byte runs of .text at file offsets %s" % bad[:5])
+if len(a) > 20000:
+    fail("the asset should be about 12 KB, is %d bytes" % len(a))
 print("asset: %d bytes, %d ranges (%d stored, %d zero), no code" %
       (len(a), n, sum(1 for r in rng if r[2] == 0), sum(1 for r in rng if r[2] == 1)))
 

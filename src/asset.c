@@ -13,7 +13,7 @@
  *
  * Format (little-endian), re-notes.md "nanpa2.dat":
  *   0   "N2AS"
- *   4   u32 version (1)
+ *   4   u32 version (2; version 1 held the PE header page and .rdata as well, and is still read)
  *   8   u32 PE TimeDateStamp of the source exe (0x39697c6a)
  *   12  u32 SizeOfImage of the source exe (0xc1000)
  *   16  u32 size of the source exe file
@@ -36,16 +36,16 @@
 #include "asset.h"
 
 #define HDR 48u
+#define ASSET_VERSION 2u
 #define MIN_ZERO 32u /* shorter zero runs stay inside a data range */
 
-/* The ranges of the image kept: the PE header page, and .rdata with the
- * initialized part of .data. Left out: .text (0x401000-0x41b000: the game
- * code 0x401000-0x4077ac, the MP3 library, the C runtime), the bss tail of
- * .data (zero at load) and .rsrc. Established by NANPA2_IMAGE_TRACE runs
- * (docs/reimpl.md "The asset"). */
+/* The range of the image kept: the initialized part of .data, which is all that state_init
+ * copies into G (0x431000-0x4c0000; the bss tail from 0x4ab000 is zero at load). Left out: the
+ * PE header, .text (the game code 0x401000-0x4077ac, the MP3 library, the C runtime), .rdata
+ * and .rsrc: nothing reads them (R4: every access goes through G, which traps below
+ * DATA_BASE). Version 1 also kept the header page and .rdata 0x41b000-0x431000. */
 static const struct { uint32_t lo, hi; } keep[] = {
-	{ 0x400000, 0x401000 },
-	{ 0x41b000, 0x4ab000 },
+	{ 0x431000, 0x4ab000 },
 };
 
 static void put32(uint8_t *p, uint32_t v)
@@ -270,7 +270,7 @@ int asset_make(const char *exe_path, const char *out_path)
 		}
 	}
 	memcpy(buf, "N2AS", 4);
-	put32(buf + 4, 1);
+	put32(buf + 4, ASSET_VERSION);
 	put32(buf + 8, 0x39697c6au);
 	put32(buf + 12, 0xc1000u);
 	put32(buf + 16, exe_size);
@@ -315,7 +315,7 @@ int asset_read(const char *path)
 	}
 	fclose(f);
 	size_t total = (size_t)len;
-	int bad = total < HDR || memcmp(d, "N2AS", 4) || get32(d + 4) != 1 ||
+	int bad = total < HDR || memcmp(d, "N2AS", 4) || (get32(d + 4) != 1 && get32(d + 4) != ASSET_VERSION) ||
 		  get32(d + 8) != 0x39697c6au || get32(d + 12) != 0xc1000u;
 	uint32_t n = bad ? 0 : get32(d + 20), payload = bad ? 0 : get32(d + 40);
 	if (!bad && (n > 4096 || HDR + 12ull * n + payload != total ||

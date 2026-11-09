@@ -1334,3 +1334,11 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
   warnings; ctest 7 of 7 (smoke skipped; replay_det 5.6 s instead of 35).
 - Portability: 64-bit little-endian assumed and checked at build time; strict-width syntax pass over every
   source (details in docs/refactor.md "Portability audit"). Linux and Windows builds are still untested.
+
+## 2026-11-09: asset version 2, the initialised .data only
+
+- `state_init` is the only reader of the asset image and copies 0x431000-0x4c0000; `g_ptr` traps below
+  0x431000, so the PE header page and .rdata 0x41b000-0x431000 were dead weight. With the image outside `G`
+  poisoned before `state_init`, the four `golden_r4` replays matched every checkpoint (271/331/33/161).
+- `nanpa2.dat` version 2 keeps 0x431000-0x4ab000 only (12,170 data bytes in 18 ranges); version 1 files are
+  still accepted (a superset). `asset_only` checks the version, that no range lies outside the data, and the size.
