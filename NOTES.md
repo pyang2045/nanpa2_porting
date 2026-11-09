@@ -1286,8 +1286,9 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
 - Same scripted input, 90e7de9 against R3 (deterministic, game ms = real ms at speed 1.0): fade 258-272
   against 258-272, dissolve 4094/4096 against 4094/4096, with a button held 949 against 957, a step of
   the player 48 against 48, the load scenario to its first wipe 12811 against 12798 (the table is in
-  docs/refactor.md). A real-time headless run at speed 1.0: the dissolve 4094 ms by the host clock, 18.5 s
-  of game time in 18.7 s.
+  docs/refactor.md). Real-time headless runs of the same script (host clock): 90e7de9 dissolve 4098 ms, title to open1.mes
+  2297 ms; R3 at speed 1 4094 and 2312 ms, 18.5 s of game time in 18.7 s; at speed 4 3.78x, at 8 7.11x,
+  no warnings. No save image is comparable across the builds (see docs/refactor.md).
 - Goldens re-recorded on 4aae940 into `golden_r3` (kept outside the repository): newgame seed 31, saveload
   seed 41, town seed 48 (330000 frames; the old seed no longer reaches the town), menu seed 46 (S46-S53).
   Each replays twice with every checkpoint matching (`li.*`, `raw.clock`, `raw.data`, `raw.heap`,

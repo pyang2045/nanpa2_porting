@@ -384,11 +384,23 @@ held from tick 800:
 | title (start1.mes) to the load's open1.mes | 2312 ms | 2329 ms |
 | first line of OPEN1, 8 characters (TextOut + cell, no delay) | 4 ms | 5 ms |
 | a text window of 40 or more characters (bot runs, 1896 against 2242 windows) | median 709 ms | median 703 ms |
-| a step of the player in the town | 48 ms (3 frames) | 48 ms |
+| a step of the player in the town (a screen-width walk is its step count x 48 ms) | 48 ms (3 frames) | 48 ms |
 | whole load scenario to the first wipe | 12811 ms | 12798 ms |
 
-In real time (non-deterministic, `NANPA2_SPEED=1`, headless, the same script): the first dissolve took
-4094 ms by the host clock, the 18.5 s of game time took 18.7 s (0.98x including the 0.2 s start-up).
+Title to prologue: the load path above (title to OPEN1) is the measurable one. A new game's name entry
+is the player's (the bot took 17296, 28551 and 20336 frames to reach S1.MES in three runs), so there is no
+fixed number to compare.
+
+In real time (non-deterministic, headless, the same script, host clock): 90e7de9 (its own 25 MIPS throttle)
+had the first dissolve at 4098 ms and title to open1.mes at 2297 ms; R3 at `NANPA2_SPEED=1` 4094 ms and
+2312 ms, and 18.5 s of game time in 18.7 s (0.98x including the 0.2 s start-up). At `NANPA2_SPEED=4` the
+same script ran 18.4 s of game time in 4.9 s (3.78x, dissolve 1024 ms), at 8 in 2.6 s (7.11x: the host's
+sleep granularity and the pumps' overhead show), with no warning.
+
+Save images: no comparable run writes one on both builds (saveload writes none, and the old inputs
+desynchronise before the Prologue's saves). The evidence that the FLAG files are unchanged is the diff
+review below and `selftest`'s save round trip; the `golden_r3` newgame and town runs write FLAG0 and FLAG6
+(replayed twice with equal `li.save` and `li.flags`).
 
 ### Determinism and the goldens
 
