@@ -31,6 +31,7 @@
 #include <setjmp.h>
 
 #include "game/ctl.h"
+#include "platform/clock.h"
 #include "game/pace.h"
 #include "game/file.h"
 #include "game/vm.h"
@@ -336,6 +337,7 @@ static int click_run(uint32_t handler)
 	RT_SET(click_busy, 0xff);
 	vm_pc = handler;
 	vm_run_block();
+	clock_lat("click_run_done");
 	RT_SET(click_busy, 0);
 	vm_pc = saved;
 	return -1;
@@ -364,6 +366,7 @@ static int vm_pass(void)
 	down = vm_input_down(1);
 	h = rd16(VM_CLICK_HANDLERS + 2);
 	if (down) {
+		clock_lat(h ? "vm_rclick_handler" : "vm_rclick_nohandler");
 		if (!h)
 			return fetch();
 		return click_run(h);

@@ -1,5 +1,7 @@
 
 #include <SDL.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "platform/clock.h"
 #include "platform/surface.h"
@@ -54,6 +56,11 @@ void clock_throttle(void)
 	double virt = (double)(vclock - base_us) / 1e6 / speed;
 	double ahead = virt - real;
 	if (ahead >= 0.002) {
+		if (ahead >= 0.01) {
+			char b[48];
+			snprintf(b, sizeof b, "sleep %.1fms", ahead * 1000.0);
+			clock_lat(b);
+		}
 		SDL_Delay((uint32_t)(ahead * 1000.0));
 	} else if (ahead < -0.05) {
 		base_ticks = now;
@@ -74,6 +81,17 @@ void clock_work(uint32_t us)
 		screen_present(0);
 		SDL_PumpEvents();
 	}
+}
+
+void clock_lat(const char *what)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_LATLOG") != NULL;
+	if (!on)
+		return;
+	double us = (double)SDL_GetPerformanceCounter() * 1e6 / (double)SDL_GetPerformanceFrequency();
+	fprintf(stderr, "L %.0f %s\n", us, what);
 }
 
 uint64_t clock_log_ms(void)

@@ -95,6 +95,9 @@ static struct qev {
 } q[MAX_Q];
 static int nq;
 static uint32_t next_decide;
+static uint32_t last_b0, last_b1, probe_next, probe_up;
+static int probe_on = -1;
+static const char *probe_only;
 
 static void push(uint32_t at, uint32_t msg, uint32_t wp, int x, int y)
 {
@@ -285,6 +288,8 @@ void explore_vm(uint32_t off)
 	last_fetch_frame = f;
 	last_off = off;
 	uint8_t b0 = rd8(SCRIPT + off), b1 = rd8(SCRIPT + off + 1), b2 = rd8(SCRIPT + off + 2);
+	last_b0 = b0;
+	last_b1 = b0 == 4 ? b1 : 0;
 	if (b0 == 0x04 && b1 == 0x13) {
 		last_op = OP_MENU;
 		menu_active = 1;
@@ -471,6 +476,33 @@ void explore_tick(void)
 			q[i] = q[--nq];
 		} else {
 			i++;
+		}
+	}
+	/* NANPA2_RPROBE=1: a right click (down, up 6 frames later) every 40-160 frames, whatever the game
+	 * is doing, with the state it came in ("RP" lines; src/platform/clock.h clock_lat for the rest) */
+	if (probe_on < 0)
+		probe_on = getenv("NANPA2_RPROBE") != NULL;
+	if (probe_on && !probe_only && strcmp(getenv("NANPA2_RPROBE"), "1"))
+		probe_only = getenv("NANPA2_RPROBE");
+	if (probe_on) {
+		if (probe_up && f >= probe_up) {
+			probe_up = 0;
+			win_post_ext(WM_RBUTTONUP, 0, (200u << 16) | 320);
+		}
+		if (!probe_up && f >= probe_next) {
+			const char *cls = menu_active ? "menu" : last_op == OP_TEXT ? "textwait"
+				: (last_b0 >= 0x80 || last_b0 == 6) ? "printing"
+				: (last_b0 == 4 && last_b1 == 0x26) ? "town"
+				: (last_b0 == 4 && last_b1 == 0x23) ? "scene" : "other";
+			if (probe_only && strcmp(cls, probe_only)) {
+				probe_next = f + 1; /* NANPA2_RPROBE=state: only in that state */
+				return;
+			}
+			fprintf(stderr, "RP frame %u %s op %02x.%02x %s\n", f, cls, last_b0, last_b1, mes);
+			win_post_ext(WM_MOUSEMOVE, 0, (200u << 16) | 320);
+			win_post_ext(WM_RBUTTONDOWN, 2, (200u << 16) | 320);
+			probe_up = f + 9;
+			probe_next = f + 40 + rnd(120);
 		}
 	}
 	if (end_frame && f >= end_frame) {

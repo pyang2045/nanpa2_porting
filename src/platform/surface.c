@@ -7,6 +7,7 @@
 
 #include "hooks.h"
 #include "platform/surface.h"
+#include "platform/clock.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "trap.h"
@@ -154,6 +155,7 @@ void screen_present(int force)
 	/* NANPA2_HEADLESS: the presenter keeps the frame in memory (no window,
 	 * no GPU, see present_common.h) */
 	present_frame(frame, pal);
+	clock_lat("present");
 }
 
 void screen_wait_vblank(void)

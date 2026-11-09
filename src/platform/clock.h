@@ -38,6 +38,8 @@ uint64_t clock_timer_ms(void);
 /* milliseconds for the timing log (NANPA2_TIMELOG): the virtual time in deterministic mode, else the host's */
 uint64_t clock_log_ms(void);
 
+void clock_lat(const char *what); /* NANPA2_LATLOG: "L <us> <what>" to stderr */
+
 /* sleep if the virtual time is ahead of real time x speed */
 void clock_throttle(void);
 
