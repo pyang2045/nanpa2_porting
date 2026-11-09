@@ -36,7 +36,7 @@ game's behaviour:
   into the VM), the status watchdog only reads, and presentation is not game state: nothing
   to do for them. The bot's own expression evaluation used to advance the instruction count
   (a replay has no bot, 77 instructions per menu of drift): it is now excluded
-  (a7cd770).
+  (62f125d).
 
 **Recording** (`--record FILE` or `NANPA2_RECORD`): a text file. Header: `nanpa2-replay 1`,
 `virt_ips`, `cp_ticks`, and `saves N/HASH`, the FLAG files of the save folder at the start (a replay
@@ -95,7 +95,7 @@ left out must diverge (exit 3).
 
 ### The golden set
 
-Made on the pre-refactor code (b98343c plus the bot fix a7cd770 and the R0 commit), headless,
+Made on the pre-refactor code (b98343c plus the bot fix 62f125d and the R0 commit), headless,
 `NANPA2_CPU_MIPS=0`, from copies of a save folder; kept outside the repository (they hold derived
 game state). Recording: `NANPA2_EXPLORE=SEED NANPA2_EXPLORE_FRAMES=N NANPA2_CP_TICKS=C
 nanpa2 --game game --record NAME.rec`; check: `nanpa2 --game game --replay NAME.rec` with the same

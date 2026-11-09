@@ -1190,13 +1190,13 @@ the check.
   tools/replay_diff.py compares two recordings; ctest `replay_det` (records at test time twice,
   replays, two tampered recordings must diverge). Two recordings of the same input were identical
   files at once, at 25 MIPS and unthrottled.
-- a7cd770: the bot's expression evaluation (x86_call 0x4037fc) advanced `x86_icount`, 77
+- 62f125d: the bot's expression evaluation (x86_call 0x4037fc) advanced `x86_icount`, 77
   instructions a menu: a replay (no bot) drifted. Found by replaying a recorded menu run.
 - Golden set (pre-refactor build, scratchpad, not committed): newgame (seed 31, 270000 frames,
   271 checkpoints, Prologue to OPEN1), town (saves32, seed 43, 300000 frames, 301, TOWN at frame
   263535), saveload (seed 41, a title load to OPEN1, 33), menu (seed 44, 40000 frames, 161).
   Each replays identically on the pre-refactor build (twice) and with `--exe`.
-- R1 (this commit series): `x86_alias` (src/x86/x86.c) backs a range of the data area with a C
+- bef599a (R1): `x86_alias` (src/x86/x86.c) backs a range of the data area with a C
   object, so converted and unconverted code, the HLE layer and the script VM see the same bytes;
   src/game/state.h structs `save_image` (0xc00, the FLAG file layout, static-asserted offsets),
   `vm_rt`, `screen_state`, `anim_state`; the 0x4452xx text window, VM flags, registers, flags,
