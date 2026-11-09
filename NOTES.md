@@ -1125,3 +1125,51 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   emulated memory into C structs (not done). Not exercised by any run: ops 04 1a (swap rect; no script
   uses it), the menu input blocks 2-5 of 04 13 (`handled2`..`waited5`), the click handler path in a
   real script, and the event check's pieces in an explore run (the fuzz and the route cover them).
+
+## 2026-11-09 (nanpa2.dat: running without nanpa2.exe)
+
+- 9355a78: after stage 6 no native game instruction runs, but the interp build still loaded the
+  whole nanpa2.exe because the C reads the exe's initialized data at its native addresses. A
+  local asset `nanpa2.dat` now holds that data and no code: `src/x86/asset.c` (format and writer
+  and loader; the source holds two address ranges, 0x400000-0x401000 and 0x41b000-0x4ab000, no
+  bytes of the exe), `src/assets.c` (lookup: game folder, then save folder; made at the first
+  launch from the exe, or `nanpa2 --make-assets [--game] [--exe] [--out]`; `--exe`, the recomp
+  build and the oracle modes `NANPA2_DIFF`, `_DIFF_DIR`, `_FUZZ`, `_START_ORACLE`, `_INTERP`,
+  `_LOCKSTEP` load the whole exe, with a clear error if it is missing; neither file: "no
+  nanpa2.dat and no nanpa2.exe"), launch.c accepting a folder with either. Gitignored, never
+  shipped. Format: re-notes.md; what it holds and how that was found: docs/reimpl.md "The
+  asset". 66 ranges, 96,053 bytes (95,213 of data: 546 header, 82,497 .rdata, 12,170 .data; zero
+  runs of 32 bytes or more are recorded, not stored). The interpreter's decoder refuses to run
+  when the code is absent (`x86_code_absent`).
+- `NANPA2_IMAGE_TRACE=FILE` (x86_ptr marks the PE image bytes touched): in five headless runs
+  with the exe hidden (seed 31 new game 60k frames, seed 43 saves32 30k, seeds 42 and 43 300k
+  frames at turbo 2, 19 and 70 MES files, the town reached) no byte of 0x401000-0x41b000
+  (game code, MP3 library, C runtime) or of .rsrc was touched, the decoder never ran, and the
+  header page was touched at 8 bytes. The whole of .rdata and the initialized .data is kept anyway
+  (paths no run took); the bss tail is zero at load.
+- Verification (interp build, headless, scratch save folders, a folder of symlinks without the
+  exe, the real game/ untouched):
+
+  | Run | Result |
+  |---|---|
+  | ctest interp, 10 tests (smoke excluded: it opens a window) | pass, incl. `no_game_bytes` and the new `asset_only` |
+  | ctest recomp, 9 tests (smoke excluded) | pass (the recomp build always loads the exe) |
+  | `asset_only`: 24 s of game time, exe hidden vs `NANPA2_INTERP=1` | 548 HLE calls and 5 screenshots equal; the asset holds no 64-byte run of .text and no range over 0x401000-0x4077ff |
+  | explore seed 43 saves32, 8000 frames, turbo 2, exe hidden vs whole exe | same 4 MES files at the same frames, 0 native, exit 0 |
+  | explore seeds 42, 43, 300000 frames, turbo 2, exe hidden | exit 0, 0 traps, 0 warnings, `native: 0`, seed 42: 19 MES, town at 26672 (left it), seed 43: 70 MES |
+  | same two seeds with the whole exe (`NANPA2_INTERP=1`) | exit 0, 0 traps, 0 warnings, `native: 0`, seed 42: 12 MES, town at 26672 (stalls in it), seed 43: 64 MES |
+  | seed 42 with the whole exe twice more, 100000 frames | also diverge from each other after quiz_sub.mes (frame 27679): 33.mes at 31743 against 21.mes at 42927 |
+
+  Long explore runs are not repeatable (the game timer is host-paced, the bot clicks by frame):
+  the asset and exe runs of seed 42 are equal through quiz_sub.mes at frame 27634 and then take
+  other branches, the pair of seed 43 differs from open.mes on (frame 547 against 548), and the
+  two further exe runs of seed 42 differ from each other and from both just as much. The equal
+  screenshots at fixed frames the task asked for are therefore not available from these runs; the
+  equality evidence is the scripted game-clock run of `asset_only` and the image traces (no
+  byte outside the kept ranges was read, so memory is the same for every byte the runs used).
+  Turbo 8 with scripted clicks was tried as well and differs in the number of repeated timer
+  and surface calls even between the asset and the exe, so it was not used.
+- Still needs the exe: `--exe`, the recomp build, the lifted originals of the differential
+  harness (`NANPA2_DIFF`, `_DIFF_DIR`, `_FUZZ`, `_START_ORACLE`) and the lockstep comparison, as
+  the oracle of the reimplemented units; nothing the player runs does. With the default
+  `NANPA2_GAME_DIR` (`game/`) ctest now writes `game/nanpa2.dat` (first launch behaviour).
