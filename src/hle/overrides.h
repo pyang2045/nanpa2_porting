@@ -269,54 +269,36 @@ HLE_GAME_CALL_EXIT(0x406ae6, "click wait: test the button (0x4074d5)")
 HLE_GAME_CALL_EXIT(0x406afb, "click wait for the release: a frame (0x4075c6)")
 HLE_GAME_CALL_EXIT(0x406b02, "click wait for the release: test (0x4074d5)")
 
-/* Stage 5A: the town map (src/game/map*.c). Sub-ops 5, 7 and 12, the sprite
- * step 0x4042f7 and the pumping routines (0x404450, 0x405216, 0x405597,
- * 0x403e30, 0x4051c2) stay native, with the 04 26 handler's `native`
- * predicate (the dispatcher 0x403a70 itself is called only by the C 04 26
- * handler game_op_map, which does its work in C now). */
-HLE_GAME_OVERRIDE(0x403b28, "map: sub-op 2, the cell grid from the layer (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403bd2, "map: sub-op 3, the sprite tiles over the grid (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403d45, "map: sub-op 4, draw the changed cells (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403eff, "map: draw one cell (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x4040f0, "map: clear bit 3 of a cell (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x404731, "map: move a sprite up (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404937, "map: move a sprite down (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404a9a, "map: move a sprite left (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404c9f, "map: move a sprite right (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x405691, "map: one step of an auto-walk (src/game/map_path.c)")
-HLE_GAME_OVERRIDE(0x405966, "map: plan a walk to a cell (src/game/map_path.c)")
-HLE_GAME_OVERRIDE(0x404f8c, "map: area trigger under a sprite (src/game/map.c)")
-HLE_GAME_OVERRIDE(0x40500e, "map: collision test for a sprite (src/game/map.c)")
+/* The town map (src/game/map*.c): the 04 26 handler 0x4073ee runs the whole
+ * map in direct-style C (map_pump.c, through ctl_piece); nothing else enters
+ * the native map code (0x403a70-0x4060a2), which is dead below. */
+HLE_GAME_DEAD(0x403b28, "map: sub-op 2, the cell grid from the layer (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403bd2, "map: sub-op 3, the sprite tiles over the grid (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403d45, "map: sub-op 4, draw the changed cells (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403eff, "map: draw one cell (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x4040f0, "map: clear bit 3 of a cell (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x404731, "map: move a sprite up (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404937, "map: move a sprite down (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404a9a, "map: move a sprite left (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404c9f, "map: move a sprite right (src/game/map_move.c)")
+HLE_GAME_DEAD(0x405691, "map: one step of an auto-walk (src/game/map_path.c)")
+HLE_GAME_DEAD(0x405966, "map: plan a walk to a cell (src/game/map_path.c)")
+HLE_GAME_DEAD(0x404f8c, "map: area trigger under a sprite (src/game/map.c)")
+HLE_GAME_DEAD(0x40500e, "map: collision test for a sprite (src/game/map.c)")
 
-/* Stage 6 (src/game/map_pump.c): the chain that pumps messages. The 04 26
- * handler 0x4073ee runs sub-ops 5, 7 and 12 in C down to the first pump; each
- * pump site's return address is a jump unit, the pump 0x40609c itself two
- * (pushad and the HLE pump 0x401bf0; the result), and the handler's tail
- * 0x40740f the last. Calls whose return address is below are call exits. */
-HLE_GAME_JUMP(0x40609c, "map pump: pushad, message pump")
-HLE_GAME_JUMP(0x4060a2, "map pump: after the message pump, popad, buttons and mouse")
-HLE_GAME_JUMP(0x40448b, "player: after the pump in the cursor path")
-HLE_GAME_JUMP(0x4044a9, "player: after the pump for the left button")
-HLE_GAME_JUMP(0x4044b7, "player: after the pump, follow the mouse")
-HLE_GAME_JUMP(0x4045eb, "player: after the pump in the keyboard path")
-HLE_GAME_JUMP(0x4051e3, "map frame: after the pump, a click on the screen's button")
-HLE_GAME_JUMP(0x40520f, "map frame: after the pump, wait for the button to go up")
-HLE_GAME_JUMP(0x405233, "event check: after the first pump")
-HLE_GAME_JUMP(0x405273, "event check: after the second pump")
-HLE_GAME_JUMP(0x40539f, "event check: after the pump, wait for the button to go up")
-HLE_GAME_JUMP(0x40559d, "right click: after the pump, plan the walk")
-HLE_GAME_JUMP(0x407410, "op 04 26: after the map sub-op and the pop of ESI")
-HLE_GAME_CALL_EXIT(0x4060a2, "map pump: the message pump (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x40448b, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4044a9, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4044b7, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4045eb, "player: the message pump (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x4051e3, "map frame: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40520f, "map frame: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x405233, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x405273, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40539f, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40559d, "right click: pump (0x40609c)")
+HLE_GAME_DEAD(0x40609c, "map pump: pushad, message pump")
+HLE_GAME_DEAD(0x4060a2, "map pump: after the message pump, popad, buttons and mouse")
+HLE_GAME_DEAD(0x40448b, "player: after the pump in the cursor path")
+HLE_GAME_DEAD(0x4044a9, "player: after the pump for the left button")
+HLE_GAME_DEAD(0x4044b7, "player: after the pump, follow the mouse")
+HLE_GAME_DEAD(0x4045eb, "player: after the pump in the keyboard path")
+HLE_GAME_DEAD(0x4051e3, "map frame: after the pump, a click on the screen's button")
+HLE_GAME_DEAD(0x40520f, "map frame: after the pump, wait for the button to go up")
+HLE_GAME_DEAD(0x405233, "event check: after the first pump")
+HLE_GAME_DEAD(0x405273, "event check: after the second pump")
+HLE_GAME_DEAD(0x40539f, "event check: after the pump, wait for the button to go up")
+HLE_GAME_DEAD(0x40559d, "right click: after the pump, plan the walk")
+HLE_GAME_DEAD(0x407410, "op 04 26: after the map sub-op and the pop of ESI")
 /* the native bodies are the oracles' code and nothing else enters them */
 HLE_GAME_DEAD(0x403a70, "map: 04 26 dispatcher")
 HLE_GAME_DEAD(0x403e30, "map: sub-op 5")

@@ -32,38 +32,38 @@
 
 static uint32_t grid_at(uint32_t i)
 {
-	return rd8(SEG1 + i);
+	return seg1_u8(i);
 }
 
 /* 0x40562b: the grid from the layer. Cell (x, y) is blocked if the layer
  * tile at (x, y + 1) or (x + 1, y + 1) has its wall bit (bit 15). */
-static void build_walk_grid(uint32_t m)
+static void build_walk_grid(const struct map_rec *m)
 {
 	uint32_t grid = MV(walk_base);
-	uint32_t tile = rd16(m + M_LAYER) + 4;
-	tile = (tile & 0xffff0000u) | ((tile + rd16(m + M_MAP_W)) & 0xffff);
-	tile = (tile & 0xffff0000u) | ((tile + rd16(m + M_MAP_W)) & 0xffff);
-	uint32_t w = rd16(m + M_MAP_W), h = rd16(m + M_MAP_H);
-	X86_COUNT(1 + 12 + 2); /* the call, up to the first push edi, pop esi + ret */
+	uint32_t tile = m->layer + 4;
+	tile = (tile & 0xffff0000u) | ((tile + m->map_w) & 0xffff);
+	tile = (tile & 0xffff0000u) | ((tile + m->map_w) & 0xffff);
+	uint32_t w = m->map_w, h = m->map_h;
+	COST(1 + 12 + 2); /* the call, up to the first push edi, pop esi + ret */
 	for (uint32_t r = h; r; r--) {
-		X86_COUNT(1); /* movzx ecx */
+		COST(1); /* movzx ecx */
 		for (uint32_t c = w; c; c--) {
 			uint32_t v = GRID_WALL;
-			if (rd8(SEG1 + tile + 1) & 0x80) {
-				X86_COUNT(11);
-			} else if (rd8(SEG1 + tile + 3) & 0x80) {
-				X86_COUNT(13);
+			if (seg1_u8(tile + 1) & 0x80) {
+				COST(11);
+			} else if (seg1_u8(tile + 3) & 0x80) {
+				COST(13);
 			} else {
 				v = GRID_FREE;
-				X86_COUNT(14);
+				COST(14);
 			}
-			wr8(SEG1 + grid, v);
+			seg1_set8(grid, v);
 			tile += 2;
 			grid++;
-			X86_POLL(0x40568a);
+			POLL(0x40568a);
 		}
-		X86_COUNT(2); /* pop ecx, loop */
-		X86_POLL(0x40568d);
+		COST(2); /* pop ecx, loop */
+		POLL(0x40568d);
 	}
 }
 
@@ -86,100 +86,100 @@ static int32_t abs16(int32_t v)
  * marked by their depth */
 static int flood(int32_t x, int32_t y, uint32_t mask, uint32_t cell, int32_t depth)
 {
-	X86_COUNT(10); /* the prologue and the first test */
+	COST(10); /* the prologue and the first test */
 	if (grid_at(cell) == GRID_WALL) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(3);
+	COST(3);
 	if (x < 0) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(4);
+	COST(4);
 	if ((int32_t)MV(path_w) - 1 < x) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(3);
+	COST(3);
 	if (y < 0) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(4);
+	COST(4);
 	if ((int32_t)MV(path_h) - 1 < y) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(2);
+	COST(2);
 	if (depth < 0) {
-		X86_COUNT(1);
+		COST(1);
 		goto fail;
 	}
-	X86_COUNT(4);
+	COST(4);
 	if (grid_at(cell) == 0) {
-		wr8(SEG1 + cell, (uint32_t)depth);
-		X86_COUNT(1 + 8);
+		seg1_set8(cell, (uint32_t)depth);
+		COST(1 + 8);
 		return 1;
 	}
 	uint32_t px = MV(path_from_x), py = MV(path_from_y);
-	X86_COUNT(2);
+	COST(2);
 	if ((mask & 0xffff) == 0xffff) {
 		mask &= 0xffff0000u;
-		X86_COUNT(1 + 3);
+		COST(1 + 3);
 		if ((int16_t)((uint32_t)y - py) < 0) {
 			mask |= 1;
-			X86_COUNT(1);
+			COST(1);
 		}
-		X86_COUNT(3);
+		COST(3);
 		if ((int16_t)((uint32_t)x - px) < 0) {
 			mask |= 2;
-			X86_COUNT(2);
+			COST(2);
 		}
 		goto axis;
 	}
-	X86_COUNT(3);
+	COST(3);
 	if ((uint32_t)y != py) {
 		mask = (mask & 0xffff0000u) | (mask & 6);
-		X86_COUNT(4);
+		COST(4);
 		if ((int16_t)((uint32_t)y - py) < 0) {
 			mask |= 1;
-			X86_COUNT(1);
+			COST(1);
 		}
 	}
-	X86_COUNT(3);
+	COST(3);
 	if ((uint32_t)x != px) {
 		mask = (mask & 0xffff0000u) | (mask & 5);
-		X86_COUNT(4);
+		COST(4);
 		if ((int16_t)((uint32_t)x - px) < 0) {
 			mask |= 2;
-			X86_COUNT(1);
+			COST(1);
 		}
 	}
 	{
 		int32_t ay = abs16((int32_t)((uint32_t)y - py));
 		int32_t ax = abs16((int32_t)((uint32_t)x - px));
 		int32_t d = abs16(ax - ay);
-		X86_COUNT(17);
+		COST(17);
 		if (d <= 3)
 			goto visit;
 		mask = (mask & 0xffff0000u) | (mask & 3);
-		X86_COUNT(1);
+		COST(1);
 	}
 axis:
 	{
 		int32_t ax = abs16((int32_t)((uint32_t)x - px));
 		int32_t ay = abs16((int32_t)((uint32_t)y - py));
-		X86_COUNT(13);
+		COST(13);
 		if (!(ay >= ax)) {
 			mask |= 4;
-			X86_COUNT(1);
+			COST(1);
 		}
 	}
 visit:
-	wr8(SEG1 + cell, GRID_WALL);
+	seg1_set8(cell, GRID_WALL);
 	depth--;
-	X86_COUNT(6);
+	COST(6);
 	if ((mask & 0xffff) > 7)
 		goto won;
 	for (int k = 0; k < 4; k++) {
@@ -192,16 +192,16 @@ visit:
 		case L: nx = x - 1; nc = cell - 1; break;
 		default: nx = x + 1; nc = cell + 1; break;
 		}
-		X86_COUNT(12);
+		COST(12);
 		if (flood(nx, ny, mask, nc, depth))
 			goto won;
 	}
 fail:
-	X86_COUNT(6);
+	COST(6);
 	return 0;
 won:
-	wr8(SEG1 + cell, (uint32_t)(depth + 1));
-	X86_COUNT(9);
+	seg1_set8(cell, (uint32_t)(depth + 1));
+	COST(9);
 	return 1;
 }
 
@@ -211,170 +211,170 @@ static void start_flood(void)
 {
 	int32_t goal_x = (int32_t)MV(path_goal_x), goal_y = (int32_t)MV(path_goal_y);
 	uint32_t goal = MV(path_goal_cell);
-	X86_COUNT(1 + 1 + 8 + 2); /* the call, pushal, up to the call, or, jne */
+	COST(1 + 1 + 8 + 2); /* the call, pushal, up to the call, or, jne */
 	if (!flood(goal_x, goal_y, 0xffff, goal, (int32_t)GRID_GOAL)) {
-		wr8(SEG1 + MV(path_from_cell), GRID_WALL);
-		X86_COUNT(2);
+		seg1_set8(MV(path_from_cell), GRID_WALL);
+		COST(2);
 	}
-	X86_COUNT(2); /* popal, ret */
+	COST(2); /* popal, ret */
 }
 
 /* 0x405fb6: the goal is a wall (marked 0xfd, `level`): from the cells of
  * each level, the free neighbours (not across the sprite's footprint: below
  * only if row + height is inside the map, right only if column + width is)
  * get the next level down, until a pass adds none */
-static void approach(uint32_t m, uint32_t s)
+static void approach(const struct map_rec *m, const struct sprite *s)
 {
 	uint32_t level = GRID_GOAL;
-	X86_COUNT(1); /* the call */
+	COST(1); /* the call */
 	for (;;) {
 		uint32_t progress = 0;
 		uint32_t cell = MV(walk_base);
-		X86_COUNT(5);
+		COST(5);
 		uint32_t rows = 0;
 		do {
 			uint32_t cols = 0;
-			X86_COUNT(1);
+			COST(1);
 			do {
-				X86_COUNT(2 + 4);
+				COST(2 + 4);
 				if (grid_at(cell) == level) {
-					uint32_t mw = rd16(m + M_MAP_W);
+					uint32_t mw = m->map_w;
 					uint32_t n;
-					X86_COUNT(2);
+					COST(2);
 					if (rows != 0) {
 						n = (cell & 0xffff0000u) | ((cell - mw) & 0xffff);
-						X86_COUNT(5);
+						COST(5);
 						if (grid_at(n) == GRID_FREE) {
-							wr8(SEG1 + n, level - 1);
+							seg1_set8(n, level - 1);
 							progress = 0xff;
-							X86_COUNT(4);
+							COST(4);
 						}
 					}
-					X86_COUNT(7);
-					if (((rd8(SEG1 + s + S_HEIGHT) + rows) & 0xffff) < rd16(m + M_MAP_H)) {
-						n = (cell & 0xffff0000u) | ((cell + rd16(m + M_MAP_W)) & 0xffff);
-						X86_COUNT(5);
+					COST(7);
+					if (((s->height + rows) & 0xffff) < m->map_h) {
+						n = (cell & 0xffff0000u) | ((cell + m->map_w) & 0xffff);
+						COST(5);
 						if (grid_at(n) == GRID_FREE) {
-							wr8(SEG1 + n, level - 1);
+							seg1_set8(n, level - 1);
 							progress = 0xff;
-							X86_COUNT(4);
+							COST(4);
 						}
 					}
-					X86_COUNT(2);
+					COST(2);
 					if (cols != 0) {
 						n = cell - 1;
-						X86_COUNT(5);
+						COST(5);
 						if (grid_at(n) == GRID_FREE) {
-							wr8(SEG1 + n, level - 1);
+							seg1_set8(n, level - 1);
 							progress = 0xff;
-							X86_COUNT(4);
+							COST(4);
 						}
 					}
-					X86_COUNT(7);
-					if (((rd8(SEG1 + s + S_WIDTH) + cols) & 0xffff) < rd16(m + M_MAP_W)) {
+					COST(7);
+					if (((s->width + cols) & 0xffff) < m->map_w) {
 						n = cell + 1;
-						X86_COUNT(5);
+						COST(5);
 						if (grid_at(n) == GRID_FREE) {
-							wr8(SEG1 + n, level - 1);
+							seg1_set8(n, level - 1);
 							progress = 0xff;
-							X86_COUNT(4);
+							COST(4);
 						}
 					}
 				}
 				cell++;
 				cols++;
-				X86_POLL(0x40607a);
-			} while ((cols & 0xffff) != rd16(m + M_MAP_W));
+				POLL(0x40607a);
+			} while ((cols & 0xffff) != m->map_w);
 			rows++;
-			X86_COUNT(3);
-			X86_POLL(0x405fc3);
-		} while ((rows & 0xffff) != rd16(m + M_MAP_H));
-		X86_COUNT(2);
+			COST(3);
+			POLL(0x405fc3);
+		} while ((rows & 0xffff) != m->map_h);
+		COST(2);
 		if (progress == 0) {
-			X86_COUNT(1);
+			COST(1);
 			return;
 		}
 		level = (level - 1) & 0xff;
-		X86_COUNT(2);
+		COST(2);
 		if (level == 0) {
-			X86_COUNT(1);
+			COST(1);
 			return;
 		}
-		X86_POLL(0x405fb8);
+		POLL(0x405fb8);
 	}
 }
 
-static uint32_t cell_of(uint32_t m, uint32_t x, uint32_t y)
+static uint32_t cell_of(const struct map_rec *m, uint32_t x, uint32_t y)
 {
-	return (((rd16(m + M_MAP_W) * y) & 0xffff) + x + MV(walk_base)) & 0xffff;
+	return (((m->map_w * y) & 0xffff) + x + MV(walk_base)) & 0xffff;
 }
 
-/* 0x405966: plan a walk for sprite ESI (an offset in segment 1) to the cell
- * (ECX, EDX). A walk already planned is cancelled instead (the next call
- * plans). Sets MAP_AUTOWALK. */
-void game_map_plan_walk(void)
+/* 0x405966: plan a walk for sprite s to the cell (gx, gy), 16 bits each. A
+ * walk already planned is cancelled instead (the next call plans). Sets
+ * G.map.v.autowalk. */
+void game_map_plan_walk(struct sprite *s, uint32_t gx, uint32_t gy)
 {
-	uint32_t s = cpu.r[ESI], gx = cpu.r[ECX] & 0xffff, gy = cpu.r[EDX] & 0xffff;
-	uint32_t sp = SEG1 + s;
-	X86_COUNT(2);
+	gx &= 0xffff;
+	gy &= 0xffff;
+	COST(2);
 	if (MV(autowalk) != 0) {
 		MV_SET(autowalk, 0);
-		X86_COUNT(2);
+		COST(2);
 		return;
 	}
-	uint32_t m = SEG1 + SV(map_sel);
-	MV_SET(path_from_x, rd16(sp + S_X));
-	MV_SET(path_from_y, rd16(sp + S_Y));
+	const struct map_rec *m = map_rec();
+	MV_SET(path_from_x, s->x);
+	MV_SET(path_from_y, s->y);
 	MV_SET(path_goal_x, gx);
 	MV_SET(path_goal_y, gy);
-	MV_SET(path_w, rd16(m + M_MAP_W));
-	MV_SET(path_h, rd16(m + M_MAP_H));
+	MV_SET(path_w, m->map_w);
+	MV_SET(path_h, m->map_h);
 	MV_SET(path_grid, MV(walk_base));
-	X86_COUNT(17);
+	COST(17);
 	build_walk_grid(m);
 	/* every `mul` leaves the high word of its product in DX, and DX is the
 	 * goal's y when the approach below starts over (usually 0: the goal
 	 * is looked for in row 0) */
-	uint32_t prod = gy * rd16(m + M_MAP_W);
+	uint32_t prod = gy * m->map_w;
 	uint32_t dx_reg = prod >> 16;
 	uint32_t goal = ((prod & 0xffff) + gx + MV(walk_base)) & 0xffff;
-	X86_COUNT(6);
+	COST(6);
 	if (grid_at(goal) != GRID_WALL) {
 		MV_SET(path_goal_cell, goal);
-		uint32_t from = cell_of(m, rd16(sp + S_X), rd16(sp + S_Y));
-		dx_reg = (rd16(m + M_MAP_W) * rd16(sp + S_Y)) >> 16;
+		uint32_t from = cell_of(m, s->x, s->y);
+		dx_reg = (m->map_w * s->y) >> 16;
 		MV_SET(path_from_cell, from);
-		wr8(SEG1 + from, 0);
-		X86_COUNT(9);
+		seg1_set8(from, 0);
+		COST(9);
 		start_flood();
-		X86_COUNT(3);
+		COST(3);
 		if (grid_at(goal) < GRID_FREE) {
 			MV_SET(autowalk, 0xff);
-			X86_COUNT(2);
+			COST(2);
 			return;
 		}
 	}
-	X86_COUNT(2);
+	COST(2);
 	if (!(MV(approach) & 1)) {
 		MV_SET(autowalk, 0);
-		X86_COUNT(2);
+		COST(2);
 		return;
 	}
-	X86_COUNT(5);
+	COST(5);
 	build_walk_grid(m);
-	uint32_t cell = ((((dx_reg * rd16(m + M_MAP_W)) & 0xffff) + gx + MV(walk_base)) & 0xffff);
+	uint32_t cell = ((((dx_reg * m->map_w) & 0xffff) + gx + MV(walk_base)) & 0xffff);
 	uint32_t old = grid_at(cell);
-	wr8(SEG1 + cell, GRID_GOAL);
-	X86_COUNT(10);
+	seg1_set8(cell, GRID_GOAL);
+	COST(10);
 	approach(m, s);
-	X86_COUNT(4);
+	COST(4);
 	if (old == GRID_WALL) {
-		wr8(SEG1 + cell, GRID_WALL);
-		X86_COUNT(1);
+		seg1_set8(cell, GRID_WALL);
+		COST(1);
 	}
-	uint32_t at = cell_of(m, rd16(sp + S_X), rd16(sp + S_Y));
+	uint32_t at = cell_of(m, s->x, s->y);
 	uint32_t v = grid_at(at);
-	X86_COUNT(7 + 2 + (v == GRID_WALL ? 2 : v == GRID_FREE ? 4 : 4));
+	COST(7 + 2 + (v == GRID_WALL ? 2 : v == GRID_FREE ? 4 : 4));
 	MV_SET(autowalk, (v == GRID_WALL || v == GRID_FREE) ? 0 : 0xff);
 }
 
@@ -384,23 +384,32 @@ void game_map_plan_walk(void)
  * order of the neighbour that is itself marked. No step possible (or the
  * step is refused): the walk ends. EDI = the map selector on return. */
 
-/* the step(s): one mover, or two (AL = both results or-ed); 0 = refused */
-static int walk(uint32_t sel, void (*a)(void), void (*b)(void))
+typedef int (*mover_fn)(struct sprite *);
+
+/* what the walk's steps need: the sprite, and the AX leftover that the
+ * movers' results replace (sub-op 7 reports it as S) */
+struct walker {
+	struct sprite *s;
+	uint32_t *eax;
+};
+
+/* the step(s): one mover, or two (the results or-ed); 0 = refused */
+static int walk(const struct walker *w, mover_fn a, mover_fn b)
 {
-	cpu.r[EDI] = sel;
-	X86_COUNT(2); /* mov edi, call */
-	a();
-	uint32_t al = cpu.r[EAX] & 0xff;
+	COST(2); /* mov edi, call */
+	int al = a(w->s);
+	*w->eax = (*w->eax & 0xffffff00u) | (uint32_t)al;
 	if (b) {
-		X86_COUNT(5); /* push, call, pop, or, cmp */
-		b();
-		al = (cpu.r[EAX] | al) & 0xff;
+		COST(5); /* push, call, pop, or, cmp */
+		int bl = b(w->s);
+		*w->eax = (*w->eax & 0xffffff00u) | (uint32_t)bl;
+		al = (al | bl) & 0xff;
 	} else {
-		X86_COUNT(1); /* cmp */
+		COST(1); /* cmp */
 	}
-	X86_COUNT(2); /* je (+ ret) */
+	COST(2); /* je (+ ret) */
 	if (al == 0)
-		X86_COUNT(3); /* the stop: mov edi, mov byte, ret */
+		COST(3); /* the stop: mov edi, mov byte, ret */
 	return al != 0;
 }
 
@@ -409,52 +418,51 @@ static int walk(uint32_t sel, void (*a)(void), void (*b)(void))
  * orthogonal neighbours o1 (first) and o2 say in which order to step */
 struct diag {
 	uint32_t n, o1, o2;
-	void (*first1)(void), (*second1)(void), (*first2)(void), (*second2)(void);
+	mover_fn first1, second1, first2, second2;
 	int tail; /* instructions after both tests fail */
 };
 
-static int diagonal(uint32_t sel, uint32_t v, const struct diag *d, int *done)
+static int diagonal(const struct walker *w, uint32_t v, const struct diag *d, int *done)
 {
-	X86_COUNT(3 + 2);
+	COST(3 + 2);
 	if (grid_at(d->n) >= GRID_FREE)
 		return 0;
-	X86_COUNT(2);
+	COST(2);
 	if (!(v < grid_at(d->n)))
 		return 0;
-	X86_COUNT(3);
+	COST(3);
 	if (grid_at(d->o1) < GRID_FREE) {
-		*done = walk(sel, d->first1, d->second1);
+		*done = walk(w, d->first1, d->second1);
 		return 1;
 	}
-	X86_COUNT(4);
+	COST(4);
 	if (grid_at(d->o2) < GRID_FREE) {
-		*done = walk(sel, d->first2, d->second2);
+		*done = walk(w, d->first2, d->second2);
 		return 1;
 	}
-	X86_COUNT(d->tail);
+	COST(d->tail);
 	return 0;
 }
 
 /* an orthogonal neighbour: `setup` instructions to find it, then the test */
 static int orthogonal(uint32_t v, uint32_t n, int setup)
 {
-	X86_COUNT(setup + 2);
+	COST(setup + 2);
 	if (grid_at(n) >= GRID_FREE)
 		return 0;
-	X86_COUNT(2);
+	COST(2);
 	return v < grid_at(n);
 }
 
-void game_map_walk_step(void)
+void game_map_walk_step(struct sprite *s, uint32_t *eax)
 {
-	uint32_t s = cpu.r[ESI];
-	uint32_t sp = SEG1 + s;
-	uint32_t sel = SV(map_sel);
-	uint32_t m = SEG1 + sel;
-	uint32_t mw = rd16(m + M_MAP_W);
-	uint32_t c = (((mw * rd16(sp + S_Y)) & 0xffff) + rd16(sp + S_X) + MV(walk_base)) & 0xffff;
+	const struct map_rec *m = map_rec();
+	struct walker wk = { s, eax };
+	const struct walker *w = &wk;
+	uint32_t mw = m->map_w;
+	uint32_t c = (((mw * s->y) & 0xffff) + s->x + MV(walk_base)) & 0xffff;
 	uint32_t v = grid_at(c);
-	X86_COUNT(10);
+	COST(10);
 	int done = 0;
 	if (v < GRID_GOAL) {
 		/* up-left, up-right, down-right, down-left (an orthogonal's two steps first, then the other order) */
@@ -466,50 +474,43 @@ void game_map_walk_step(void)
 			game_map_move_down, game_map_move_right, game_map_move_right, game_map_move_down, 1 };
 		struct diag dl = { (c + mw - 1) & 0xffff, (c + mw) & 0xffff, (c - 1) & 0xffff,
 			game_map_move_down, game_map_move_left, game_map_move_left, game_map_move_down, 1 };
-		if (diagonal(sel, v, &ul, &done) || diagonal(sel, v, &ur, &done) ||
-		    diagonal(sel, v, &dr, &done) || diagonal(sel, v, &dl, &done)) {
+		if (diagonal(w, v, &ul, &done) || diagonal(w, v, &ur, &done) ||
+		    diagonal(w, v, &dr, &done) || diagonal(w, v, &dl, &done)) {
 			if (done)
 				return;
 		} else if (orthogonal(v, c - 1, 2)) {
-			if (walk(sel, game_map_move_left, NULL))
+			if (walk(w, game_map_move_left, NULL))
 				return;
 		} else if (orthogonal(v, c + 1, 1)) {
-			if (walk(sel, game_map_move_right, NULL))
+			if (walk(w, game_map_move_right, NULL))
 				return;
 		} else if (orthogonal(v, c + mw, 2)) {
-			if (walk(sel, game_map_move_down, NULL))
+			if (walk(w, game_map_move_down, NULL))
 				return;
 		} else if (orthogonal(v, c - mw, 2)) {
-			if (walk(sel, game_map_move_up, NULL))
+			if (walk(w, game_map_move_up, NULL))
 				return;
 		} else {
-			X86_COUNT(3); /* the stop */
+			COST(3); /* the stop */
 		}
 	} else {
-		X86_COUNT(3);
+		COST(3);
 	}
-	cpu.r[EDI] = sel;
 	MV_SET(autowalk, 0);
 }
 
 /* Sub-op 30, 0x405542: plan a walk for sprite a to the destination in its
- * record (S_DEST_X, S_DEST_Y), approaching a blocked goal. S = 0 if a walk
+ * record (dest_x, dest_y), approaching a blocked goal. AX = 0 if a walk
  * was planned, 0xffff - 0x0101 * flag... as the native code computes it:
  * -(flag * 0x101 + 1). */
 uint32_t game_map_op_walk(void)
 {
-	uint32_t sel = SV(map_sel);
-	uint32_t n16 = MV(args[0]) << 4;
-	uint32_t s = ((n16) + rd16(SEG1 + sel + M_SPRITES)) & 0xffff;
-	uint32_t sp = SEG1 + s;
-	cpu.r[ESI] = s;
-	cpu.r[ECX] = rd8(sp + S_DEST_X);
-	cpu.r[EDX] = rd8(sp + S_DEST_Y);
+	struct sprite *s = sprite_at(((MV(args[0]) << 4) + map_rec()->sprites) & 0xffff);
 	MV_SET(approach, 1);
-	X86_COUNT(14);
-	game_map_plan_walk();
+	COST(14);
+	game_map_plan_walk(s, s->dest_x, s->dest_y);
 	uint32_t f = MV(autowalk);
 	uint32_t bx = (f * 0x101 + 1) & 0xffff;
-	X86_COUNT(6);
+	COST(6);
 	return (0u - bx) & 0xffff;
 }
