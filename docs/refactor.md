@@ -498,6 +498,10 @@ four of them.
 | `raw.gdata` | new: hash of `G` with the platform words zeroed; same value in R3 and R4 code |
 | `raw.cpu`, `raw.data`, `raw.heap`, `raw.stack`, `raw.pg` | retired with the emulated machine. A recording that has them still replays: the keys the live run does not produce are skipped (`replay.c`, `replay_diff.py`) |
 
+The recording header stays `nanpa2-replay 2`, `pace 1`: the format of the file (messages and key=value
+checkpoints) did not change, only the set of keys, and a reader takes the keys of the recording; an R4
+recording is recognised by the absence of the retired keys (and the presence of `raw.gdata`).
+
 `NANPA2_DATA_CHECK` (a snapshot of the data area outside the aliases) is retired: there are no
 aliases and nothing outside `G`; an access that leaves `G` traps (below). `replay_det` no longer runs it.
 
@@ -643,6 +647,11 @@ the game clock and `G` (platform words masked).
 
 ### Left
 
+- `platform/files.c` includes `dev/dev.h` and `dev/replay.h` (the open hooks: the dev log and the checkpoint's
+  file list), a dependency of the platform on the dev layer that a callback registration would remove.
+- `SURF_PRIMARY_HANDLE` (0x0104b098) is an artefact of the old emulated heap, frozen on purpose: the value is in
+  the saved image through register S (above). A new value would be harmless to the game but would change `li.save`
+  of every recording and the saves written from now on.
 - The map code still indexes its members by byte offset (`seg1_ptr`, `cursor_plane`, `hist_*`) to keep the
   unchecked-index behaviour; that is the contract of `G` and is documented where it is used.
 - `G` has words nothing reads or writes any more (the DirectDraw lock descriptor, `ddraw`, `palette_obj`,

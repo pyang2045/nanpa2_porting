@@ -23,8 +23,10 @@ addresses.
   Stage only the files you mean to commit.
 - After each fix or milestone, add a dated `NOTES.md` entry citing commit hashes and native
   addresses; record format findings in `re-notes.md`.
-- Keep the platform split: game code never includes Metal or Objective-C; everything
-  platform-specific goes behind `src/platform/present.h` (and later audio/input headers).
+- Keep the platform split: game code never includes SDL, Metal or Objective-C; everything
+  platform-specific goes behind the platform API headers in `src/platform/` (`files.h`, `surface.h`,
+  `text.h`, `window.h`, `sound.h`, `present.h`, `dialog.h`). A new host service gets a header there; the
+  game calls it directly.
 - Ask before outward or destructive actions (pushing, creating remotes, deleting files).
 
 ## Layout
