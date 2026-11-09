@@ -1,18 +1,16 @@
 /*
- * Stage 5B: start-up and shutdown (WinMain 0x402090, the CD search 0x402590,
- * DirectDraw / surfaces / fonts / timer set-up 0x402620, the shutdown
- * 0x402a20) and the window procedure 0x4021c0 with its repaint 0x402570.
+ * Start-up and shutdown (WinMain 0x402090, the CD search 0x402590, the display, sound, fonts and
+ * timer set-up 0x402620, the shutdown 0x402a20) and the window procedure 0x4021c0 with its repaint
+ * 0x402570.
  *
- * WinMain registers the window class, opens a full-screen window, looks for
- * the game CD, plays the logo (the HLE 0x401e20), sets the display up, runs
- * the script VM (game_vm_run) and tears everything down when the VM ends.
- *
- * Windows APIs and DirectDraw methods are called as the native code calls
- * them (hle_invoke through the import table and the objects' vtables), so
- * src/hle serves them unchanged. Semantics: re-notes.md "Start-up" and
+ * game_main opens the window, looks for the game CD, plays the logo, sets the display up, runs the
+ * script VM (game_vm_run) and tears everything down when the VM ends. The window, the display
+ * (surfaces and palette), the fonts, the timer and the sound are the platform's (src/platform):
+ * the surfaces are named by handles kept in G.rt.surface. Semantics: re-notes.md "Start-up" and
  * "Window procedure".
  */
 #include <stdio.h>
+#include <string.h>
 
 #include "game/ctl.h"
 #include "game/startup.h"
@@ -22,90 +20,17 @@
 #include "hle/logo.h"
 #include "platform/files.h"
 #include "platform/sound.h"
+#include "platform/surface.h"
+#include "platform/window.h"
 #include "x86/x86.h"
 
-/* import address table slots (the loaded image's .idata) */
-#define IAT_DDRAWCREATE 0x41b000u
-#define IAT_DELETEOBJECT 0x41b010u
-#define IAT_CREATEFONT 0x41b018u
-#define IAT_GETSTOCKOBJECT 0x41b01cu
-#define IAT_SHOWCURSOR 0x41b11cu
-#define IAT_GETSYSMETRICS 0x41b134u
-#define IAT_POSTQUIT 0x41b140u
-#define IAT_DESTROYWINDOW 0x41b144u
-#define IAT_LOADICON 0x41b148u
-#define IAT_LOADCURSOR 0x41b14cu
-#define IAT_REGISTERCLASS 0x41b150u
-#define IAT_CREATEWINDOW 0x41b154u
-#define IAT_MESSAGEBOX 0x41b158u
-#define IAT_SHOWWINDOW 0x41b15cu
-#define IAT_UPDATEWINDOW 0x41b160u
-#define IAT_SETFOCUS 0x41b164u
-#define IAT_DEFWINDOWPROC 0x41b168u
-#define IAT_TIMESETEVENT 0x41b178u
-#define IAT_TIMEKILLEVENT 0x41b17cu
-
-/* COM vtable offsets */
-#define DD_RELEASE 0x08u
-#define DD_CREATEPALETTE 0x14u
-#define DD_CREATESURFACE 0x18u
-#define DD_SETCOOPERATIVELEVEL 0x50u
-#define DD_SETDISPLAYMODE 0x54u
-#define SURF_LOCK 0x64u
-#define SURF_RESTORE 0x6cu
-#define SURF_SETCOLORKEY 0x74u
-#define SURF_SETPALETTE 0x7cu
-#define SURF_UNLOCK 0x80u
-#define PAL_RELEASE 0x08u
-#define DD_WAITVBLANK 0x58u
-
 /* the game's globals */
-#define HWND_MAIN 0x4ab05cu
 #define CD_PREFIX 0x431030u    /* "X:\" of the CD found, or empty */
-#define DDRAW 0x4ac4f0u
-#define PALETTE_OBJ 0x4ac4f4u
 #define SURFACES 0x44629eu     /* u32[4]: 0 the screen, 1-3 off-screen */
 #define PITCHES 0x4462aeu
-#define SCRATCH_SURFACE 0x4ab058u
-#define SURFACE_DESC 0x4ac480u
-#define DESC_FLAGS (SURFACE_DESC + 4)
-#define DESC_HEIGHT (SURFACE_DESC + 8)
-#define DESC_WIDTH (SURFACE_DESC + 12)
-#define DESC_PITCH (SURFACE_DESC + 16)
-#define DESC_CAPS (SURFACE_DESC + 0x68)
-#define PALETTE_ENTRIES 0x4ac07cu /* 256 x 4 bytes */
-#define FONTS 0x4ac070u         /* u32[3] */
 
-#define WND_CLASS 0x431160u
-#define ICON_NAME 0x431168u
-#define FONT_FACE 0x4311a0u
 #define MSG_NO_CD 0x431140u
 #define MSG_NO_CD_TITLE 0x431158u
-#define MSG_DD_ERROR 0x4311c4u
-#define MSG_MODE_ERROR 0x4311a8u
-#define MSG_TITLE_ERROR 0x4311e0u
-#define LOGO_ARG 0x431134u
-
-
-/* ---- calls into imports and COM objects */
-
-static uint32_t stdcall(uint32_t fn, int n, const uint32_t *a)
-{
-	return hle_invoke(fn, n, a);
-}
-
-#define IMPORT(slot, ...) stdcall(rd32(slot), (int)(sizeof((uint32_t[]){ __VA_ARGS__ }) / 4), \
-	(const uint32_t[]){ __VA_ARGS__ })
-/* method at vtable offset `off` of obj; obj is the first argument */
-#define COM(obj, off, ...) stdcall(rd32(rd32(obj) + (off)), \
-	(int)(sizeof((uint32_t[]){ (obj), __VA_ARGS__ }) / 4), (const uint32_t[]){ (obj), __VA_ARGS__ })
-#define COM1(obj, off) stdcall(rd32(rd32(obj) + (off)), 1, (const uint32_t[]){ (obj) })
-
-/* a cdecl call of a routine in the C runtime replacement */
-static uint32_t cdecl_call(uint32_t addr, int n, const uint32_t *a)
-{
-	return hle_invoke(addr, n, a);
-}
 
 /* ---- the CD search (0x402590) ---- */
 
@@ -137,166 +62,68 @@ static uint32_t cd_search(void)
 
 /* ---- display, sound and timer set-up (0x402620) ---- */
 
-static void message_box(uint32_t text, uint32_t title)
-{
-	IMPORT(IAT_MESSAGEBOX, 0, text, title, 0x10);
-}
+#define COLOUR_KEY 8u /* the transparent colour of the surfaces */
 
-/* Returns 1, or 0 after a message box when DirectDraw cannot be set up. */
-static uint32_t display_init(void)
+/* The screen (a 640x480 8-bit surface; letterboxed: the picture sits 40 lines down), the
+ * all-black palette, three off-screen 640x400 surfaces, the 640x480 scratch surface for text,
+ * the three fonts (15, 24 and 32 pixels, Big5) and the 16 ms timer. */
+static void display_init(void)
 {
-	uint32_t esp = cpu.r[ESP];
-	cpu.r[ESP] -= 8; /* the colour key {8, 8} */
-	uint32_t key = cpu.r[ESP];
-	IMPORT(IAT_SHOWCURSOR, 1);
-	/* DirectSound: the HLE 0x402ad0 (cdecl, the window) */
+	win_show_cursor(1);
 	sound_init();
-	if (IMPORT(IAT_DDRAWCREATE, 0, DDRAW, 0) != 0) {
-		message_box(MSG_DD_ERROR, MSG_TITLE_ERROR);
-		cpu.r[ESP] = esp;
-		return 0;
-	}
-	uint32_t dd = SC(ddraw);
-	COM(dd, DD_SETCOOPERATIVELEVEL, SC(hwnd), 0x11);
-	dd = SC(ddraw);
-	if (COM(dd, DD_SETDISPLAYMODE, 640, 480, 8) != 0) {
-		message_box(MSG_MODE_ERROR, MSG_TITLE_ERROR);
-		cpu.r[ESP] = esp;
-		return 0;
-	}
-	/* the screen: a primary surface */
 	SC_SET(letterbox, 1);
-	wr32(SURFACE_DESC, 0x6c);
-	wr32(DESC_FLAGS, 1);
-	wr32(DESC_CAPS, 0x200);
-	dd = SC(ddraw);
-	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES, 0);
-	uint32_t screen = rd32(SURFACES);
-	COM1(screen, SURF_RESTORE);
-	COM(screen, SURF_LOCK, 0, SURFACE_DESC, 1, 0);
-	wr32(PITCHES, rd32(DESC_PITCH));
-	COM(screen, SURF_UNLOCK, 0);
-	/* transparent colour 8 */
-	wr32(key, 8);
-	wr32(key + 4, 8);
-	COM(screen, SURF_SETCOLORKEY, 8, key);
-	/* the palette: all black, shared by the screen */
-	for (uint32_t i = 0; i < 256; i++)
-		wr32(PALETTE_ENTRIES + 4 * i, 0);
-	dd = SC(ddraw);
-	COM(dd, DD_CREATEPALETTE, 0x44, PALETTE_ENTRIES, PALETTE_OBJ, 0);
-	COM(rd32(SURFACES), SURF_SETPALETTE, SC(palette_obj));
-	/* three off-screen surfaces 640 x 400 (system memory, colour key 8) */
-	wr32(DESC_FLAGS, 7);
-	wr32(DESC_CAPS, 0x840);
-	wr32(DESC_WIDTH, 640);
-	wr32(DESC_HEIGHT, 400);
+	int pitch;
+	uint32_t screen = surf_create(640, 480, 1);
+	G.rt.surface[0] = screen;
+	surf_lock(screen, &pitch);
+	G.rt.pitch[0] = (uint32_t)pitch;
+	surf_set_colorkey(screen, 1, COLOUR_KEY, COLOUR_KEY);
+	memset(G.sc.pal_entries, 0, sizeof G.sc.pal_entries);
+	pal_set(0, 256, G.sc.pal_entries);
 	for (uint32_t i = 0; i < 3; i++) {
-		dd = SC(ddraw);
-		COM(dd, DD_CREATESURFACE, SURFACE_DESC, SURFACES + 4 + 4 * i, 0);
-		COM(rd32(SURFACES + 4 + 4 * i), SURF_SETCOLORKEY, 8, key);
-		wr32(PITCHES + 4 + 4 * i, 640);
+		uint32_t s = surf_create(640, 400, 0);
+		G.rt.surface[1 + i] = s;
+		surf_set_colorkey(s, 1, COLOUR_KEY, COLOUR_KEY);
+		G.rt.pitch[1 + i] = 640;
 	}
-	/* the 640 x 480 scratch surface the text is drawn into */
-	wr32(DESC_HEIGHT, 480);
-	dd = SC(ddraw);
-	COM(dd, DD_CREATESURFACE, SURFACE_DESC, SCRATCH_SURFACE, 0);
-	/* fonts by size: 15, 24 and 32 pixels, Big5 */
-	static const struct { int32_t height, weight; } fonts[3] = { { -15, 700 }, { -24, 700 }, { -32, 400 } };
-	for (int i = 0; i < 3; i++) {
-		uint32_t f = IMPORT(0x41b018, (uint32_t)fonts[i].height, 0, 0, 0, (uint32_t)fonts[i].weight, 0, 0, 0,
-		                    0x88, 0, 0, 0, 0, FONT_FACE);
-		wr32(FONTS + 4 * (uint32_t)i, f);
-	}
-	/* the 16 ms timer: the callback 0x4028c0 is the HLE */
-	SC_SET(timer_id, IMPORT(IAT_TIMESETEVENT, 0x10, 0x10, 0x4028c0, 0, 1));
-	IMPORT(IAT_SHOWCURSOR, 0);
-	cpu.r[ESP] = esp;
-	return 1;
+	SC_SET(scratch_surface, surf_create(640, 480, 0));
+	static const struct { int height, weight; } fonts[3] = { { -15, 700 }, { -24, 700 }, { -32, 400 } };
+	for (int i = 0; i < 3; i++)
+		G.sc.font[i] = text_font_create(fonts[i].height, fonts[i].weight);
+	win_timer_start();
+	win_show_cursor(0);
 }
 
 /* ---- shutdown (0x402a20) ---- */
 
-static void release_at(uint32_t slot)
-{
-	uint32_t obj = rd32(slot);
-	if (obj) {
-		COM1(obj, DD_RELEASE);
-		wr32(slot, 0);
-	}
-}
-
 static void shutdown(void)
 {
-	if (SC(timer_id))
-		IMPORT(IAT_TIMEKILLEVENT, SC(timer_id));
-	for (int i = 2; i >= 0; i--)
-		IMPORT(IAT_DELETEOBJECT, rd32(FONTS + 4 * (uint32_t)i));
-	release_at(PALETTE_OBJ);
-	release_at(SCRATCH_SURFACE);
-	for (uint32_t i = 0; i < 4; i++) {
-		release_at(SURFACES + 4 * i);
-	}
-	release_at(DDRAW);
-	/* DirectSound: the HLE 0x402c70 */
+	win_timer_stop();
+	/* the surfaces, palette and fonts go with the process */
 	sound_shutdown();
-	IMPORT(IAT_SHOWCURSOR, 1);
+	win_show_cursor(1);
 }
 
 /* ---- WinMain (0x402090) ---- */
 
-/* 0x402090: register the window class, create the window, find the CD,
- * play the logo (HLE), set the display up, show the window, run the script
- * VM (0x4060d4) and shut down when it ends. Returns WinMain's result: -1 the
- * class could not be registered, 0 no CD or no display, 1 the game ran.
- * The emulated stack keeps the native frame (4 argument and return words, the
- * 40-byte WNDCLASS, the saved EDI). */
-uint32_t game_main(uint32_t hinst)
+/* 0x402090: open the window, find the CD, play the logo, set the display up, show the window, run
+ * the script VM (0x4060d4) and shut down when it ends. Returns WinMain's result: 0 no CD, 1 the
+ * game ran. */
+uint32_t game_main(void)
 {
-	uint32_t esp0 = cpu.r[ESP];
-	uint32_t wc = esp0 - 8 - 0x28;
-	cpu.r[ESP] = wc - 4;
-	SC_SET(hinstance, hinst);
-	/* the class: style 0, window procedure 0x4021c0, no extra bytes */
-	wr32(wc + 0, 0);
-	wr32(wc + 4, 0x4021c0);
-	wr32(wc + 8, 0);
-	wr32(wc + 12, 0);
-	wr32(wc + 16, hinst);
-	wr32(wc + 20, IMPORT(IAT_LOADICON, hinst, ICON_NAME));
-	wr32(wc + 24, IMPORT(IAT_LOADCURSOR, 0, 0x7f00));
-	wr32(wc + 28, IMPORT(IAT_GETSTOCKOBJECT, 4));
-	wr32(wc + 32, 0);
-	wr32(wc + 36, WND_CLASS);
-	uint32_t result;
-	if ((IMPORT(IAT_REGISTERCLASS, wc) & 0xffff) == 0) {
-		result = 0xffffffffu;
-		goto leave;
-	}
-	uint32_t height = IMPORT(IAT_GETSYSMETRICS, 1);
-	uint32_t width = IMPORT(IAT_GETSYSMETRICS, 0);
-	wr32(HWND_MAIN, IMPORT(IAT_CREATEWINDOW, 0, WND_CLASS, WND_CLASS, 0x80000000u, 0, 0, width, height, 0, 0,
-	                       SC(hinstance), 0));
+	static const struct win_handlers handlers = { game_wndproc, game_timer_tick };
+	win_open(&handlers);
 	if (!cd_search()) {
-		message_box(MSG_NO_CD, MSG_NO_CD_TITLE);
-		result = 0;
-		goto leave;
+		win_message_box((const char *)x86_ptr(MSG_NO_CD, 1), (const char *)x86_ptr(MSG_NO_CD_TITLE, 1));
+		return 0;
 	}
-	win32_show_cursor(0); /* the first thing the logo player does, whether or not a movie plays */
+	win_show_cursor(0); /* the first thing the logo player does, whether or not a movie plays */
 	logo_play();
-	uint32_t ok = display_init();
-	if (!ok) {
-		result = 0;
-		goto leave;
-	}
-	IMPORT(IAT_SHOWWINDOW, SC(hwnd), 5);
-	IMPORT(IAT_UPDATEWINDOW, SC(hwnd));
+	display_init();
+	win_show();
 	game_vm_run();
 	shutdown();
-	result = 1;
-leave:
-	cpu.r[ESP] = esp0;
-	return result;
+	return 1;
 }
 
 /* ---- the window procedure (0x4021c0) ---- */
@@ -329,15 +156,9 @@ static void voice_stop(void)
  * again). The cursor routines are native until the screen module is C. */
 static void paint(void)
 {
-	uint32_t dd = SC(ddraw);
-	COM(dd, DD_WAITVBLANK, 1, 0);
+	screen_wait_vblank();
 	game_cursor_restore();
 	game_cursor_draw();
-}
-
-static void host_call(uint32_t slot, int n, const uint32_t *a)
-{
-	stdcall(rd32(slot), n, a);
 }
 
 /* The window procedure, stdcall (hwnd, msg, wparam, lparam): returns the
@@ -386,7 +207,7 @@ uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lpa
 		if (wparam - 0xd > 0x63)
 			goto done;
 		if (wparam == 0x70) { /* F1 */
-			host_call(IAT_DESTROYWINDOW, 1, (const uint32_t[]){ SC(hwnd) });
+			win_post(WM_QUIT, 0, 0); /* DestroyWindow */
 			goto done;
 		}
 		uint32_t bit = key_bit(wparam);
@@ -408,7 +229,7 @@ uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lpa
 		goto done;
 	}
 	if (msg == 2) { /* WM_DESTROY */
-		host_call(IAT_POSTQUIT, 1, (const uint32_t[]){ 0 });
+		win_post(WM_QUIT, 0, 0); /* PostQuitMessage */
 		goto done;
 	}
 	if (msg != 0x1c) /* WM_ACTIVATEAPP */
@@ -423,11 +244,10 @@ uint32_t game_wndproc(uint32_t hwnd, uint32_t msg, uint32_t wparam, uint32_t lpa
 	if (SC(paused)) {
 		sound_music_pause(0);
 	}
-	host_call(IAT_SETFOCUS, 1, (const uint32_t[]){ hwnd });
 	SC_SET(active, 1);
 	goto done;
-def:
-	result = stdcall(rd32(IAT_DEFWINDOWPROC), 4, (const uint32_t[]){ hwnd, msg, wparam, lparam });
+def: /* DefWindowProc: nothing the game needs */
+	result = 0;
 done:
 	return result;
 }

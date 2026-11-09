@@ -71,7 +71,7 @@ void clock_work(uint32_t us)
 	if (now - last >= 8) { /* the host's own service, as the timer thread and DirectDraw did */
 		last = now;
 		status_main();
-		ddraw_present(0);
+		screen_present(0);
 		SDL_PumpEvents();
 	}
 }

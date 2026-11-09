@@ -16,80 +16,56 @@
 #include "game/vm.h"
 #include "x86/x86.h"
 #include "game/state.h"
+#include "hle/hle.h"
 
 
-#define SURFACES 0x44629eu     /* u32[]: surface objects, [0] the screen */
-#define PITCHES 0x4462aeu      /* u32[]: their pitches */
 #define SCRATCH_PITCH 0x280u
-#define FONTS 0x4ac070u        /* u32[4]: font handles by size */
-
-/* imports and COM methods the native code calls (IAT slots, vtable
- * offsets) */
-#define IAT_TEXTOUT 0x41b014u
-#define IAT_SELECTOBJECT 0x41b020u
-#define IAT_SETTEXTCOLOR 0x41b024u
-#define IAT_SETBKCOLOR 0x41b028u
-#define IAT_SETBKMODE 0x41b02cu
-#define SURFACE_GETDC 0x44u
-#define SURFACE_RELEASEDC 0x68u
-#define BK_OPAQUE 2u
 
 /* 0x401900: draw character c (Big5 if bit 15 is set, high byte first; else
  * ASCII) with its top left at pixel (x, y) of the screen in font size & 3,
  * as an opaque cell of N x N pixels, N = 8 * (size & 3) + 16: fg where the
  * glyph is, bg elsewhere (the low bytes of the colours are stored). The
  * cell is copied from the scratch surface, whose rows are cleared again (32
- * bytes each) on the way. The character string and the device context the
- * GDI calls use live in two words of the emulated stack (the HLE boundary,
- * until R4). */
+ * bytes each) on the way. The glyph is drawn by the platform's text call into the
+ * scratch surface (white on black, opaque, at (0, 0)); the pacing model charges
+ * the cell copy and, for the original's GDI TextOut, a time a character. */
 void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t fg, uint8_t bg)
 {
 	ctl_tlog("ch", c);
-	uint32_t f = game_frame_alloc(8);
-	uint32_t str = f + 4, dc_at = f;
+	uint8_t str[2];
 	uint32_t len;
 	if (c & 0x8000) {
-		wr8(str, c >> 8);
-		wr8(str + 1, c);
-		wr8(str + 2, 0);
+		str[0] = (uint8_t)(c >> 8);
+		str[1] = (uint8_t)c;
 		len = 2;
 	} else {
-		wr8(str, c);
-		wr8(str + 1, 0);
+		str[0] = (uint8_t)c;
 		len = 1;
 	}
 	size &= 3;
 	uint32_t n = 8 * size + 16;
 	ctl_work_us(PACE_CELL_US(n));
-	uint32_t scratch = SC(scratch_surface), vtbl = rd32(scratch);
+	uint32_t scratch = SC(scratch_surface);
 
 	/* the glyph, white on black, at (0, 0) of the scratch surface */
-	HLE(rd32(vtbl + SURFACE_GETDC), scratch, dc_at);
-	uint32_t dc = rd32(dc_at);
-	HLE(rd32(IAT_SELECTOBJECT), dc, rd32(FONTS + 4 * size));
-	HLE(rd32(IAT_SETTEXTCOLOR), dc, 0xf0f0f0);
-	HLE(rd32(IAT_SETBKCOLOR), dc, 0);
-	HLE(rd32(IAT_SETBKMODE), dc, BK_OPAQUE);
-	HLE(rd32(IAT_TEXTOUT), dc, 0, 0, str, len);
-	HLE(rd32(vtbl + SURFACE_RELEASEDC), scratch, dc);
+	ctl_work_us(PACE_GLYPH_US * len);
+	text_draw(scratch, 0, 0, SC(font[size]), str, (int)len, 0xf0f0f0, 0, 1);
 
 	/* the cell, from the scratch surface to the screen */
 	uint32_t screen = G.rt.surface[0];
-	uint32_t src = game_surface_lock(scratch);
-	uint32_t dst = game_surface_lock(screen) + G.rt.pitch[0] * y + x;
+	uint8_t *s = game_surface_lock(scratch);
+	uint8_t *d = game_surface_lock(screen) + G.rt.pitch[0] * y + x;
 	for (uint32_t row = 0; row < n; row++) {
-		uint8_t *s = x86_ptr(src, 32 > n ? 32 : n), *d = x86_ptr(dst, n);
 		for (uint32_t col = 0; col < n; col++) {
 			int on = s[col] != 0;
 			d[col] = on ? fg : bg;
 		}
 		memset(s, 0, 32);
-		src += SCRATCH_PITCH;
-		dst += G.rt.pitch[0];
+		s += SCRATCH_PITCH;
+		d += G.rt.pitch[0];
 	}
 	game_surface_unlock(scratch);
 	game_surface_unlock(G.rt.surface[0]);
-	game_frame_free(8);
 }
 
 /* 0x406415: the cursor to the start of the next line, or of the window's

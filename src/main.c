@@ -221,10 +221,9 @@ static int run_game(const char *game, const char *exe, const char *font)
 		clock_init(0); /* a replay runs as fast as the host can */
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
-	uint32_t hinstance = MEM_BASE;
 	uint64_t t0 = SDL_GetPerformanceCounter();
 	x86_unaliased_snapshot();
-	game_main(hinstance);
+	game_main();
 	if (x86_unaliased_check() && atoi(getenv("NANPA2_DATA_CHECK")) >= 2)
 		return 4;
 	replay_finish();

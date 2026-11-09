@@ -372,11 +372,8 @@ static uint32_t misc_row_swap(void)
 	uint32_t y = rd16(ARG(1));
 	uint64_t m0 = (uint64_t)y * rd32(0x4462ae), m1 = (uint64_t)y * rd32(0x4462b2);
 	uint32_t off0 = (uint32_t)m0 + 0x40, off1 = (uint32_t)m1 + 0x40;
-	uint32_t esi = game_surface_lock(rd32(0x44629e));
-	uint32_t edi = game_surface_lock(rd32(0x4462a2));
-	edi += off1;
-	esi += off0;
-	uint8_t *pa = x86_ptr(esi, 0x200), *pb = x86_ptr(edi, 0x200);
+	uint8_t *pa = game_surface_lock(rd32(0x44629e)) + off0;
+	uint8_t *pb = game_surface_lock(rd32(0x4462a2)) + off1;
 	for (int i = 0; i < 0x80; i++) {
 		uint32_t a, b;
 		memcpy(&a, pa + 4 * i, 4);

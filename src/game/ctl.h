@@ -42,14 +42,4 @@ void ctl_pump_or_quit(void);
  * (the stack of C calls is gone, the caller finishes the unwinding). Nests. */
 int ctl_catch(void (*fn)(void *), void *arg);
 
-/* ---- the boundary to the HLE layer (R4 removes it) ----
- * Call the Win32 import, COM method, C runtime function or game unit at
- * native address `addr` as the code called it: the arguments are pushed on
- * the emulated stack (args[0] first argument), the callee runs, the stack is
- * restored (cdecl and stdcall alike), the result is EAX. No game time. */
-uint32_t hle_invoke(uint32_t addr, int nargs, const uint32_t *args);
-#define HLE(addr, ...) hle_invoke((addr), (int)(sizeof((uint32_t[]){ __VA_ARGS__ }) / 4), \
-	(const uint32_t[]){ __VA_ARGS__ })
-#define HLE0(addr) hle_invoke((addr), 0, NULL)
-
 #endif

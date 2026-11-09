@@ -12,8 +12,7 @@
 
 int ctl_pump(void)
 {
-	hle_trace_pump();
-	return win32_pump();
+	return win_pump();
 }
 
 void ctl_work_us(uint32_t us)
@@ -58,15 +57,4 @@ int ctl_catch(void (*fn)(void *), void *arg)
 	fn(arg);
 	catch_top = outer;
 	return 1;
-}
-
-uint32_t hle_invoke(uint32_t addr, int nargs, const uint32_t *args)
-{
-	uint32_t esp = cpu.r[ESP];
-	for (int i = nargs - 1; i >= 0; i--)
-		push32(args[i]);
-	push32(X86_RET_SENTINEL);
-	hle_call(addr);
-	cpu.r[ESP] = esp;
-	return cpu.r[EAX];
 }

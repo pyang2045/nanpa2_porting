@@ -186,12 +186,10 @@ uint32_t game_fade_active(void);        /* 0x401e10 */
 uint32_t game_wipe(uint32_t s0, uint32_t s1); /* 0x401a50: the dissolve wipe of op 19 4 (surfaces 0, 2); pumps; EAX of the last unlock */
 void game_palette_wait(void);           /* 0x406f41: 04 16 3 waits for the fade, restores the tables */
 
-/* surfaces, cursor, rectangles (screen.c). Surface arguments of the lock and unlock are the
- * DirectDraw objects (guest addresses); the pixel pointer is a guest address (x86_ptr). */
-uint32_t game_surface_lock(uint32_t surf);    /* 0x401190 */
+/* surfaces, cursor, rectangles (screen.c). Surface arguments of the lock and unlock are platform
+ * surface handles; the lock returns the pixels. */
+uint8_t *game_surface_lock(uint32_t surf);    /* 0x401190 */
 uint32_t game_surface_unlock(uint32_t surf);  /* 0x4012b0; EAX as the routine leaves it */
-uint32_t game_frame_alloc(uint32_t bytes); /* scratch on the emulated stack for the HLE boundary */
-void game_frame_free(uint32_t bytes);
 void game_cursor_restore(void);         /* 0x4011f0 */
 uint32_t game_cursor_draw(void);        /* 0x4012e0; the cursor's x (EAX) */
 void game_cursor_show(void);            /* 0x401c40 */

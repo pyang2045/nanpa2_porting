@@ -1,4 +1,5 @@
-/* USER32/GDI32/KERNEL32/WINMM imports, the message queue, the 16 ms timer. */
+/* Platform API: the window, the message queue, the 16 ms timer and the cursor (platform/window.h). */
+#include "platform/window.h"
 #include "hle.h"
 #include "game/ctl.h"
 #include "game/pace.h"
@@ -17,93 +18,13 @@
 #include "game/state.h"
 
 #define HWND_MAIN 0x00001000u
-#define WM_DESTROY 0x0002
-#define WM_QUIT 0x0012
-#define WM_ACTIVATEAPP 0x001c
-#define WM_KEYDOWN 0x0100
-#define WM_KEYUP 0x0101
-#define WM_MOUSEMOVE 0x0200
-#define WM_LBUTTONDOWN 0x0201
-#define WM_LBUTTONUP 0x0202
-#define WM_RBUTTONDOWN 0x0204
-#define WM_RBUTTONUP 0x0205
 
-uint32_t win32_wndproc;
+static struct win_handlers handlers;
 static int timer_on;
 static uint64_t timer_next; /* game ms (clock_timer_ms) */
 /* the native ShowCursor display counter (0 at start; shown while >= 0) */
 static int cursor_count;
 static int cursor_shown = -1, cursor_over; /* host cursor state last set */
-
-enum {
-	F_ShowCursor = 1, F_DispatchMessageA, F_TranslateMessage, F_PeekMessageA, F_SetCursorPos,
-	F_SetWindowPos, F_GetSystemMetrics, F_MsgWaitForMultipleObjects, F_PostMessageA,
-	F_PostQuitMessage, F_DestroyWindow, F_LoadIconA, F_LoadCursorA, F_RegisterClassA,
-	F_CreateWindowExA, F_MessageBoxA, F_ShowWindow, F_UpdateWindow, F_SetFocus,
-	F_DefWindowProcA, F_GetMessageA, F_SetWindowLongA,
-	F_DeleteObject, F_TextOutA, F_CreateFontA, F_GetStockObject, F_SelectObject,
-	F_SetTextColor, F_SetBkColor, F_SetBkMode,
-	F_timeSetEvent, F_timeKillEvent, F_mciSendStringA,
-	F_GetDriveTypeA, F_CreateEventA, F_CloseHandle,
-	F_DirectDrawCreate, F_DirectSoundCreate,
-};
-
-static const struct {
-	const char *name;
-	int id, nargs;
-} table[] = {
-	{ "ShowCursor", F_ShowCursor, 1 },
-	{ "DispatchMessageA", F_DispatchMessageA, 1 },
-	{ "TranslateMessage", F_TranslateMessage, 1 },
-	{ "PeekMessageA", F_PeekMessageA, 5 },
-	{ "SetCursorPos", F_SetCursorPos, 2 },
-	{ "SetWindowPos", F_SetWindowPos, 7 },
-	{ "GetSystemMetrics", F_GetSystemMetrics, 1 },
-	{ "MsgWaitForMultipleObjects", F_MsgWaitForMultipleObjects, 5 },
-	{ "PostMessageA", F_PostMessageA, 4 },
-	{ "PostQuitMessage", F_PostQuitMessage, 1 },
-	{ "DestroyWindow", F_DestroyWindow, 1 },
-	{ "LoadIconA", F_LoadIconA, 2 },
-	{ "LoadCursorA", F_LoadCursorA, 2 },
-	{ "RegisterClassA", F_RegisterClassA, 1 },
-	{ "CreateWindowExA", F_CreateWindowExA, 12 },
-	{ "MessageBoxA", F_MessageBoxA, 4 },
-	{ "ShowWindow", F_ShowWindow, 2 },
-	{ "UpdateWindow", F_UpdateWindow, 1 },
-	{ "SetFocus", F_SetFocus, 1 },
-	{ "DefWindowProcA", F_DefWindowProcA, 4 },
-	{ "GetMessageA", F_GetMessageA, 4 },
-	{ "SetWindowLongA", F_SetWindowLongA, 3 },
-	{ "DeleteObject", F_DeleteObject, 1 },
-	{ "TextOutA", F_TextOutA, 5 },
-	{ "CreateFontA", F_CreateFontA, 14 },
-	{ "GetStockObject", F_GetStockObject, 1 },
-	{ "SelectObject", F_SelectObject, 2 },
-	{ "SetTextColor", F_SetTextColor, 2 },
-	{ "SetBkColor", F_SetBkColor, 2 },
-	{ "SetBkMode", F_SetBkMode, 2 },
-	{ "timeSetEvent", F_timeSetEvent, 5 },
-	{ "timeKillEvent", F_timeKillEvent, 1 },
-	{ "mciSendStringA", F_mciSendStringA, 4 },
-	{ "GetDriveTypeA", F_GetDriveTypeA, 1 },
-	{ "CreateEventA", F_CreateEventA, 4 },
-	{ "CloseHandle", F_CloseHandle, 1 },
-	{ "DirectDrawCreate", F_DirectDrawCreate, 3 },
-	{ "#1", F_DirectSoundCreate, 3 },
-};
-
-uint32_t win32_import(const char *dll, const char *name, int *nargs, int *known)
-{
-	for (size_t i = 0; i < sizeof table / sizeof table[0]; i++)
-		if (!strcmp(table[i].name, name)) {
-			*nargs = table[i].nargs;
-			*known = 1;
-			return (uint32_t)table[i].id;
-		}
-	*nargs = 0;
-	*known = 0;
-	return 0;
-}
 
 /* ---- message queue ---- */
 
@@ -190,7 +111,7 @@ void win32_cursor_update(void)
 	}
 }
 
-int win32_show_cursor(int show)
+int win_show_cursor(int show)
 {
 	cursor_count += show ? 1 : -1;
 	win32_cursor_update();
@@ -310,10 +231,9 @@ static int pop_message(struct msg *m)
 
 static uint32_t dispatch(const struct msg *m)
 {
-	if (!win32_wndproc)
+	if (!handlers.wndproc)
 		return 0;
-	uint32_t args[4] = { HWND_MAIN, m->msg, m->wparam, m->lparam };
-	uint32_t r = game_wndproc(args[0], args[1], args[2], args[3]);
+	uint32_t r = handlers.wndproc(HWND_MAIN, m->msg, m->wparam, m->lparam);
 	if (getenv("NANPA2_MSGLOG") && m->msg != WM_MOUSEMOVE)
 		fprintf(stderr, "msg %04x %x -> state %02x frame %u\n", m->msg, m->wparam,
 			RT(input_bits), RT(frame));
@@ -321,8 +241,6 @@ static uint32_t dispatch(const struct msg *m)
 }
 
 /* ---- timer ---- */
-
-void hle_timer_callback(void);
 
 int win32_timer_running(void)
 {
@@ -345,7 +263,7 @@ void win32_run_timer(void)
 	/* at most 8 ticks of catching up (more at higher speeds) */
 	int n = 0, max = 8 * (clock_speed() > 1 ? (int)clock_speed() + 1 : 1);
 	while (now >= timer_next && n < max) {
-		hle_timer_callback();
+		handlers.timer();
 		timer_ticks++;
 		timer_next += 16;
 		n++;
@@ -380,7 +298,7 @@ void x86_probe(uint32_t pc)
 }
 
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
-int win32_pump(void)
+int win_pump(void)
 {
 	/* PeekMessage on Windows 95 costs a 486 some hundreds of instructions;
 	 * charging it keeps the throttle from running the game's pump loops
@@ -390,7 +308,7 @@ int win32_pump(void)
 	clock_throttle();
 	win32_run_timer();
 	replay_pump();
-	ddraw_present(0);
+	screen_present(0);
 	/* the host event queue at most once a millisecond (deterministic mode:
 	 * collect_events counts pumps instead) */
 	static uint32_t last_collect;
@@ -408,152 +326,47 @@ int win32_pump(void)
 	return 1;
 }
 
-void win32_init(void)
+uint32_t win_open(const struct win_handlers *h)
 {
-	cursor_count = 0;
-	cursor_shown = -1;
+	handlers = *h;
+	return HWND_MAIN;
 }
 
-int win32_call_import(int id)
+void win_show(void)
 {
-	uint32_t r = 0;
-	switch (id) {
-	case F_ShowCursor:
-		r = (uint32_t)win32_show_cursor(hle_arg(0) != 0);
-		break;
-	case F_SetCursorPos: {
-		/* screen coordinates of the 640x480 display */
-		SDL_Window *w = SDL_GetMouseFocus();
-		if (w) {
-			int x, y;
-			present_screen_to_window((int)hle_arg(0), (int)hle_arg(1), &x, &y);
-			SDL_WarpMouseInWindow(w, x, y);
-		}
-		r = 1;
-		break;
+	/* Windows activates the new full-screen window; the game only runs its timer after
+	 * WM_ACTIVATEAPP */
+	win32_post_message(WM_ACTIVATEAPP, 1, 0);
+}
+
+void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
+{
+	win32_post_message(msg, wparam, lparam);
+}
+
+void win_timer_start(void)
+{
+	timer_on = 1;
+	timer_next = clock_timer_ms() + 16;
+}
+
+void win_timer_stop(void)
+{
+	timer_on = 0;
+}
+
+void win_warp_cursor(int x, int y)
+{
+	/* screen coordinates of the 640x480 display */
+	SDL_Window *w = SDL_GetMouseFocus();
+	if (w) {
+		int wx, wy;
+		present_screen_to_window(x, y, &wx, &wy);
+		SDL_WarpMouseInWindow(w, wx, wy);
 	}
-	case F_GetSystemMetrics:
-		r = hle_arg(0) == 0 ? SCREEN_W : hle_arg(0) == 1 ? SCREEN_H : 0;
-		break;
-	case F_PostMessageA:
-		win32_post_message(hle_arg(1), hle_arg(2), hle_arg(3));
-		r = 1;
-		break;
-	case F_PostQuitMessage:
-	case F_DestroyWindow:
-		win32_post_message(WM_QUIT, 0, 0);
-		r = 1;
-		break;
-	case F_PeekMessageA: {
-		/* only the logo player's loop would use these; never reached */
-		r = 0;
-		break;
-	}
-	case F_GetMessageA:
-		r = 0;
-		break;
-	case F_ShowWindow:
-		/* Windows activates the new full-screen window; the game only runs
-		 * its timer (0x4ac4ec) after WM_ACTIVATEAPP */
-		win32_post_message(WM_ACTIVATEAPP, 1, 0);
-		r = 0;
-		break;
-	case F_DispatchMessageA:
-	case F_TranslateMessage:
-	case F_SetWindowPos:
-	case F_UpdateWindow:
-	case F_SetFocus:
-	case F_DefWindowProcA:
-	case F_SetWindowLongA:
-	case F_MsgWaitForMultipleObjects:
-		r = 0;
-		break;
-	case F_LoadIconA:
-	case F_LoadCursorA:
-		r = 0x2000;
-		break;
-	case F_RegisterClassA:
-		win32_wndproc = rd32(hle_arg(0) + 4);
-		r = 0xc000;
-		break;
-	case F_CreateWindowExA:
-		r = HWND_MAIN;
-		break;
-	case F_MessageBoxA: {
-		char text[256], title[64];
-		hle_strcpy_in(text, hle_arg(1), sizeof text);
-		hle_strcpy_in(title, hle_arg(2), sizeof title);
-		fprintf(stderr, "MessageBox (Big5) %s: %s\n", title, text);
-		r = 1;
-		break;
-	}
-	case F_DeleteObject:
-		r = 1;
-		break;
-	case F_TextOutA:
-		/* emulated CPU time: GDI TrueType text on Windows 95 / 486, about
-		 * 0.2 ms a (cached) glyph */
-		ctl_work_us(PACE_GLYPH_US * hle_arg(4));
-		text_out(hle_arg(0), (int)hle_arg(1), (int)hle_arg(2), hle_arg(3), (int)hle_arg(4));
-		r = 1;
-		break;
-	case F_CreateFontA:
-		r = text_create_font((int)hle_arg(0), (int)hle_arg(4));
-		break;
-	case F_GetStockObject:
-		r = 0x3000 + hle_arg(0);
-		break;
-	case F_SelectObject:
-		text_select(hle_arg(0), hle_arg(1));
-		r = 0;
-		break;
-	case F_SetTextColor:
-		text_set_color(hle_arg(0), hle_arg(1), 0xffffffffu, -1);
-		r = 0;
-		break;
-	case F_SetBkColor:
-		text_set_color(hle_arg(0), 0xffffffffu, hle_arg(1), -1);
-		r = 0;
-		break;
-	case F_SetBkMode:
-		text_set_color(hle_arg(0), 0xffffffffu, 0xffffffffu, (int)hle_arg(1));
-		r = 1;
-		break;
-	case F_timeSetEvent:
-		timer_on = 1;
-		timer_next = clock_timer_ms() + 16;
-		r = 1;
-		break;
-	case F_timeKillEvent:
-		timer_on = 0;
-		r = 0;
-		break;
-	case F_mciSendStringA:
-		r = 1; /* MCIERR: the logo movie is skipped */
-		break;
-	case F_GetDriveTypeA: {
-		/* the game folder is the CD in drive Q: */
-		char root[8];
-		hle_strcpy_in(root, hle_arg(0), sizeof root);
-		r = ((root[0] | 0x20) == 'q') ? 5 /* DRIVE_CDROM */ : 1 /* DRIVE_NO_ROOT_DIR */;
-		break;
-	}
-	case F_CreateEventA:
-		r = 0x4000;
-		break;
-	case F_CloseHandle:
-		r = 1;
-		break;
-	case F_DirectDrawCreate:
-		wr32(hle_arg(1), ddraw_create());
-		r = 0;
-		break;
-	case F_DirectSoundCreate:
-		r = 0x80004005u; /* E_FAIL: sound goes through sound.c */
-		break;
-	default:
-		return 0;
-	}
-	cpu.r[EAX] = r;
-	return 1;
+}
+
+void win_message_box(const char *text, const char *title)
+{
+	fprintf(stderr, "MessageBox (Big5) %s: %s\n", title, text);
 }

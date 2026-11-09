@@ -175,7 +175,7 @@ static int build_cp(char *out, size_t cap)
 	static uint8_t frame[640 * 480];
 	static uint32_t pal[256];
 	uint64_t hs = 0, hp = 0;
-	if (ddraw_snapshot(frame, pal)) {
+	if (screen_snapshot(frame, pal)) {
 		hs = replay_hash(frame, sizeof frame, 0);
 		hp = replay_hash(pal, sizeof pal, 0);
 	}

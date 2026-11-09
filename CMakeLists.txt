@@ -47,6 +47,7 @@ set(GAME_SOURCES
   src/game/wipe.c
   src/game/state_view.c
   src/game/state.c
+  src/game/timer.c
 )
 
 set(SOURCES
@@ -62,7 +63,7 @@ set(SOURCES
   src/platform/files.c
   src/hle/win32.c
   src/hle/clock.c
-  src/hle/ddraw.c
+  src/platform/surface.c
   src/hle/text.c
   src/hle/logo.c
   src/cinepak.c
