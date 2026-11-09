@@ -52,12 +52,14 @@ SDL2. Game code never includes SDL, Metal or Objective-C.
   `dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
 - `src/dev/`: `replay.c` (deterministic mode, `--record`/`--replay`, state checkpoints), `explore.c` (the
   exploration bot), `dev.c` (scripted input, screenshots, `NANPA2_SAVETEST`), `status.c` (live status file).
-- `src/`: `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
+- `src/`: `hooks.[ch]` (the dev hook table: the only way `platform/` and `trap.c` reach `dev/`; `dev_install_hooks`
+  in `dev/dev.c` fills it from `main`; nothing outside `dev/` and `main.c` includes a `dev/` header, test `headers`),
+  `hash.[ch]` (the checkpoint hash), `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
   `launch.c` (game folder lookup, remembered path, log file for Finder launches), `main.c`.
 - `tools/`: `build.sh`, `build_msys2.sh`, `bundle_macos.sh` (target `nanpa2_app`: `build/同級生２.app` with
   SDL inside), `replay_diff.py`, `explore.py`, `gp4png.py`, `lzh.py`, `sheet.py`, `peek.py`, `disasm.py`
   (table-aware objdump to `decomp/game.asm`), `timing_stats.py`; `ghidra_scripts/DecompileAll.java`;
-  `tests/` (ctest: selftest, replay_det, wavcheck, no_game_bytes, standalone, smoke, decode_all);
+  `tests/` (ctest: headers, selftest, replay_det, wavcheck, no_game_bytes, standalone, smoke, decode_all);
   `third_party/` (stb_truetype, minimp3, public domain).
 
 The save files (`FLAGn`, 0xc00 bytes) are `G.save` in the original's byte layout, written and read only

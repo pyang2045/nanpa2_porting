@@ -678,8 +678,6 @@ the game clock and `G` (platform words masked).
 
 ### Left
 
-- `platform/files.c` includes `dev/dev.h` and `dev/replay.h` (the open hooks: the dev log and the checkpoint's
-  file list), a dependency of the platform on the dev layer that a callback registration would remove.
 - `SURF_PRIMARY_HANDLE` (0x0104b098) is an artefact of the old emulated heap, frozen on purpose: the value is in
   the saved image through register S (above). A new value would be harmless to the game but would change `li.save`
   of every recording and the saves written from now on.

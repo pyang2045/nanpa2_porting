@@ -5,8 +5,7 @@
 #include "platform/surface.h"
 #include "platform/window.h"
 #include "platform/present.h"
-#include "dev/replay.h"
-#include "dev/status.h"
+#include "hooks.h"
 
 static double speed = 1.0;
 static uint64_t vclock;           /* virtual microseconds */
@@ -37,7 +36,7 @@ void clock_add(uint32_t us)
 
 uint64_t clock_timer_ms(void)
 {
-	if (replay_det() || speed <= 0)
+	if (hook_det() || speed <= 0)
 		return vclock / 1000;
 	return (uint64_t)((double)SDL_GetTicks() * speed);
 }
@@ -48,7 +47,7 @@ uint64_t clock_timer_ms(void)
  * that spin on them cost virtual time too, and the timer itself follows real time. */
 void clock_throttle(void)
 {
-	if (speed <= 0 || replay_replaying())
+	if (speed <= 0 || hook_replaying())
 		return;
 	uint64_t now = SDL_GetPerformanceCounter();
 	double real = (double)(now - base_ticks) / (double)SDL_GetPerformanceFrequency();
@@ -71,7 +70,7 @@ void clock_work(uint32_t us)
 	uint32_t now = SDL_GetTicks();
 	if (now - last >= 8) { /* the host's own service, as the timer thread and DirectDraw did */
 		last = now;
-		status_main();
+		hook_beat();
 		screen_present(0);
 		SDL_PumpEvents();
 	}
@@ -79,5 +78,5 @@ void clock_work(uint32_t us)
 
 uint64_t clock_log_ms(void)
 {
-	return replay_det() ? replay_ms() : SDL_GetTicks();
+	return hook_det() ? hook_virtual_ms() : SDL_GetTicks();
 }

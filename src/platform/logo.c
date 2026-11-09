@@ -32,7 +32,7 @@
 #include "fsys.h"
 #include "platform/window.h"
 #include "platform/present.h"
-#include "dev/status.h"
+#include "hooks.h"
 
 struct avi {
 	unsigned char *data;
@@ -181,7 +181,7 @@ void logo_play(void)
 		avi_free(&a);
 		return;
 	}
-	status_set_logo(1);
+	hook_logo(1);
 	SDL_AudioDeviceID dev = open_audio(&a);
 	if (dev)
 		SDL_PauseAudioDevice(dev, 0);
@@ -201,7 +201,7 @@ void logo_play(void)
 		}
 		present_frame_rgb(dec.pixels);
 		shown++;
-		status_main();
+		hook_beat();
 		SDL_Event ev;
 		win_cursor_update(); /* the pointer may have left the image */
 		while (SDL_PollEvent(&ev)) {
@@ -225,7 +225,7 @@ void logo_play(void)
 		SDL_CloseAudioDevice(dev);
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
-	status_set_logo(0);
+	hook_logo(0);
 	cvid_free(&dec);
 	avi_free(&a);
 }

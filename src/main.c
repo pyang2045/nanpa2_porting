@@ -230,6 +230,7 @@ int main(int argc, char **argv)
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	double speed = 1.0;
 	int speed_set = 0;
+	dev_install_hooks();
 	if (argc > 2 && !strcmp(argv[1], "--wav-check"))
 		return sound_wav_check(argc - 2, argv + 2) ? 1 : 0;
 	launch_log_init(argc, argv);

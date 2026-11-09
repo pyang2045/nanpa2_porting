@@ -4,15 +4,13 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "platform/clock.h"
-#include "dev/replay.h"
 
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev/dev.h"
-#include "dev/status.h"
+#include "hooks.h"
 #include "platform/present.h"
 #include "game/startup.h"
 
@@ -52,7 +50,7 @@ void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
 
 void win_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
-	if (replay_external(msg, wparam, lparam, 0))
+	if (hook_external(msg, wparam, lparam))
 		win_post(msg, wparam, lparam);
 }
 
@@ -150,17 +148,17 @@ static void collect_events(void)
 	/* deterministic: the scripts and the bot run at every pump, and the host
 	 * queue every 256th (messages carry the pump they came at) */
 	static unsigned n;
-	if (replay_det()) {
-		if (!replay_replaying())
-			dev_inject();
+	if (hook_det()) {
+		if (!hook_replaying())
+			hook_inject();
 		if (n++ & 255)
 			return;
 	} else {
-		dev_inject();
+		hook_inject();
 	}
 	/* scripted runs only take SDL_QUIT from the host, so the Cocoa event
 	 * pump (most of their host CPU) can run every 16 ms */
-	if (dev_scripted() && !replay_det()) {
+	if (hook_scripted() && !hook_det()) {
 		static uint32_t last;
 		uint32_t now = SDL_GetTicks();
 		if (now - last < 16)
@@ -174,7 +172,7 @@ static void collect_events(void)
 		/* scripted runs: the real cursor, keys and focus changes on a shared
 		 * desktop would move the injected mouse or stop the timer
 		 * (WM_ACTIVATEAPP 0 clears 0x4ac4ec) */
-		if (dev_scripted() && ev.type != SDL_QUIT)
+		if (hook_scripted() && ev.type != SDL_QUIT)
 			continue;
 		switch (ev.type) {
 		case SDL_QUIT:
@@ -278,16 +276,16 @@ int win_pump(void)
 	 * charging it keeps the throttle from running the game's pump loops
 	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
 	clock_add(PACE_PUMP_US);
-	status_main();
+	hook_beat();
 	clock_throttle();
 	win_run_timer();
-	replay_pump();
+	hook_pump();
 	screen_present(0);
 	/* the host event queue at most once a millisecond (deterministic mode:
 	 * collect_events counts pumps instead) */
 	static uint32_t last_collect;
 	uint32_t now = SDL_GetTicks();
-	if (replay_det() || now != last_collect) {
+	if (hook_det() || now != last_collect) {
 		last_collect = now;
 		collect_events();
 	}

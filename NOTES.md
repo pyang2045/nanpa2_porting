@@ -1372,3 +1372,15 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
   New ctest `standalone` (tests/standalone.py).
 - The four goldens (`li.*`, `raw.clock`) match twice (271/331/33/161) in a folder of symlinks with no exe and no
   nanpa2.dat; the FLAG files they write are byte-identical to the previous build's on the same inputs (16 of 16).
+
+## 2026-11-09: layering cleanup: platform no longer includes dev
+
+- `src/hooks.[ch]`: one table of function pointers (`struct dev_hooks`) with inline `hook_*` wrappers that are
+  no-ops while a hook is NULL. `platform/{files,clock,window,surface,sound,logo}.c` and `trap.c` call them instead of
+  `dev/dev.h`, `dev/replay.h` and `dev/status.h`; `dev_install_hooks` (`dev/dev.c`) fills the table at the top of
+  `main`. `game/state_view.c` took `replay_hash` from the dev layer; the hash now lives in `src/hash.[ch]`
+  (`hash_bytes`, same function, checkpoints unchanged).
+- New ctest `headers` (`tests/headers.py`): every header in `src/` compiles alone, nothing but `dev/` and `main.c`
+  includes a `dev/` header, game code includes no SDL. All headers already stood alone.
+- Four goldens (`li.*`, `raw.clock`) match: 271/331/33/161 checkpoints. Removed the "Left" item about
+  `files.c` in `docs/refactor.md`.

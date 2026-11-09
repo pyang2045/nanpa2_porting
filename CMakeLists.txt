@@ -56,6 +56,8 @@ set(SOURCES
   src/gp4.c
   src/fsys.c
   src/trap.c
+  src/hooks.c
+  src/hash.c
     src/platform/files.c
   src/platform/window.c
   src/platform/clock.c
@@ -169,6 +171,25 @@ set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
 add_test(NAME replay_det COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/replay_det.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/replay-det")
 set_tests_properties(replay_det PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# Header hygiene: every header in src/ compiles alone, nothing but src/dev and main.c includes a dev
+# header, game code includes no SDL (tests/headers.py).
+set(_hflags "")
+if(CMAKE_OSX_SYSROOT)
+  list(APPEND _hflags -isysroot "${CMAKE_OSX_SYSROOT}")
+endif()
+foreach(_d ${SDL2_INCLUDE_DIRS})
+  list(APPEND _hflags -isystem ${_d})
+endforeach()
+if(TARGET SDL2::SDL2)
+  get_target_property(_sdl_inc SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
+  foreach(_d ${_sdl_inc})
+    list(APPEND _hflags -isystem ${_d})
+  endforeach()
+endif()
+add_test(NAME headers COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/headers.py"
+  "${CMAKE_SOURCE_DIR}/src" "${CMAKE_C_COMPILER}" ${_hflags})
+set_tests_properties(headers PROPERTIES TIMEOUT 120)
 
 # WAV loader: decoded duration equals header length / byte rate for mono,
 # stereo, 11 kHz and files with extra chunks before data.
