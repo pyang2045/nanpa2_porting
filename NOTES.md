@@ -1260,3 +1260,43 @@ dispatch removed), 7a0501b (docs, build scripts, tests).
   the calls that became direct C and the stack garbage of parameterless thunks are dropped).
 - Found on the way: the exploration-free replay is the only check that catches a charge off by one
   (a missing 3-instruction native prologue in `game_main` showed up at checkpoint 0 as raw.icount -3).
+
+## 2026-11-09 (refactor R3: real-time pacing, no instruction charges)
+
+Design, derivation and numbers: docs/refactor.md "R3". Commits (oldest first): c772d12 (`NANPA2_TIMELOG`
+probes, to measure), 4aae940 (the time model: `src/game/pace.h`, `src/hle/clock.c`; `COST`/`POLL` and
+about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing after the pump removed),
+1cf2240 (docs, `replay_diff.py --sequence`, `NANPA2_REPLAY_CHECK=none`, `replay_det` checks the clock).
+
+- Measured first: a profiling build attributed every old charge to its function while the four
+  golden_r2 runs replayed. 89 % of the game time is the pump spinning on the 16 ms timer (a wait), 3 %
+  more the waits' loop bodies, 3.8 % expression evaluation, 1.1 % block skipping, 1.1 % GDI text, 0.5 %
+  GP4 decoding; the map, animation steps, cursor, fills together under 0.1 %.
+- Model (microseconds, each the old instruction cost / 25): pump 21, opcode 2, expression 9, block skip
+  1 + 0.2 a byte, glyph 200 a byte, character cell n*n/3, decode (70 a compressed byte + 1.2 an output
+  byte)/25, blit pixels/100 (keyed /25), dissolve pass 25 x (260 + 6.4 a mask bit), fade set-up 290, a
+  non-pumping spin round 1. Alongside the old charges on the four goldens: newgame +1.2 %, town +1.4 %,
+  saveload -1.3 %, menu -0.1 % of game time.
+- Clock: virtual microseconds in `clock.c`; the 16 ms timer follows real time x `--speed` /
+  `NANPA2_SPEED` (1.0 = the original; `NANPA2_TURBO` is an alias; `--cpu-mips` is gone), or the virtual
+  time in deterministic mode and at speed 0. The throttle makes the work costs real by sleeping.
+- Found on the way: two waits spin without a pump on a flag the timer callback sets (the animation slot
+  wait 0x4035b5 and the fade wait 0x406f41); their only timer came from the polls, so removing `POLL`
+  hung the first run at frame 0. Each round now passes `PACE_SPIN_US`.
+- Same scripted input, 90e7de9 against R3 (deterministic, game ms = real ms at speed 1.0): fade 258-272
+  against 258-272, dissolve 4094/4096 against 4094/4096, with a button held 949 against 957, a step of
+  the player 48 against 48, the load scenario to its first wipe 12811 against 12798 (the table is in
+  docs/refactor.md). A real-time headless run at speed 1.0: the dissolve 4094 ms by the host clock, 18.5 s
+  of game time in 18.7 s.
+- Goldens re-recorded on 4aae940 into `golden_r3` (kept outside the repository): newgame seed 31, saveload
+  seed 41, town seed 48 (330000 frames; the old seed no longer reaches the town), menu seed 46 (S46-S53).
+  Each replays twice with every checkpoint matching (`li.*`, `raw.clock`, `raw.data`, `raw.heap`,
+  `raw.stack`), identical re-recordings, 0 unaliased ranges.
+- Content check: saveload (same path) is identical in MES files, FLAG state, quiescent screens and last
+  palette. The old recordings' messages replayed on R3 stay in step for 12 MES files (9 in menu) and
+  then desynchronise, and the exploration bot, which decides from pump counts, takes other paths in long
+  runs: those can neither show nor rule out a content difference, so the diff of the removal was reviewed
+  by hand (only whole-line charges and 18 `if` lines that guarded only a charge went; two spin waits
+  gained a charge).
+- ctest (selftest_dir, selftest, replay_det, wavcheck, no_game_bytes, asset_only) pass; plain headless
+  run, 300000 frames of seed 48 from the town saves, 0 warnings or traps.
