@@ -1213,7 +1213,7 @@ the check.
 
 ## 2026-11-09 (refactor R1 finished: all game state in one C object)
 
-Details: docs/refactor.md "R1", re-notes.md "The data area as one object". (Commit hashes below.)
+Details: docs/refactor.md "R1", re-notes.md "The data area as one object". ae7b33c: the one object, the data check, replay_det with it. 2852980: palettes, cursor bitmap, map variables, history by field; docs.
 
 - `struct game_state G` is now the whole mutable data area 0x431000-0x4c0000 in native layout,
   one alias (`x86_alias`, fast path in `x86_ptr`): the script image, segment 1 (map), the picture
