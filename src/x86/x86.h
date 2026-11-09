@@ -62,10 +62,20 @@ _Noreturn void x86_trap(uint32_t pc, const char *why);
 extern void (*x86_trap_hook)(void);
 _Noreturn void x86_fault(uint32_t addr);
 
+/* Dev trace of the PE image region (NANPA2_IMAGE_TRACE=1, src/x86/image.c):
+ * one byte per image byte, OR-ed with x86_img_ctx (1 = data access, 2 = the
+ * interpreter decoding code) for every byte x86_ptr hands out. */
+#define IMG_SIZE 0xc1000u
+extern uint8_t *x86_img_map;
+extern uint8_t x86_img_ctx;
+void x86_img_mark(uint32_t a, uint32_t n);
+
 static inline uint8_t *x86_ptr(uint32_t a, uint32_t n)
 {
 	if (a < MEM_BASE || a + n > MEM_END || a + n < a)
 		x86_fault(a);
+	if (__builtin_expect(x86_img_map != 0, 0) && a - MEM_BASE < IMG_SIZE)
+		x86_img_mark(a, n);
 	return x86_mem + (a - MEM_BASE);
 }
 
@@ -623,6 +633,24 @@ void x86_probe(uint32_t pc);
 /* Load the exe image into emulated memory: 1 ok, 0 cannot read, -1 not
  * the nanpa2.exe this engine runs (wrong file or another build). */
 int x86_load_image(const char *exe_path);
+/* The exe image without installing it (src/x86/asset.c cuts the asset from
+ * it): a fresh MEM_END - MEM_BASE bytes, or NULL with *status 0 (cannot
+ * read) or -1 (not this nanpa2.exe). hash and exe_size may be NULL. */
+uint8_t *x86_image_read(const char *exe_path, int *status, uint64_t *hash, uint32_t *exe_size);
+/* Make mem (from x86_image_read or x86_asset_read) the emulated memory. */
+void x86_install_image(uint8_t *mem);
+uint64_t x86_fnv64(const void *p, size_t n, uint64_t h);
+#define X86_FNV64_INIT 0xcbf29ce484222325ull
+
+/* nanpa2.dat, the built-in data of the exe without its code (asset.c).
+ * x86_asset_make: 1 written, 0 io error, -1 exe is not this build.
+ * x86_asset_read: 1 loaded and installed, 0 cannot read, -1 not an asset of
+ * this format and build. After it x86_code_absent is set: game code bytes
+ * are not in memory, so the interpreter's decoder refuses to run. */
+int x86_asset_make(const char *exe_path, const char *out_path);
+int x86_asset_read(const char *path);
+extern int x86_code_absent;
+
 /* 1 if the first n bytes of a file are the header of that nanpa2.exe */
 int x86_exe_check(const uint8_t *d, size_t n);
 /* Call a lifted (or HLE) function with stdcall/cdecl args; returns EAX.

@@ -147,6 +147,10 @@ const struct dec *x86_decode(uint32_t pc)
 {
 	struct dec d = { 0 };
 	uint32_t p = pc;
+	if (x86_code_absent)
+		x86_trap(pc, "native game code is not in memory (running from nanpa2.dat); "
+			     "this mode needs nanpa2.exe");
+	x86_img_ctx = 2;
 	d.osz = 4;
 	d.base = d.index = NOREG;
 	for (;; p++) {
@@ -215,6 +219,7 @@ const struct dec *x86_decode(uint32_t pc)
 	case REL8: d.imm = (uint32_t)(int32_t)(int8_t)rd8(p); p += 1; d.imm += p; break;
 	case REL32: d.imm = rd32(p); p += 4; d.imm += p; break;
 	}
+	x86_img_ctx = 1;
 	d.len = (uint8_t)(p - pc);
 	d.probe = (uint8_t)is_probe(pc);
 	dec_cache[pc - CODE_START] = d;

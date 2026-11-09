@@ -9,6 +9,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "assets.h"
 #include "fsys.h"
 #include "platform/dialog.h"
 #include "x86/x86.h"
@@ -109,20 +110,12 @@ static const char *check(const char *dir, int need_exe)
 		return "no DATA folder with the pictures (DATA/01.GP4)";
 	fclose(f);
 	if (need_exe) {
-		/* the engine runs the game code of the player's own exe; it
-		 * is not on the CD as a plain file but inside the
-		 * InstallShield cabinet data1.cab (with FLAG0..FLAG6) */
-		f = fsys_open("nanpa2.exe");
-		if (!f)
-			return "no nanpa2.exe. It is inside data1.cab on the CD (an InstallShield "
-			       "cabinet): extract nanpa2.exe and FLAG0..FLAG6 from it into this folder, "
-			       "or copy them from an installed copy of the game";
-		uint8_t head[4096];
-		size_t n = fread(head, 1, sizeof head, f);
-		fclose(f);
-		if (!x86_exe_check(head, n))
-			return "nanpa2.exe is not the Taiwan release this engine runs "
-			       "(同級生２, built 2000-07-10)";
+		/* the engine needs the built-in data of the player's exe:
+		 * nanpa2.dat, or the exe (inside the InstallShield cabinet
+		 * data1.cab on the CD, with FLAG0..FLAG6) to make it from */
+		const char *why = assets_check(dir);
+		if (why)
+			return why;
 	}
 	return NULL;
 }
@@ -223,8 +216,8 @@ static int pick(int need_exe)
 {
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
 		return 0;
-	const char *prompt = need_exe ? "請選擇同級生２的遊戲資料夾（含 DATA 與 nanpa2.exe）\n"
-					"Choose the 同級生２ game folder (with DATA and nanpa2.exe)"
+	const char *prompt = need_exe ? "請選擇同級生２的遊戲資料夾（含 DATA 與 nanpa2.exe 或 nanpa2.dat）\n"
+					"Choose the 同級生２ game folder (with DATA and nanpa2.exe or nanpa2.dat)"
 				      : "請選擇同級生２的遊戲資料夾（含 DATA）\n"
 					"Choose the 同級生２ game folder (with DATA)";
 	char dir[PATH_CAP];
@@ -284,7 +277,7 @@ const char *launch_game_dir(const char *cli, int need_exe, int interactive)
 	char text[PATH_CAP + 400];
 	int n = snprintf(text, sizeof text,
 			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents with "
-			 "nanpa2.exe and FLAG0..FLAG6 from data1.cab.\n\n"
+			 "nanpa2.exe and FLAG0..FLAG6 from data1.cab (or the nanpa2.dat made from it).\n\n"
 			 "Choose it when asked, put it next to the app (in a folder named \"game\"), "
 			 "or start with --game DIR or NANPA2_GAME_DIR.");
 	if (log_file && launch_pref_dir() && n > 0 && (size_t)n < sizeof text)

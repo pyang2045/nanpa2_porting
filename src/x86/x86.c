@@ -14,6 +14,48 @@ uint32_t x86_stop_esp, x86_stop_pc;
 const uint32_t *x86_stop_exits, *x86_stop_units, *x86_stop_calls;
 int x86_stop_started;
 
+/* ---- NANPA2_IMAGE_TRACE=FILE: which bytes of the PE image the run touched */
+uint8_t *x86_img_map;
+uint8_t x86_img_ctx = 1;
+static const char *img_trace_file;
+
+void x86_img_mark(uint32_t a, uint32_t n)
+{
+	uint32_t o = a - MEM_BASE;
+	if (o + n > IMG_SIZE)
+		n = IMG_SIZE - o;
+	for (uint32_t i = 0; i < n; i++)
+		x86_img_map[o + i] |= x86_img_ctx;
+}
+
+static void img_trace_dump(void)
+{
+	FILE *f = fopen(img_trace_file, "w");
+	if (!f)
+		return;
+	/* one line per run of equal flags: start end(exclusive) flags */
+	uint32_t i = 0;
+	while (i < IMG_SIZE) {
+		uint8_t v = x86_img_map[i];
+		uint32_t j = i;
+		while (j < IMG_SIZE && x86_img_map[j] == v)
+			j++;
+		if (v)
+			fprintf(f, "%08x %08x %d\n", MEM_BASE + i, MEM_BASE + j, v);
+		i = j;
+	}
+	fclose(f);
+}
+
+static void img_trace_start(void)
+{
+	img_trace_file = getenv("NANPA2_IMAGE_TRACE");
+	if (!img_trace_file || !*img_trace_file)
+		return;
+	x86_img_map = calloc(1, IMG_SIZE);
+	atexit(img_trace_dump);
+}
+
 int x86_stop_at(uint32_t pc)
 {
 	uint32_t esp = cpu.r[ESP];
@@ -99,11 +141,15 @@ int x86_exe_check(const uint8_t *d, size_t n)
 	       le32(d + pe + 8) == 0x39697c6au && le32(d + pe + 80) == 0xc1000u;
 }
 
-int x86_load_image(const char *exe_path)
+/* The exe's sections laid out as the loader would, in a fresh zeroed image
+ * of MEM_END - MEM_BASE bytes. NULL with *status 0: cannot read; -1: not the
+ * nanpa2.exe this engine runs. *hash is the FNV-1a of the file. */
+uint8_t *x86_image_read(const char *exe_path, int *status, uint64_t *hash, uint32_t *exe_size)
 {
+	*status = 0;
 	FILE *f = fopen(exe_path, "rb");
 	if (!f)
-		return 0;
+		return NULL;
 	fseek(f, 0, SEEK_END);
 	long n = ftell(f);
 	fseek(f, 0, SEEK_SET);
@@ -111,32 +157,65 @@ int x86_load_image(const char *exe_path)
 	if (!d || fread(d, 1, (size_t)n, f) != (size_t)n) {
 		fclose(f);
 		free(d);
-		return 0;
+		return NULL;
 	}
 	fclose(f);
 	if (!x86_exe_check(d, (size_t)n)) {
 		free(d);
-		return -1;
+		*status = -1;
+		return NULL;
 	}
-	x86_mem = calloc(1, MEM_END - MEM_BASE);
-	if (!x86_mem) {
+	uint8_t *mem = calloc(1, MEM_END - MEM_BASE);
+	if (!mem) {
 		free(d);
-		return 0;
+		return NULL;
 	}
 	uint32_t pe = le32(d + 0x3c);
 	uint32_t nsec = le16(d + pe + 6);
 	uint32_t hdr = le32(d + pe + 84);
 	uint32_t secs = pe + 24 + le16(d + pe + 20);
-	memcpy(x86_mem, d, hdr < (uint32_t)n ? hdr : (uint32_t)n);
+	memcpy(mem, d, hdr < (uint32_t)n ? hdr : (uint32_t)n);
 	for (uint32_t i = 0; i < nsec; i++) {
 		const uint8_t *s = d + secs + i * 40;
 		uint32_t va = le32(s + 12), rs = le32(s + 16), ro = le32(s + 20);
 		if (ro + rs > (uint32_t)n)
 			rs = (uint32_t)n - ro;
-		memcpy(x86_mem + va, d + ro, rs);
+		memcpy(mem + va, d + ro, rs);
 	}
+	if (hash)
+		*hash = x86_fnv64(d, (size_t)n, X86_FNV64_INIT);
+	if (exe_size)
+		*exe_size = (uint32_t)n;
 	free(d);
+	*status = 1;
+	return mem;
+}
+
+uint64_t x86_fnv64(const void *p, size_t n, uint64_t h)
+{
+	const uint8_t *b = p;
+	for (size_t i = 0; i < n; i++)
+		h = (h ^ b[i]) * 0x100000001b3ull;
+	return h;
+}
+
+/* Memory is the given image (taken over); ready for the first call. */
+void x86_install_image(uint8_t *mem)
+{
+	x86_mem = mem;
 	cpu.r[ESP] = STACK_TOP - 16;
+	img_trace_start();
+}
+
+int x86_code_absent;
+
+int x86_load_image(const char *exe_path)
+{
+	int st;
+	uint8_t *mem = x86_image_read(exe_path, &st, NULL, NULL);
+	if (!mem)
+		return st;
+	x86_install_image(mem);
 	return 1;
 }
 

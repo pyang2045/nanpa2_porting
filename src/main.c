@@ -2,6 +2,8 @@
  * 同級生２ (nanpa2.exe, Taiwan release) on SDL2.
  *
  *   nanpa2 [--game DIR] [--exe PATH] [--font PATH]     play
+ *   nanpa2 --make-assets [--game DIR] [--exe PATH]     cut nanpa2.dat (the built-in data
+ *          [--out FILE]                                 of nanpa2.exe) in the game folder
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
  *   nanpa2 --view NAME.GP4 --crt-shot OUT.bmp          presenter output, 1280x960
  *          [--crt-size WxH]                             ... at another size
@@ -25,14 +27,16 @@
  * the remembered choice, next to the executable or .app, ./game, then a
  * folder picker.
  *
- * Playing runs the game code lifted from nanpa2.exe (tools/recomp.py) on the
- * hand-written Win32/DirectX layer in src/hle.
+ * Playing runs the game's C reimplementation (src/game) on the hand-written
+ * Win32/DirectX layer in src/hle, with the built-in data of the player's
+ * nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe once).
  */
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "assets.h"
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
@@ -185,15 +189,9 @@ static SDL_Window *game_window;
 
 static int run_game(const char *game, const char *exe, const char *font)
 {
-	char exe_buf[1100];
-	if (!exe) {
-		snprintf(exe_buf, sizeof exe_buf, "%s/nanpa2.exe", game);
-		exe = exe_buf;
-	}
-	int loaded = x86_load_image(exe);
-	if (loaded <= 0) {
-		fprintf(stderr, loaded < 0 ? "%s is not the nanpa2.exe this engine runs (the Taiwan release "
-				       "built 2000-07-10)\n" : "cannot load %s\n", exe);
+	char err[1400];
+	if (!assets_open(exe, err, sizeof err)) {
+		fprintf(stderr, "%s\n", err);
 		return 1;
 	}
 #ifdef NANPA2_HAVE_RECOMP
@@ -204,7 +202,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
 	if (!hle_init(game, save_env ? save_env : save ? save : ".")) {
-		fprintf(stderr, "cannot map imports of %s\n", exe);
+		fprintf(stderr, "cannot map the imports of nanpa2.exe\n");
 		return 1;
 	}
 	SDL_free(save);
@@ -235,7 +233,8 @@ static int run_game(const char *game, const char *exe, const char *font)
 int main(int argc, char **argv)
 {
 	const char *game = NULL, *view = NULL, *shot = NULL, *exe = NULL, *font = NULL;
-	const char *crt_shot = NULL, *view_bmp = NULL;
+	const char *crt_shot = NULL, *view_bmp = NULL, *asset_out = NULL;
+	int make_assets = 0;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
 	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	/* Emulated CPU speed in MIPS (0 = unthrottled), see x86_throttle() */
@@ -250,6 +249,10 @@ int main(int argc, char **argv)
 			game = argv[++i];
 		else if (!strcmp(argv[i], "--exe") && i + 1 < argc)
 			exe = argv[++i];
+		else if (!strcmp(argv[i], "--make-assets"))
+			make_assets = 1;
+		else if (!strcmp(argv[i], "--out") && i + 1 < argc)
+			asset_out = argv[++i];
 		else if (!strcmp(argv[i], "--font") && i + 1 < argc)
 			font = argv[++i];
 		else if (!strcmp(argv[i], "--view")) {
@@ -287,12 +290,21 @@ int main(int argc, char **argv)
 	if (!view_bmp) {
 		int interactive = !getenv("NANPA2_HEADLESS") && !getenv("NANPA2_INPUT") && !shot && !crt_shot;
 		int play = !viewer && logo_frame_n < 0;
-		game = launch_game_dir(game, play && !exe, interactive);
+		game = launch_game_dir(game, (play || make_assets) && !exe, interactive && !make_assets);
 		if (!game)
 			return 1;
 	} else if (!game)
 		game = "game";
 	fsys_set_root(game);
+	if (make_assets) {
+		char path[1200], err[1400];
+		if (!assets_make(exe, asset_out, path, sizeof path, err, sizeof err)) {
+			fprintf(stderr, "%s\n", err);
+			return 1;
+		}
+		printf("made %s\n", path);
+		return 0;
+	}
 
 	int cur = 0;
 	if (logo_frame_n >= 0) {
