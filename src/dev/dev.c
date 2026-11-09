@@ -33,6 +33,8 @@
 #include "platform/window.h"
 #include "platform/present.h"
 #include "dev/replay.h"
+#include "dev/status.h"
+#include "hooks.h"
 
 static const char *shot_dir;
 static uint32_t shot_start, shot_interval, shot_count, shot_done;
@@ -347,4 +349,37 @@ int dev_save_selftest(void)
 	ok = ok && !memcmp(src, dst, sizeof src);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
 	return ok ? 0 : 1;
+}
+
+/* ---- hooks: how platform code and trap.c reach this layer (hooks.h) ---- */
+
+static int hook_external_msg(uint32_t msg, uint32_t wparam, uint32_t lparam)
+{
+	return replay_external(msg, wparam, lparam, 0);
+}
+
+static void hook_file(const char *name)
+{
+	dev_file_opened(name);
+	replay_note_file(name);
+}
+
+void dev_install_hooks(void)
+{
+	dev_hooks = (struct dev_hooks){
+		.det = replay_det,
+		.replaying = replay_replaying,
+		.virtual_ms = replay_ms,
+		.pump = replay_pump,
+		.external = hook_external_msg,
+		.file_opened = hook_file,
+		.frame = dev_frame,
+		.inject = dev_inject,
+		.scripted = dev_scripted,
+		.now = dev_now,
+		.beat = status_main,
+		.logo = status_set_logo,
+		.vm_fetch = dev_vm_fetch,
+		.hit_table = dev_hit_table,
+	};
 }

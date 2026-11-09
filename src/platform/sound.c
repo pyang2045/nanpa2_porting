@@ -37,7 +37,7 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3_ex.h"
 
-#include "dev/dev.h"
+#include "hooks.h"
 #include "fsys.h"
 
 #define RATE 44100
@@ -144,7 +144,7 @@ static void dump_close(void)
 static void slog(const char *what, const char *name)
 {
 	if (log_on)
-		fprintf(stderr, "sound %s %s at %u ms (dump %.3f s)\n", what, name, dev_now(),
+		fprintf(stderr, "sound %s %s at %u ms (dump %.3f s)\n", what, name, hook_now(),
 			(double)dump.frames / RATE);
 }
 

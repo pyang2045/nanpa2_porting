@@ -53,7 +53,4 @@ void replay_note_vm(uint32_t off);
 /* At exit: the final checkpoint, the file closed */
 void replay_finish(void);
 
-/* Hashing, shared with tools of the same kind */
-uint64_t replay_hash(const void *p, size_t n, uint64_t seed);
-
 #endif

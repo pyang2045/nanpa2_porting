@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "dev/replay.h"
+#include "hash.h"
 #include "platform/clock.h"
 #include "game/pace.h"
 #include "game/state_view.h"
@@ -78,31 +79,9 @@ uint64_t replay_ms(void)
 	return clock_us() / 1000;
 }
 
-/* ---- hashing: 8 bytes a step, multiply and rotate ---- */
-
-uint64_t replay_hash(const void *p, size_t n, uint64_t h)
-{
-	const uint8_t *b = p;
-	h ^= 0x9E3779B97F4A7C15ull + n;
-	while (n >= 8) {
-		uint64_t v;
-		memcpy(&v, b, 8);
-		h = (h ^ (v * 0xC2B2AE3D27D4EB4Full));
-		h = ((h << 31) | (h >> 33)) * 0x9E3779B185EBCA87ull;
-		b += 8;
-		n -= 8;
-	}
-	uint64_t v = 0;
-	memcpy(&v, b, n);
-	h = (h ^ (v * 0xC2B2AE3D27D4EB4Full));
-	h = ((h << 31) | (h >> 33)) * 0x9E3779B185EBCA87ull;
-	h ^= h >> 29;
-	return h;
-}
-
 static uint64_t hash_str(const char *s, uint64_t h)
 {
-	return replay_hash(s, strlen(s), h);
+	return hash_bytes(s, strlen(s), h);
 }
 
 /* ---- what the run has reached ---- */
@@ -155,7 +134,7 @@ static uint64_t saves_hash(int *count)
 		static uint8_t buf[1 << 16];
 		size_t len = fread(buf, 1, sizeof buf, f);
 		fclose(f);
-		h = replay_hash(buf, len, h + (uint64_t)i * 0x100000001B3ull);
+		h = hash_bytes(buf, len, h + (uint64_t)i * 0x100000001B3ull);
 		n++;
 	}
 	if (count)
@@ -173,8 +152,8 @@ static int build_cp(char *out, size_t cap)
 	static uint32_t pal[256];
 	uint64_t hs = 0, hp = 0;
 	if (screen_snapshot(frame, pal)) {
-		hs = replay_hash(frame, sizeof frame, 0);
-		hp = replay_hash(pal, sizeof pal, 0);
+		hs = hash_bytes(frame, sizeof frame, 0);
+		hp = hash_bytes(pal, sizeof pal, 0);
 	}
 	int nsaves;
 	uint64_t sv = saves_hash(&nsaves);
@@ -183,7 +162,7 @@ static int build_cp(char *out, size_t cap)
 	ADD("li.frame=%" PRIx32, state_frame());
 	ADD(" li.screen=%016" PRIx64, hs);
 	ADD(" li.pal=%016" PRIx64, hp);
-	ADD(" li.save=%016" PRIx64, replay_hash(img, sizeof img, 0));
+	ADD(" li.save=%016" PRIx64, hash_bytes(img, sizeof img, 0));
 	ADD(" li.mes=%d/%016" PRIx64, (int)nmes, mes_hash);
 	ADD(" li.files=%d/%016" PRIx64, (int)nfiles, files_hash);
 	ADD(" li.vm=%" PRIu64 "/%" PRIx64, vm_ops, vm_last);

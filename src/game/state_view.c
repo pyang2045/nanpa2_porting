@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "game/vm.h"
-#include "dev/replay.h"
+#include "hash.h"
 
 void state_save_export(uint8_t out[STATE_SAVE_SIZE])
 {
@@ -50,7 +50,7 @@ uint64_t state_data_hash(void)
 	memcpy(copy, &G, sizeof G);
 	for (size_t i = 0; i < sizeof platform_fields / sizeof platform_fields[0]; i++)
 		memset(copy + platform_fields[i].off, 0, platform_fields[i].len);
-	return replay_hash(copy, sizeof copy, 0);
+	return hash_bytes(copy, sizeof copy, 0);
 }
 
 uint32_t state_frame(void)

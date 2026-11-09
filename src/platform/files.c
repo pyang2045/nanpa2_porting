@@ -6,8 +6,7 @@
 #include <string.h>
 
 #include "fsys.h"
-#include "dev/dev.h"
-#include "dev/replay.h"
+#include "hooks.h"
 
 static char save_root[1024];
 
@@ -53,8 +52,7 @@ static FILE *open_native(const char *path, const char *mode)
 FILE *files_open(const char *path, const char *mode)
 {
 	FILE *f = open_native(path, mode);
-	dev_file_opened(path);
-	replay_note_file(path);
+	hook_file_opened(path);
 	if (getenv("NANPA2_LOG"))
 		fprintf(stderr, "fopen %s %s -> %s\n", path, mode, f ? "ok" : "fail");
 	return f;

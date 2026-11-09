@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+/* Fill the hook table of src/hooks.h with this layer's functions; first thing in main */
+void dev_install_hooks(void);
 void dev_init(void);
 uint32_t dev_now(void);
 void dev_frame(const uint8_t *frame, const uint32_t pal[256]);

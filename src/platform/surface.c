@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "dev/dev.h"
+#include "hooks.h"
 #include "platform/surface.h"
 #include "platform/window.h"
 #include "platform/present.h"
@@ -150,7 +150,7 @@ void screen_present(int force)
 	if (!screen_snapshot(frame, pal))
 		return;
 	last = now;
-	dev_frame(frame, pal);
+	hook_frame(frame, pal);
 	/* NANPA2_HEADLESS: the presenter keeps the frame in memory (no window,
 	 * no GPU, see present_common.h) */
 	present_frame(frame, pal);
