@@ -1232,3 +1232,31 @@ Details: docs/refactor.md "R1", re-notes.md "The data area as one object". ae7b3
   map, anim and op code (R2), the C runtime and DirectDraw objects on the emulated heap (R4),
   the FLAG file I/O through the generic file loader (R4, it needs the C runtime thunks to go),
   the read-only tables of `head` and the tile offset table (asset data). See docs/refactor.md.
+
+## 2026-11-09 (refactor R2: ordinary C calls instead of register and stack conventions)
+
+Design and details: docs/refactor.md "R2". Commits (oldest first): 3a21c09 (frozen differential
+machinery, recomp backend and lockstep removed), 775b2fe (`src/game/ctl.h`: COST/POLL, pump, quit,
+catch, `hle_invoke`), c69faf3 (graphics leaves typed, direct wipe and fade wait), 343e003 (the script VM
+in direct style: loop, blocks, text, waits, menus, control ops), f77e95d (town map: typed views, direct
+pump chain), 7cc8086 + 1253106 (expressions, files, animation slots, start-up as typed C, `game_main`),
+merges 14548f9, 3c2e74e, cd7056b, 2e9567e (the subsystem ops direct; interpreter, unit table, piece
+dispatch removed), 7a0501b (docs, build scripts, tests).
+
+- Control flow: a wait is a C loop that calls `ctl_pump()`; WM_QUIT, the end of the script and opcodes that
+  end the VM unwind with `ctl_quit()` (longjmp to the one `ctl_catch`); a script restart longjmps to the top
+  of the VM loop. Chosen over a state machine (rewrites the pieces into states) and a coroutine or thread
+  (platform-specific, and SDL wants events on the main thread).
+- Pacing unchanged: every `X86_COUNT`/`X86_POLL` kept (as `COST`/`POLL`) in the same order relative to
+  the pump and the HLE calls. All four golden replays (re-recorded on d79f8e0 into `golden_r2`) match every
+  `li.*` key plus `raw.icount` and `raw.data` after every chunk; `raw.cpu/stack/heap` change by design.
+- The native-address dispatch is gone: `game_units`, `hle_jump`, `overrides.h`, the x86 interpreter and
+  decoder. Nothing executes native game code. Removed with them: `NANPA2_DIFF`, fuzz, lockstep, the recomp
+  backend, `tools/recomp.py`, `liveness.py`, `reimpl_status.py`, ctest `start_trace` (oracle comparison).
+- Still on the CPU model: `hle_invoke` and the emulated stack frames for the HLE thunks (R4), the aliased
+  address space, `top_esp` (dead, kept for `raw.data`), the instruction counter (R3).
+- Tools: `NANPA2_REPLAY_CHECK` takes key prefixes; `NANPA2_HLETRACE=2` prints the instruction count per HLE
+  call (equal traces <=> equal pacing and platform traffic; saveload and menu identical to d79f8e0 once
+  the calls that became direct C and the stack garbage of parameterless thunks are dropped).
+- Found on the way: the exploration-free replay is the only check that catches a charge off by one
+  (a missing 3-instruction native prologue in `game_main` showed up at checkpoint 0 as raw.icount -3).
