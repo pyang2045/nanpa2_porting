@@ -342,6 +342,12 @@ uint32_t game_main(uint32_t hinst)
 	IMPORT(IAT_UPDATEWINDOW, SC(hwnd));
 	X86_COUNT(2);
 	X86_COUNT(1); /* call */
+	/* 0x4060d4: the VM's entry saves EBP and records its stack top (data
+	 * area word RT.top_esp), below the return address into WinMain */
+	cpu.r[ESP] -= 4;
+	push32(cpu.r[EBP]);
+	RT_SET(top_esp, cpu.r[ESP]);
+	X86_COUNT(3);
 	game_vm_run();
 	shutdown();
 	X86_COUNT(1);
