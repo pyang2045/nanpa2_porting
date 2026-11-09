@@ -640,17 +640,24 @@ word 0xffffffff at 0x445308, the 16 base colours (derived, 0x44530c), the FLAG n
 function pointers (0x43100c-, 0x435576-0x4355fa, 0x435dfc-0x435e60, 0x4313d9), the native file-name
 format, MCI and error strings of the head (0x431034-0x4312cc: the C holds its own formats), and 6,586
 bytes at 0x4a72c0-0x4aac42 (the MP3 library's tables inside the ANI buffer, overwritten when the file is
-read). Left in the asset (asset version 3, 124 bytes): the no-CD message and title (0x431140, 0x431158) and
-the 7-byte text at 0x445c71, which are the game's own text. Check: with the whole image loaded and the
+read). The no-CD message and title (0x431140, 0x431158) are now our own English and Traditional Chinese
+wording in `game_main` (nothing reads those addresses), and the 7-byte text at 0x445c71 starts as
+zero (no script read or wrote it in the goldens and the exploration bot). The asset is gone: see "No asset". Check: with the whole image loaded and the
 defaults applied, the bytes of G differ from the image only in the ranges listed as unread; the four
 `golden_r4` replays match every `li.*` and `raw.clock` checkpoint on a build that starts from zero for
 those ranges. `raw.gdata` of the old recordings no longer matches (it hashed the unread bytes), so the
 goldens need `NANPA2_REPLAY_CHECK=li,raw.clock` from here on or a new recording.
 
+**No asset.** With the game text out, `src/asset.c`, `src/assets.c`, `--make-assets`, `--exe`,
+`NANPA2_LOAD_EXE` and the `asset_only` test are removed: the engine reads neither nanpa2.exe nor
+nanpa2.dat, `launch.c` accepts a folder that has `DATA/01.GP4`, and a stray nanpa2.dat (any version)
+is never opened. ctest `standalone` records a run in a folder with the files and one without and the
+recordings and FLAG files must be equal, then replays one in the other.
+
 ### Architecture summary (R4 and after)
 
 ```
-state_defaults (code) + nanpa2.dat (game text only) --state_init--> G (struct game_state, native layout)
+state_init (start values in code, no file) --> G (struct game_state, native layout)
                                                             |
  SDL events --window.c--> WM_* queue --win_pump--> game_wndproc --> G.rt.input_bits, cursor ...
  16 ms timer (clock.c) ---------------------------> game_timer_tick --> G.rt.frame, fades

@@ -36,7 +36,7 @@ the PC the game was written for. The game logic calls a small platform API; the 
 SDL2. Game code never includes SDL, Metal or Objective-C.
 
 - `src/game/`: the game. `state.h` defines `G`, one object that is the exe's data area (0x431000-0x4c0000) in
-  its native layout, initialised from `nanpa2.dat` (`state_init`) and the only game state; `gmem.h` has
+  its native layout, initialised by code (`state_init`, `state_defaults`: no data file is read) and the only game state; `gmem.h` has
   `rd8..wr32`/`g_ptr` over it by the original's numbering ("G addresses": segment bases, animation
   pc, labels are integers that index G, never host pointers; outside G traps). The VM (`loop.c`, `ops*.c`,
   `vm.c`, `expr.c`), text, animation, the town map (`map*.c`), palette and picture/rectangle/cursor
@@ -52,13 +52,12 @@ SDL2. Game code never includes SDL, Metal or Objective-C.
   `dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
 - `src/dev/`: `replay.c` (deterministic mode, `--record`/`--replay`, state checkpoints), `explore.c` (the
   exploration bot), `dev.c` (scripted input, screenshots, `NANPA2_SAVETEST`), `status.c` (live status file).
-- `src/`: `asset.c` (the `nanpa2.dat` format and the exe image loader), `assets.c` (where the data comes
-  from), `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
+- `src/`: `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
   `launch.c` (game folder lookup, remembered path, log file for Finder launches), `main.c`.
 - `tools/`: `build.sh`, `build_msys2.sh`, `bundle_macos.sh` (target `nanpa2_app`: `build/同級生２.app` with
   SDL inside), `replay_diff.py`, `explore.py`, `gp4png.py`, `lzh.py`, `sheet.py`, `peek.py`, `disasm.py`
   (table-aware objdump to `decomp/game.asm`), `timing_stats.py`; `ghidra_scripts/DecompileAll.java`;
-  `tests/` (ctest: selftest, replay_det, wavcheck, no_game_bytes, asset_only, smoke, decode_all);
+  `tests/` (ctest: selftest, replay_det, wavcheck, no_game_bytes, standalone, smoke, decode_all);
   `third_party/` (stb_truetype, minimp3, public domain).
 
 The save files (`FLAGn`, 0xc00 bytes) are `G.save` in the original's byte layout, written and read only
@@ -69,8 +68,7 @@ Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched,
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
 (screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.
-`NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`, `NANPA2_LOAD_EXE=1` (data from the whole
-exe instead of `nanpa2.dat`), `NANPA2_SPEED`/`--speed`, `NANPA2_DETERMINISTIC`, `--record`/`--replay`
+`NANPA2_GAME_DIR` (game folder without `--game`), `NANPA2_LOG_FILE`, `NANPA2_SPEED`/`--speed`, `NANPA2_DETERMINISTIC`, `--record`/`--replay`
 (`NANPA2_REPLAY_CHECK=li,raw.clock,raw.gdata` picks the checkpoint keys), `NANPA2_EXPLORE=SEED`
 `NANPA2_EXPLORE_FRAMES=N` (the bot); `NANPA2_SAVE_DIR` also
 holds `game-folder.txt` and `nanpa2.log`, so app tests leave the real save folder alone.
@@ -84,7 +82,7 @@ cmake -S . -B build -G Ninja && ninja -C build
 ./build/nanpa2 --view A_END2.GP4 --shot out.bmp  # headless: write the screen and exit
 ./build/decode_all game                          # expect "ok 705 bad 0"
 ctest --test-dir build --output-on-failure       # all: selftest, replay_det, wavcheck, no_game_bytes,
-                                                 # asset_only, and smoke (one window, renders;
+                                                 # standalone, and smoke (one window, renders;
                                                  # Skipped = passed, screen not visible)
 cat $TMPDIR/nanpa2-status-*.json                 # live state of every running instance
 ```

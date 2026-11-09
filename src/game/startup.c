@@ -27,8 +27,6 @@
 #define SURFACES 0x44629eu     /* u32[4]: 0 the screen, 1-3 off-screen */
 #define PITCHES 0x4462aeu
 
-#define MSG_NO_CD 0x431140u
-#define MSG_NO_CD_TITLE 0x431158u
 
 /* ---- the CD search (0x402590) ---- */
 
@@ -112,7 +110,8 @@ uint32_t game_main(void)
 	static const struct win_handlers handlers = { game_wndproc, game_timer_tick };
 	win_open(&handlers);
 	if (!cd_search()) {
-		win_message_box((const char *)g_ptr(MSG_NO_CD, 1), (const char *)g_ptr(MSG_NO_CD_TITLE, 1));
+		/* our own wording (0x402090 showed the original's Big5 message here) */
+		win_message_box("Game CD not found.\n找不到遊戲光碟。", "同級生２");
 		return 0;
 	}
 	win_show_cursor(0); /* the first thing the logo player does, whether or not a movie plays */

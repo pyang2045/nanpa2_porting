@@ -9,7 +9,6 @@
 #include <string.h>
 #include <time.h>
 
-#include "assets.h"
 #include "fsys.h"
 #include "platform/dialog.h"
 
@@ -99,7 +98,7 @@ static char tried[4096]; /* candidates that failed, for the not-found report */
 
 /* What dir lacks, or NULL if it looks like the game folder. Uses fsys, so
  * names match case-insensitively as the game's own loads do. */
-static const char *check(const char *dir, int need_exe)
+static const char *check(const char *dir)
 {
 	if (!dir || !*dir)
 		return "no folder given";
@@ -108,20 +107,12 @@ static const char *check(const char *dir, int need_exe)
 	if (!f)
 		return "no DATA folder with the pictures (DATA/01.GP4)";
 	fclose(f);
-	if (need_exe) {
-		/* the engine needs the built-in data of the player's exe:
-		 * nanpa2.dat, or the exe (inside the InstallShield cabinet
-		 * data1.cab on the CD, with FLAG0..FLAG6) to make it from */
-		const char *why = assets_check(dir);
-		if (why)
-			return why;
-	}
 	return NULL;
 }
 
-static int try_dir(const char *dir, int need_exe, const char *source)
+static int try_dir(const char *dir, const char *source)
 {
-	const char *why = check(dir, need_exe);
+	const char *why = check(dir);
 	if (why) {
 		size_t n = strlen(tried);
 		snprintf(tried + n, sizeof tried - n, "  %s (%s): %s\n", dir, source, why);
@@ -181,7 +172,7 @@ static void strip_last(char *p)
 /* The executable's folder and a few above it (an .app's Resources,
  * Contents, the .app, the folder holding it, one more: so build/X.app finds
  * the repository's game/), each as itself and with "game" appended. */
-static int try_near_exe(int need_exe)
+static int try_near_exe(void)
 {
 	char *base = SDL_GetBasePath();
 	if (!base)
@@ -195,10 +186,10 @@ static int try_near_exe(int need_exe)
 		while (n > 1 && (dir[n - 1] == '/' || dir[n - 1] == '\\'))
 			dir[--n] = 0;
 		/* not the bundle's own folders */
-		if ((!launch_in_bundle() || i >= 3) && try_dir(dir, need_exe, "next to the executable"))
+		if ((!launch_in_bundle() || i >= 3) && try_dir(dir, "next to the executable"))
 			return 1;
 		snprintf(cand, sizeof cand, "%s/game", dir);
-		if (try_dir(cand, need_exe, "next to the executable"))
+		if (try_dir(cand, "next to the executable"))
 			return 1;
 		strip_last(dir);
 	}
@@ -211,17 +202,15 @@ static void message(const char *text)
 }
 
 /* Folder picker until a folder validates or the player gives up. */
-static int pick(int need_exe)
+static int pick(void)
 {
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
 		return 0;
-	const char *prompt = need_exe ? "請選擇同級生２的遊戲資料夾（含 DATA 與 nanpa2.exe 或 nanpa2.dat）\n"
-					"Choose the 同級生２ game folder (with DATA and nanpa2.exe or nanpa2.dat)"
-				      : "請選擇同級生２的遊戲資料夾（含 DATA）\n"
-					"Choose the 同級生２ game folder (with DATA)";
+	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）\n"
+			     "Choose the 同級生２ game folder (with DATA)";
 	char dir[PATH_CAP];
 	while (dialog_pick_folder(prompt, dir, sizeof dir)) {
-		const char *why = check(dir, need_exe);
+		const char *why = check(dir);
 		if (!why) {
 			snprintf(found, sizeof found, "%s", dir);
 			SDL_Log("game folder: %s (chosen)", found);
@@ -244,12 +233,12 @@ static int pick(int need_exe)
 	return 0;
 }
 
-const char *launch_game_dir(const char *cli, int need_exe, int interactive)
+const char *launch_game_dir(const char *cli, int interactive)
 {
 	const char *env = getenv("NANPA2_GAME_DIR");
 	const char *given = cli ? cli : env && *env ? env : NULL;
 	if (given) {
-		const char *why = check(given, need_exe);
+		const char *why = check(given);
 		if (!why) {
 			snprintf(found, sizeof found, "%s", given);
 			SDL_Log("game folder: %s (%s)", found, cli ? "--game" : "NANPA2_GAME_DIR");
@@ -265,18 +254,18 @@ const char *launch_game_dir(const char *cli, int need_exe, int interactive)
 	}
 	char mem[PATH_CAP];
 	if (read_remembered(mem, sizeof mem)) {
-		if (try_dir(mem, need_exe, "remembered"))
+		if (try_dir(mem, "remembered"))
 			return found;
-		SDL_Log("the remembered game folder %s is not usable: %s", mem, check(mem, need_exe));
+		SDL_Log("the remembered game folder %s is not usable: %s", mem, check(mem));
 	}
-	if (try_near_exe(need_exe) || try_dir("game", need_exe, "working folder"))
+	if (try_near_exe() || try_dir("game", "working folder"))
 		return found;
-	if (interactive && pick(need_exe))
+	if (interactive && pick())
 		return found;
 	char text[PATH_CAP + 400];
 	int n = snprintf(text, sizeof text,
 			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents with "
-			 "nanpa2.exe and FLAG0..FLAG6 from data1.cab (or the nanpa2.dat made from it).\n\n"
+			 "FLAG0..FLAG6 from data1.cab.\n\n"
 			 "Choose it when asked, put it next to the app (in a folder named \"game\"), "
 			 "or start with --game DIR or NANPA2_GAME_DIR.");
 	if (log_file && launch_pref_dir() && n > 0 && (size_t)n < sizeof text)

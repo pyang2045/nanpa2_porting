@@ -62,7 +62,8 @@ int win_show_cursor(int show);
 /* Move the host pointer to the game's screen coordinates (640x480) */
 void win_warp_cursor(int x, int y);
 
-/* An error for the player (the original's MessageBox): the platform shows it or prints it */
+/* An error for the player (the original's MessageBox), UTF-8: printed, and shown in a box unless the
+ * run is headless or scripted */
 void win_message_box(const char *text, const char *title);
 
 /* ---- for the host side (dev layer, clock, status, presenter) ---- */

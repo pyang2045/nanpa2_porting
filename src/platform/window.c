@@ -337,5 +337,7 @@ void win_warp_cursor(int x, int y)
 
 void win_message_box(const char *text, const char *title)
 {
-	fprintf(stderr, "MessageBox (Big5) %s: %s\n", title, text);
+	fprintf(stderr, "MessageBox %s: %s\n", title, text);
+	if (!getenv("NANPA2_HEADLESS") && !getenv("NANPA2_INPUT"))
+		SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, text, NULL);
 }

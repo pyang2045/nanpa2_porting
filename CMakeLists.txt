@@ -52,11 +52,9 @@ set(GAME_SOURCES
 set(SOURCES
   src/main.c
   src/launch.c
-  src/assets.c
   src/lzh.c
   src/gp4.c
   src/fsys.c
-  src/asset.c
   src/trap.c
     src/platform/files.c
   src/platform/window.c
@@ -188,10 +186,9 @@ set_tests_properties(wavcheck PROPERTIES TIMEOUT 30)
   add_test(NAME no_game_bytes COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/no_game_bytes.py"
     "${NANPA2_GAME_DIR}/nanpa2.exe" ${_scan})
   set_tests_properties(no_game_bytes PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
-  # nanpa2.dat: cut from the exe, holds no game code; the game runs from it
-  # with the exe hidden and matches a run with the whole exe (about 2 min,
-  # headless; tests/asset_only.py)
-  add_test(NAME asset_only COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/asset_only.py"
-    $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/asset-only")
-  set_tests_properties(asset_only PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+  # the game folder without nanpa2.exe and nanpa2.dat: the same recording as with them, and a
+  # replay of it (about 1 min, headless; tests/standalone.py)
+  add_test(NAME standalone COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/standalone.py"
+    $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/standalone")
+  set_tests_properties(standalone PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
 
