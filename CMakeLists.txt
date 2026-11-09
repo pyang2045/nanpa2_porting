@@ -45,7 +45,6 @@ set(GAME_SOURCES
   src/game/map_pump.c
   src/game/screen.c
   src/game/wipe.c
-  src/game/units.c
   src/game/state_view.c
   src/game/state.c
 )
@@ -59,7 +58,6 @@ set(SOURCES
   src/fsys.c
   src/x86/x86.c
   src/x86/asset.c
-  src/x86/interp.c
   src/hle/hle.c
   src/hle/crt.c
   src/hle/win32.c
@@ -73,7 +71,6 @@ set(SOURCES
   src/hle/explore.c
   src/hle/status.c
   ${GAME_SOURCES}
-  src/game/game.c
 )
 
 option(NANPA2_SDL_RENDERER "Use the SDL_Renderer presenter on macOS too" OFF)
@@ -123,7 +120,6 @@ endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
   # the interpreter runs the whole game: optimized in Debug builds too
-  set_source_files_properties(src/x86/interp.c PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 # macOS app bundle: build/同級生２.app with SDL inside (tools/bundle_macos.sh).
 # It holds no game data (the game folder is found or asked for at run time,

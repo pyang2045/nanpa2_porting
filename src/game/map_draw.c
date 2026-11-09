@@ -26,8 +26,6 @@
 
 #define TILE_PITCH 0x280u /* a sheet is 640 pixels wide */
 
-#define LOCK 0x401190u   /* cdecl (surface): pixels */
-#define UNLOCK 0x4012b0u /* cdecl (surface) */
 
 /* the locked pixels of the screen, the tile sheet and the sprite sheet, and
  * the screen's pitch */
@@ -42,7 +40,7 @@ static inline void st32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
 static uint32_t lock_surface(uint32_t surface)
 {
 	COST(2);
-	uint32_t p = HLE(LOCK, surface);
+	uint32_t p = game_surface_lock(surface);
 	COST(2); /* add esp, mov [LOCKED_*], eax */
 	return p;
 }
@@ -50,7 +48,7 @@ static uint32_t lock_surface(uint32_t surface)
 static uint32_t unlock_surface(uint32_t surface)
 {
 	COST(2);
-	uint32_t eax = HLE(UNLOCK, surface);
+	uint32_t eax = game_surface_unlock(surface);
 	COST(1);
 	return eax;
 }

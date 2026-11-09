@@ -171,7 +171,6 @@ struct pump_state {
 };
 
 /* ---- map.c: sub-ops and the area / collision tests ---- */
-uint32_t game_op_map(void);                /* 0x4073ee, the 04 26 handler (map_pump.c) */
 uint32_t game_map_op(uint32_t op);         /* 0x403a70: the sub-ops that do not wait; the AX they leave */
 void game_map_load_args(void);             /* 0x403a70: arguments 1..6 to G.map.v.args */
 int game_map_op_in_c(uint32_t op);

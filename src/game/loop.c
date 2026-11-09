@@ -35,7 +35,6 @@
 
 #include "game/ctl.h"
 #include "game/file.h"
-#include "game/game.h"
 #include "game/vm.h"
 #include "hle/hle.h"
 #include "x86/x86.h"
@@ -81,40 +80,6 @@ void game_vm_run(void)
 	COST(2);
 	ctl_catch(vm_loop_top, NULL);
 	COST(2);
-}
-
-/* ---- the still register-level handlers */
-
-/* Run the piece-world handler at native address `addr` (entered with ESI past
- * the opcode bytes, EAX = its table index) until it jumps to the loop head.
- * Its pieces call HLE routines and each other as the dispatcher did: units by
- * address, anything else through hle_call with the return address on the
- * stack. A quit leaves through the native exits, which unwind like ctl_quit. */
-static void legacy(uint32_t addr, uint32_t index)
-{
-	cpu.r[ESI] = vm_pc;
-	cpu.r[EAX] = index;
-	uint32_t pc = addr;
-	for (;;) {
-		if (pc == VM_LOOP)
-			break;
-		if (pc == 0x40638d)
-			ctl_quit();
-		if (pc == 0x406393 || pc == 0x40472f)
-			ctl_unwind();
-		const struct game_unit *u = game_unit_find(pc);
-		if (u && u->jump) {
-			uint32_t next = u->jump();
-			if (u->poll_self && next == pc)
-				POLL(pc);
-			pc = next;
-			continue;
-		}
-		uint32_t ra = rd32(cpu.r[ESP]);
-		hle_call(pc);
-		pc = ra;
-	}
-	vm_pc = cpu.r[ESI];
 }
 
 /* ---- waits */
@@ -346,39 +311,25 @@ static void big5_char(uint32_t first)
 /* ---- fetch and dispatch */
 
 /* handlers of ops 0a-1a (table 0x40620b; 10 is a no-op, the loop head) and of
- * the extended ops 04 10-04 26 (table 0x406262): the C handler, or for the ones
- * still register-level (fn NULL) its native address as an offset from
- * HANDLER_BASE (16 bits, so the binary does not hold the native tables: ctest
- * no_game_bytes) */
-#define HANDLER_BASE 0x400000u
-struct handler {
-	int (*fn)(void);
-	uint16_t native;
+ * the extended ops 04 10-04 26 (table 0x406262) */
+static int (*const op_handlers[])(void) = {
+	vm_op_set_flags, vm_op_set_flags_expr, vm_op_set_reg, vm_op_store_words, vm_op_store_bytes, vm_op_if,
+	NULL /* 10: the loop head itself, no backward jump */, vm_op_wait, vm_op_set_label, vm_op_call_label,
+	vm_op_call_offset, vm_op_print_number, vm_op_delay, vm_op_clear_text, vm_op_text_colour, vm_op_misc,
+	vm_op_anim,
 };
-static const struct handler op_handlers[] = {
-	{ vm_op_set_flags, 0 }, { vm_op_set_flags_expr, 0 }, { vm_op_set_reg, 0 }, { vm_op_store_words, 0 },
-	{ vm_op_store_bytes, 0 }, { vm_op_if, 0 }, { NULL, 0x60f9 }, { vm_op_wait, 0 }, { vm_op_set_label, 0 },
-	{ vm_op_call_label, 0 }, { vm_op_call_offset, 0 }, { vm_op_print_number, 0 }, { vm_op_delay, 0 },
-	{ NULL, 0x6b05 }, { vm_op_text_colour, 0 }, { NULL, 0x7204 }, { NULL, 0x7096 },
-};
-static const struct handler ext_handlers[] = {
-	{ vm_op_while, 0 }, { vm_op_continue, 0 }, { vm_op_break, 0 }, { vm_op_menu, 0 }, { NULL, 0x6842 },
-	{ NULL, 0x6916 }, { NULL, 0x6f06 }, { NULL, 0x6b76 }, { NULL, 0x6bcb }, { NULL, 0x6c20 },
-	{ NULL, 0x6c85 }, { NULL, 0x6cea }, { NULL, 0x6d8b }, { NULL, 0x6e11 }, { vm_op_jump_mes, 0 },
-	{ vm_op_call_mes, 0 }, { vm_op_click_handler, 0 }, { vm_op_flag_file, 0 }, { vm_op_args_only, 0 },
-	{ vm_op_hit_test, 0 }, { NULL, 0x73a5 }, { NULL, 0x73cd }, { NULL, 0x73ee },
+static int (*const ext_handlers[])(void) = {
+	vm_op_while, vm_op_continue, vm_op_break, vm_op_menu, vm_op_menu_items, vm_op_cursor, vm_op_palette,
+	vm_op_fill_rect, vm_op_xor_rect, vm_op_copy_rect, vm_op_swap_rect, vm_op_masked_rect, vm_op_load_file,
+	vm_op_picture, vm_op_jump_mes, vm_op_call_mes, vm_op_click_handler, vm_op_flag_file, vm_op_args_only,
+	vm_op_hit_test, vm_op_music, vm_op_voice, vm_op_map,
 };
 #define N_OPS (sizeof op_handlers / sizeof op_handlers[0])
 #define N_EXT (sizeof ext_handlers / sizeof ext_handlers[0])
 
-static int run_handler(const struct handler *h, uint32_t index)
+static int run_handler(int (*fn)(void))
 {
-	if (h->fn)
-		return h->fn();
-	if (h->native == 0x60f9) /* op 10: the loop head itself, no backward jump */
-		return -1;
-	legacy(HANDLER_BASE + h->native, index);
-	return -1;
+	return fn ? fn() : -1;
 }
 
 /* 0x40616e: fire the fetch probe (the exploration bot and NANPA2_VMTRACE
@@ -404,7 +355,7 @@ static int fetch(void)
 		COST(6 + 5);
 		if (index >= N_EXT)
 			x86_trap(0x40625b, "extended opcode outside the native table");
-		return run_handler(&ext_handlers[index], index);
+		return run_handler(ext_handlers[index]);
 	}
 	if (op == VM_SEPARATOR) {
 		COST(8);
@@ -430,7 +381,7 @@ static int fetch(void)
 	COST(17 + 4);
 	if (index >= N_OPS)
 		x86_trap(0x406204, "opcode outside the native table (09, 1b-1f)");
-	return run_handler(&op_handlers[index], index);
+	return run_handler(op_handlers[index]);
 }
 
 /* ---- the loop */

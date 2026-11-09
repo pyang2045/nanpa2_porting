@@ -129,24 +129,3 @@ uint32_t game_wipe(uint32_t s0, uint32_t s1)
 	COST(7);
 	return r;
 }
-
-/* The wipe for op 19 sub-op 4's piece (ops_sys.c): the handler pushed ESI,
- * 2 and 0 and charged the call; run it direct-style and go on at the
- * piece `next_pc` (0x40738b) with EAX the result. */
-struct wipe_call {
-	uint32_t s0, s1, result;
-};
-
-static void wipe_run(void *p)
-{
-	struct wipe_call *c = p;
-	c->result = game_wipe(c->s0, c->s1);
-}
-
-uint32_t game_wipe_piece(uint32_t s0, uint32_t s1, uint32_t next_pc)
-{
-	struct wipe_call c = { s0, s1, 0 };
-	uint32_t pc = ctl_piece(wipe_run, &c, next_pc);
-	cpu.r[EAX] = c.result;
-	return pc;
-}

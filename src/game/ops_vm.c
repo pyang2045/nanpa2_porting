@@ -291,7 +291,7 @@ int vm_op_flag_file(void)
  * place value fits, so a value too big for the digits gives a "digit"
  * above 9, as natively. Out: AX = 0, BX = the last digit's code, CX = 1,
  * EDI past the digits (DI only, for ASCII), DL/DH kept. */
-void game_format_number_regs(void)
+static void game_format_number_regs(void)
 {
 	static const uint16_t place[5] = { 10000, 1000, 100, 10, 1 };
 	uint32_t edi = 0x445ce6, ax = cpu.r[EAX] & 0xffff, bx = cpu.r[EBX];

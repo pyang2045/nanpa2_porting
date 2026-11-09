@@ -10,9 +10,6 @@ int x86_poll_countdown = 1;
 uint32_t x86_poll_pc;
 uint64_t x86_icount;
 void (*x86_trap_hook)(void);
-uint32_t x86_stop_esp, x86_stop_pc;
-const uint32_t *x86_stop_exits, *x86_stop_units, *x86_stop_calls;
-int x86_stop_started;
 
 /* ---- NANPA2_IMAGE_TRACE=FILE: which bytes of the PE image the run touched */
 uint8_t *x86_img_map;
@@ -54,38 +51,6 @@ static void img_trace_start(void)
 		return;
 	x86_img_map = calloc(1, IMG_SIZE);
 	atexit(img_trace_dump);
-}
-
-int x86_stop_at(uint32_t pc)
-{
-	uint32_t esp = cpu.r[ESP];
-	/* never at the first check: that is the oracle's own entry, which may
-	 * be an exit (the loop head 0x4060f9) or lie above the stop ESP (the
-	 * VM entry 0x4060d4 stops a word below, after its push ebp) */
-	if (!x86_stop_started) {
-		x86_stop_started = 1;
-		return 0;
-	}
-	int stop = esp > x86_stop_esp;
-	if (esp == x86_stop_esp) {
-		for (const uint32_t *e = x86_stop_exits; e && *e; e++)
-			stop |= *e == pc;
-		/* another jump unit (or this one again) */
-		for (const uint32_t *e = x86_stop_units; e && *e; e++)
-			stop |= *e == pc;
-	} else if (esp < x86_stop_esp && x86_stop_calls) {
-		/* a call exit: the callee's entry with the return address on top
-		 * (read past the memory trace) */
-		uint32_t ra;
-		memcpy(&ra, x86_ptr(esp, 4), 4);
-		for (const uint32_t *c = x86_stop_calls; *c; c += 2)
-			stop |= c[0] == pc && c[1] == ra;
-	}
-	if (stop) {
-		x86_stop_pc = pc;
-		x86_stop_esp = 0;
-	}
-	return stop;
 }
 
 _Noreturn void x86_trap(uint32_t pc, const char *why)
@@ -214,20 +179,6 @@ int x86_load_image(const char *exe_path)
 		return st;
 	x86_install_image(mem);
 	return 1;
-}
-
-uint32_t x86_call(uint32_t addr, int nargs, const uint32_t *args)
-{
-	struct cpu saved = cpu;
-	for (int i = nargs - 1; i >= 0; i--)
-		push32(args[i]);
-	push32(X86_RET_SENTINEL);
-	x86_exec(addr);
-	uint32_t ret = cpu.r[EAX];
-	uint32_t esp = saved.r[ESP];
-	cpu = saved;
-	cpu.r[ESP] = esp;
-	return ret;
 }
 
 /* ---------------------------------------------------------------- heap */

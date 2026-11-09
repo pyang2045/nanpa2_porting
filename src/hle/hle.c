@@ -5,10 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "game/game.h"
 #include "logo.h"
 #include "lzh.h"
-#include "x86/interp.h"
 #include "game/state.h"
 
 #define MAX_IMPORTS 256
@@ -80,17 +78,9 @@ static int map_imports(void)
 
 int hle_init(const char *game_dir, const char *save_dir)
 {
-	x86_interp_init(); /* the override list, used by both backends */
 	crt_init(game_dir, save_dir);
 	win32_init();
 	return map_imports();
-}
-
-/* Everything outside the game code (thunks, the C runtime) and the
- * overrides of overrides.h, the list both backends use. */
-int hle_is_target(uint32_t addr)
-{
-	return x86_is_hle(addr);
 }
 
 /* ---- COM objects ----
@@ -256,16 +246,6 @@ static void override_call(uint32_t addr)
 	x86_trap(addr, msg);
 }
 
-uint32_t hle_jump(uint32_t addr)
-{
-	uint32_t pc;
-	if (game_jump(addr, &pc))
-		return pc;
-	char msg[64];
-	snprintf(msg, sizeof msg, "no jump override for %08x", addr);
-	x86_trap(addr, msg);
-}
-
 /* NANPA2_HLETRACE=1: every call into the HLE layer (imports, COM methods,
  * C runtime, HLE overrides) with its first six arguments, before it runs.
  * Stack addresses are written STK so that two builds' traces compare (the
@@ -330,8 +310,6 @@ void hle_call(uint32_t addr)
 		snprintf(msg, sizeof msg, "import %s", i < nimports ? imports[i].name : "?");
 		x86_trap(addr, msg);
 	}
-	if (game_call(addr)) /* reimplemented game logic (src/game) */
-		return;
 	if (crt_call(addr))
 		return;
 	override_call(addr);

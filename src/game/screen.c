@@ -420,28 +420,6 @@ uint32_t game_surface_unlock(uint32_t surf)
 	return game_cursor_draw();
 }
 
-/* The register-level entries of the two routines, for the native-style
- * callers that remain (map_draw.c's game_ncall); cdecl, the argument at
- * ESP, the result in EAX and the registers the native routines left
- * (ECX after the lock). */
-void game_lock_regs(void)    /* 0x401190 */
-{
-	uint32_t surf = rd32(cpu.r[ESP]);
-	cpu.r[EAX] = game_surface_lock(surf);
-	uint32_t screen = G.rt.surface[0];
-	cpu.r[ECX] = screen;
-	if (surf == screen) {
-		cpu.r[ECX] = SC(letterbox);
-		if (cpu.r[ECX])
-			cpu.r[ECX] = G.rt.pitch[0] * 5;
-	}
-}
-
-void game_unlock_regs(void)  /* 0x4012b0 */
-{
-	cpu.r[EAX] = game_surface_unlock(rd32(cpu.r[ESP]));
-}
-
 /*
  * Rectangles (stage 5B): copy, masked copy, swap, fill and XOR on the
  * numbered surfaces. The copy arguments are (dx, dy, sx, sy, w, h, src,
@@ -749,8 +727,8 @@ uint32_t game_picture_load(int named)
 	game_anim_reset();
 	COST(3);
 	if (named) {
-		cpu.r[EDI] = PICTURE_NAME;
-		game_string_arg_regs();
+		uint32_t src, last;
+		vm_string_arg(PICTURE_NAME, &src, &last);
 		COST(6);
 		game_file_load_at(PICTURE_NAME, PICTURE);
 	}

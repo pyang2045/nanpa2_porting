@@ -489,22 +489,16 @@ static uint32_t subop_frame(void)
 
 /* ---- the handler 0x4073ee ---- */
 
-struct op26 {
-	uint32_t pc;  /* in: the script pc at the opcode's argument list; out: after it */
-};
-
 /* 04 26 n, args...: map sub-op n through 0x403a70, S = AX after it. Sub-ops
  * 4 and 5 first reset the animation slots (0x406dff). The handler's tail
  * (0x40740f: pop esi, mov [S], ax, jmp 0x4060f9) is here too. */
-static void op26(void *arg)
+int vm_op_map(void)
 {
-	struct op26 *o = arg;
-	uint32_t pc = o->pc, a;
+	uint32_t pc = vm_pc, a;
 	vm_parse_args(&pc, &a);
 	COST(1);
 	COST(2);
 	if (a == 5 || a == 4) {
-		cpu.r[ESI] = pc;
 		game_anim_reset();
 		COST(2);
 	}
@@ -532,16 +526,9 @@ static void op26(void *arg)
 		COST(1); /* the ret of 0x403a86 */
 		COST(1); /* pop esi */
 	}
-	cpu.r[ESI] = pc;
+	vm_pc = pc;
 	vm_set_reg(VM_REG_S, ax);
 	COST(2); /* mov [S], ax; jmp 0x4060f9 */
 	POLL(0x407416);
-}
-
-/* 0x4073ee: the opcode handler. ESI = the pc at the argument list; returns the
- * pc to go on at, with ESI the pc after the list and S set. */
-uint32_t game_op_map(void)
-{
-	struct op26 o = { cpu.r[ESI] };
-	return ctl_piece(op26, &o, VM_LOOP);
+	return -1;
 }

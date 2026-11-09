@@ -60,13 +60,3 @@ uint32_t hle_invoke(uint32_t addr, int nargs, const uint32_t *args)
 	cpu.r[ESP] = esp;
 	return cpu.r[EAX];
 }
-
-uint32_t ctl_piece(void (*fn)(void *), void *arg, uint32_t next_pc)
-{
-	if (ctl_catch(fn, arg))
-		return next_pc;
-	/* WM_QUIT: ctl_quit charged the `mov esp, [top]`; set it and leave for the
-	 * native tail (pop ebp, ret to WinMain, which the dispatcher counts) */
-	cpu.r[ESP] = RT(top_esp);
-	return 0x406393;
-}

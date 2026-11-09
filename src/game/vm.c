@@ -111,15 +111,6 @@ uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax)
 
 /* ---- native calling conventions ---- */
 
-/* 0x4061d4: ESI in/out. The native loop leaves AL = 0 (the closing byte)
- * and AH = 0 (the depth); the flags are dead at all six call sites
- * (tools/liveness.py). */
-void game_skip_block_regs(void)
-{
-	cpu.r[ESI] = vm_skip_block(cpu.r[ESI]);
-	set16(EAX, 0);
-}
-
 /* 0x406395: set up '@', the segment table and @[0], @[22] before a MES
  * file runs. */
 void vm_init(void)
@@ -134,43 +125,33 @@ void vm_init(void)
 	X86_COUNT(17);
 }
 
-/* register-level wrapper for the pieces that remain (ops_sys.c): EAX is scratch */
-void game_vm_init_regs(void)
+/* 0x4068e1: one item of a menu list ("02 [0f expr 03] text", ended by 00),
+ * at *pc. Returns 0xff at the end of the list (nothing else changes), else
+ * the low byte of the item's guard value (1 with no 0f guard); *text = the
+ * offset of the item's text and *pc the next 00 or 02 after it. */
+uint32_t vm_menu_item(uint32_t *pcp, uint32_t *text)
 {
-	vm_init();
-}
-
-/* 0x4068e1: one item of a menu list ("02 [0f expr 03] text", ended by 00).
- * In ESI at the item; out AL = -1 at the end of the list (nothing else
- * changes), else AL = 1, or the guard's value when there is a 0f guard
- * (EAX all of it); BX = the offset of the item's text and ESI the next 00
- * or 02 after it. EDX is the evaluator's scratch; the flags are dead after
- * both call sites. */
-void game_menu_item_regs(void)
-{
-	uint32_t pc = cpu.r[ESI], a = cpu.r[EAX];
+	uint32_t pc = *pcp, al = 1;
 	if (vm_script_byte(pc) == VM_BLOCK_END) {
-		cpu.r[EAX] = (a & ~0xffu) | 0xff;
 		X86_COUNT(4);
-		return;
+		return 0xff;
 	}
 	pc++; /* the 02 (any byte, in fact) */
-	a = (a & ~0xffu) | 1;
 	if (vm_script_byte(pc) == VM_IF) {
 		pc++;
 		uint32_t insns;
 		int bare;
 		uint32_t v = script_eval(&pc, &bare, &insns);
 		X86_COUNT(insns);
-		a = bare >= 0 ? (a & ~0xffu) | v : v;
+		al = v & 0xff;
 	}
-	cpu.r[EBX] = pc;
+	*text = pc;
 	uint32_t start = pc;
 	while (vm_script_byte(pc) != VM_BLOCK_END && vm_script_byte(pc) != VM_SEPARATOR)
 		pc++;
-	cpu.r[ESI] = pc;
-	cpu.r[EAX] = a;
+	*pcp = pc;
 	X86_COUNT(10 + 6 * (pc - start));
+	return al;
 }
 
 /* 0x406dc4: copy argument 0 as a string to dst. A string literal (type 2,
@@ -198,38 +179,4 @@ uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last)
 	*src_end = src;
 	*last = b;
 	return dst;
-}
-
-/* register-level wrapper: EDI = dst in and out, EBX = *src_end, AL = *last;
- * EDI is live after (the callers' ECX passes through untouched) */
-void game_string_arg_regs(void)
-{
-	uint32_t src, b;
-	cpu.r[EDI] = vm_string_arg(cpu.r[EDI], &src, &b);
-	cpu.r[EBX] = src;
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | b;
-}
-
-/* 0x40741b: ESI in/out; out EAX (argument 0's value, or AL = -1 over the
- * last value when the list ends at a byte that starts no argument), ECX =
- * the count, EBX = VM_ARG_TYPES + count, EDI = VM_ARG_VALUES + 2 * count
- * (some callers read each). EDX is the evaluator's scratch. */
-void game_parse_args_regs(void)
-{
-	uint32_t pc = cpu.r[ESI], a;
-	uint32_t n = vm_parse_args(&pc, &a);
-	cpu.r[ESI] = pc;
-	cpu.r[EAX] = a;
-	cpu.r[ECX] = n;
-	cpu.r[EBX] = VM_ARG_TYPES + n;
-	cpu.r[EDI] = VM_ARG_VALUES + 2 * n;
-}
-
-void game_ncall(uint32_t addr, uint32_t popped)
-{
-	uint32_t esp = cpu.r[ESP] + 4 * popped;
-	push32(X86_RET_SENTINEL);
-	x86_exec(addr);
-	if (cpu.r[ESP] != esp)
-		x86_trap(addr, "native routine called by reimplemented code did not return");
 }

@@ -98,20 +98,7 @@ uint32_t vm_skip_block(uint32_t pc);
  * argument 0, see re-notes.md). */
 uint32_t vm_parse_args(uint32_t *pc, uint32_t *eax);
 
-/* `call addr` into native game code, an import or an HLE routine, with the
- * CPU as it is: the callee runs on the emulated stack and leaves the CPU
- * as it does. The caller pushed the arguments; `popped` of them are the
- * callee's to pop (stdcall), the rest the caller's. Traps if the stack
- * does not come back to that. No callee used so may leave by the VM's
- * stack reset (0x40638d). */
-void game_ncall(uint32_t addr, uint32_t popped);
 
-/* Register-level entry points (src/game/units.c). */
-void game_skip_block_regs(void);   /* 0x4061d4 */
-void game_vm_init_regs(void);      /* 0x406395 */
-void game_menu_item_regs(void);    /* 0x4068e1 */
-void game_string_arg_regs(void);   /* 0x406dc4 */
-void game_parse_args_regs(void);   /* 0x40741b */
 
 /* ---- the VM (R2: direct style; src/game/loop.c, ops.c, ops_vm.c) ---- */
 
@@ -169,32 +156,26 @@ int vm_op_call_mes(void);        /* 04 1f */
 int vm_op_click_handler(void);   /* 04 20 */
 int vm_op_flag_file(void);       /* 04 21 */
 int vm_op_args_only(void);       /* 04 22 */
+int vm_op_clear_text(void);      /* 17 */
+int vm_op_fill_rect(void);       /* 04 17 */
+int vm_op_xor_rect(void);        /* 04 18 */
+int vm_op_copy_rect(void);       /* 04 19 */
+int vm_op_swap_rect(void);       /* 04 1a */
+int vm_op_masked_rect(void);     /* 04 1b */
+int vm_op_menu_items(void);      /* 04 14 */
+int vm_op_cursor(void);          /* 04 15 */
+int vm_op_palette(void);         /* 04 16 */
+int vm_op_load_file(void);       /* 04 1c */
+int vm_op_picture(void);         /* 04 1d */
+int vm_op_music(void);           /* 04 24 */
+int vm_op_voice(void);           /* 04 25 */
+int vm_op_anim(void);            /* 1a */
+int vm_op_misc(void);            /* 19 */
+int vm_op_map(void);             /* 04 26 (map_pump.c) */
+/* 0x4068e1: one menu list item at *pc: 0xff at the end, else the guard's low
+ * byte; *text = the item's text offset, *pc the next 00 or 02 */
+uint32_t vm_menu_item(uint32_t *pc, uint32_t *text);
 int vm_op_hit_test(void);        /* 04 23 */
-void game_format_number_regs(void);       /* 0x4069fd */
-
-/* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
-uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */
-uint32_t game_op_cursor(void);          /* 04 15 0x406916 */
-uint32_t game_op_clear_text(void);      /* 17 0x406b05 */
-uint32_t game_op_fill_rect(void);       /* 04 17 0x406b76 */
-uint32_t game_op_xor_rect(void);        /* 04 18 0x406bcb */
-uint32_t game_op_copy_rect(void);       /* 04 19 0x406c20 */
-uint32_t game_op_swap_rect(void);       /* 04 1a 0x406c85 */
-uint32_t game_op_masked_rect(void);     /* 04 1b 0x406cea */
-uint32_t game_op_load_file(void);       /* 04 1c 0x406d8b */
-uint32_t game_op_picture(void);         /* 04 1d 0x406e11 */
-uint32_t game_op_palette(void);         /* 04 16 0x406f06 */
-uint32_t game_op_anim(void);            /* 1a 0x407096 */
-uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
-uint32_t game_op_misc(void);            /* 19 0x407204 */
-uint32_t game_op_wipe_done(void);        /* 0x40738b */
-/* src/game/wipe.c: the dissolve wipe 0x401a50 (surface s1 over s0); the piece wrapper runs it
- * from op 19 sub-op 4's handler and goes on at next_pc with EAX the result */
-uint32_t game_wipe(uint32_t s0, uint32_t s1);
-uint32_t game_wipe_piece(uint32_t s0, uint32_t s1, uint32_t next_pc);
-uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
-uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
-uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
 
 /* ---- src/game/screen.c (stage 5B): palette and fades ---- */
 void game_palette_save(void);           /* 0x40756c */
@@ -203,14 +184,13 @@ void game_palette_fill(uint16_t v);     /* 0x40754d */
 void game_palette_upload(void);         /* 0x401ca0 */
 uint32_t game_fade_start(void);         /* 0x401d30; the last blue distance (EAX) */
 uint32_t game_fade_active(void);        /* 0x401e10 */
+uint32_t game_wipe(uint32_t s0, uint32_t s1); /* 0x401a50: the dissolve wipe of op 19 4 (surfaces 0, 2); pumps; EAX of the last unlock */
 void game_palette_wait(void);           /* 0x406f41: 04 16 3 waits for the fade, restores the tables */
 
 /* surfaces, cursor, rectangles (screen.c). Surface arguments of the lock and unlock are the
  * DirectDraw objects (guest addresses); the pixel pointer is a guest address (x86_ptr). */
 uint32_t game_surface_lock(uint32_t surf);    /* 0x401190 */
 uint32_t game_surface_unlock(uint32_t surf);  /* 0x4012b0; EAX as the routine leaves it */
-void game_lock_regs(void);              /* 0x401190, cdecl at ESP: map_draw.c's game_ncall */
-void game_unlock_regs(void);            /* 0x4012b0 */
 uint32_t game_frame_alloc(uint32_t bytes); /* scratch on the emulated stack for the HLE boundary */
 void game_frame_free(uint32_t bytes);
 void game_cursor_restore(void);         /* 0x4011f0 */

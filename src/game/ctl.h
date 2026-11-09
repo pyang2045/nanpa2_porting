@@ -46,12 +46,6 @@ void ctl_pump_or_quit(void);
  * (the stack of C calls is gone, the caller finishes the unwinding). Nests. */
 int ctl_catch(void (*fn)(void *), void *arg);
 
-/* Transitional, for the pieces of the register-level VM that remain: run
- * direct-style fn(arg) from a piece. Returns next_pc when fn returned, and
- * on WM_QUIT sets ESP to the VM's top frame and returns the pc 0x406393 where
- * the dispatcher finishes the quit (pop ebp, ret to WinMain). */
-uint32_t ctl_piece(void (*fn)(void *), void *arg, uint32_t next_pc);
-
 /* ---- the boundary to the HLE layer (R4 removes it) ----
  * Call the Win32 import, COM method, C runtime function or game unit at
  * native address `addr` as the code called it: the arguments are pushed on
