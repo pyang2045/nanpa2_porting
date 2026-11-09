@@ -73,16 +73,12 @@ static struct anim_slot *slot_at(uint32_t n)
 
 /* the blit of a rectangle record {x0, y0, w, h, dx, dy} (u16 each, the
  * surfaces in the cdecl's seventh argument as 0x100: surface 1 to 0) */
-static void blit(void (*fn)(void), uint32_t rect)
+static void blit(int masked, uint32_t rect)
 {
-	uint16_t r[6];
-	memcpy(r, x86_ptr(rect, sizeof r), sizeof r);
-	push32(0x100);
-	for (int i = 5; i >= 0; i--)
-		push32(r[i]);
+	uint16_t v[6];
+	memcpy(v, x86_ptr(rect, sizeof v), sizeof v);
 	X86_COUNT(17);
-	fn();
-	cpu.r[ESP] += 0x1c;
+	(masked ? game_blit_masked : game_blit_copy)(v[0], v[1], v[2], v[3], v[4], v[5], 1, 0);
 	X86_COUNT(1);
 }
 
@@ -155,7 +151,7 @@ static void run_slot(struct anim_slot *s)
 		case ANI_MASKED: {
 			uint16_t off;
 			memcpy(&off, ip + 1, 2);
-			blit(op == ANI_COPY ? game_blit_copy : game_blit_masked, ANIM_DATA + off);
+			blit(op != ANI_COPY, ANIM_DATA + off);
 			s->pc = pc + 2;
 			X86_COUNT(2);
 			X86_POLL(op == ANI_COPY ? 0x403787 : 0x4037c8);

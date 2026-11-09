@@ -121,8 +121,8 @@ void game_skip_block_regs(void)
 }
 
 /* 0x406395: set up '@', the segment table and @[0], @[22] before a MES
- * file runs. EAX is scratch (dead after its three call sites). */
-void game_vm_init_regs(void)
+ * file runs. */
+void vm_init(void)
 {
 	vm_set_reg(0, VM_ARRAY - VM_SCRIPT);
 	G.save.n.segment[0] = VM_SCRIPT;
@@ -132,6 +132,12 @@ void game_vm_init_regs(void)
 	G.save.n.w0_4[0] = (uint16_t)(VM_ARRAY0_BUFFER - VM_SCRIPT);
 	SV_SET(menu_list_ptr, VM_MENU_LIST - VM_SCRIPT);
 	X86_COUNT(17);
+}
+
+/* register-level wrapper for the pieces that remain (ops_sys.c): EAX is scratch */
+void game_vm_init_regs(void)
+{
+	vm_init();
 }
 
 /* 0x4068e1: one item of a menu list ("02 [0f expr 03] text", ended by 00).
@@ -167,16 +173,15 @@ void game_menu_item_regs(void)
 	X86_COUNT(10 + 6 * (pc - start));
 }
 
-/* 0x406dc4: copy argument 0 as a string to EDI. A string literal (type 2,
+/* 0x406dc4: copy argument 0 as a string to dst. A string literal (type 2,
  * the value is the offset of its opening 06) is copied up to its closing
- * 06 and NUL-terminated, EDI ending on the NUL and AL = 06; an expression
- * (type 1, the value is the script offset of a NUL-terminated string) is
- * copied with its NUL, EDI ending past it and AL = 0. Either way EBX is the
- * script offset just past the last byte read. EDI is live after (the
- * callers' ECX passes through untouched). */
-void game_string_arg_regs(void)
+ * 06 and NUL-terminated, the result is dst on the NUL and *last = 06; an
+ * expression (type 1, the value is the script offset of a NUL-terminated
+ * string) is copied with its NUL, the result is dst past it and *last = 0.
+ * Either way *src_end is the script offset just past the last byte read. */
+uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last)
 {
-	uint32_t dst = cpu.r[EDI], src = vm_arg(0), b;
+	uint32_t src = vm_arg(0), b;
 	uint32_t start = dst;
 	if (rd8(VM_ARG_TYPES) == VM_ARG_EXPR) {
 		do {
@@ -189,10 +194,20 @@ void game_string_arg_regs(void)
 			wr8(dst++, b);
 		wr8(dst, 0);
 	}
-	cpu.r[EBX] = src;
-	cpu.r[EDI] = dst;
-	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | b;
 	X86_COUNT(6 + 6 * (dst - start));
+	*src_end = src;
+	*last = b;
+	return dst;
+}
+
+/* register-level wrapper: EDI = dst in and out, EBX = *src_end, AL = *last;
+ * EDI is live after (the callers' ECX passes through untouched) */
+void game_string_arg_regs(void)
+{
+	uint32_t src, b;
+	cpu.r[EDI] = vm_string_arg(cpu.r[EDI], &src, &b);
+	cpu.r[EBX] = src;
+	cpu.r[EAX] = (cpu.r[EAX] & ~0xffu) | b;
 }
 
 /* 0x40741b: ESI in/out; out EAX (argument 0's value, or AL = -1 over the

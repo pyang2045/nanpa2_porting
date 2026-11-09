@@ -36,6 +36,9 @@ int ctl_pump(void);
  * catcher's to charge. */
 _Noreturn void ctl_quit(void);
 
+/* The unwinding without the charge (the quit exits that charged it). */
+_Noreturn void ctl_unwind(void);
+
 /* Pump; on WM_QUIT ctl_quit(). The usual wait loop step. */
 void ctl_pump_or_quit(void);
 

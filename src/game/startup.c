@@ -352,15 +352,6 @@ leave:
 	return result;
 }
 
-/* Temporary seam: run the script VM (0x4060d4, still pieces of register-level
- * code) from WinMain's frame and return when it ends, by its quit or its end.
- * The VM's final `ret` finds the sentinel where WinMain's return address
- * (0x4021a3) was. */
-void game_vm_run(void)
-{
-	x86_call(0x4060d4, 0, NULL);
-}
-
 /* ---- the window procedure (0x4021c0) ---- */
 
 /* The keys the game reads, as input bits (INPUT_BITS): the arrows, Enter

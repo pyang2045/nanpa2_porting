@@ -89,30 +89,12 @@ HLE_OVERRIDE(0x4075f0, "GP4/ANI decompressor (src/lzh.c)")
 HLE_OVERRIDE(0x402cb0, "play music N (MUSIC\\%02d.MP3 through the linked MP3 decoder)")
 HLE_OVERRIDE(0x403360, "play voice (SPEECH%s through DirectSound)")
 
-/* Reimplemented game logic (src/game/vm.c, ops_vm.c; game_units in
- * src/game/units.c holds the C side) */
-HLE_GAME_OVERRIDE(0x4061d4, "VM skip block (src/game/vm.c)")
-HLE_GAME_OVERRIDE(0x406395, "VM init (src/game/vm.c)")
-HLE_GAME_OVERRIDE(0x4068e1, "VM menu item (src/game/vm.c)")
-HLE_GAME_OVERRIDE(0x406dc4, "VM string argument (src/game/vm.c)")
-HLE_GAME_OVERRIDE(0x4069fd, "VM number to text, for op 15 (src/game/ops_vm.c)")
-HLE_GAME_OVERRIDE(0x40741b, "VM argument list parser (src/game/vm.c)")
+/* Reimplemented game logic (src/game/expr.c; game_units in src/game/units.c
+ * holds the C side) */
 
 /* Script opcode handlers in C (src/game/ops.c) */
-HLE_GAME_JUMP(0x406491, "op 0a: set flags")
-HLE_GAME_JUMP(0x4064b5, "op 0b: set flags from expressions")
-HLE_GAME_JUMP(0x4064d9, "op 0c: set register")
-HLE_GAME_JUMP(0x4064f8, "op 0d: store words")
-HLE_GAME_JUMP(0x406557, "op 0e: store bytes")
-HLE_GAME_JUMP(0x406638, "op 04 11: continue")
-HLE_GAME_JUMP(0x40663b, "op 04 12: break")
-HLE_GAME_JUMP(0x40663e, "op 12: set label")
-HLE_GAME_JUMP(0x4069be, "op 18: text colour")
 /* 0x4070bc (op 04 20, click handler): used by no shipped script; checked with
  * the dev hook NANPA2_CLICKTEST and the fuzz (src/game/map_fuzz.c) */
-HLE_GAME_JUMP(0x4070bc, "op 04 20: set a click handler")
-HLE_GAME_JUMP(0x4071a4, "op 04 23: hit test")
-HLE_GAME_JUMP(0x40739b, "op 04 22: arguments only")
 
 /* Handlers around native subsystem routines (src/game/ops_sys.c); 19, 1a,
  * 04 16 and 04 26 leave their timer-bound sub-ops to the original */
@@ -136,179 +118,44 @@ HLE_GAME_JUMP(0x4073ee, "op 04 26: map")
 /* Handlers that run a block, a script or a wait, split at those calls
  * (src/game/ops_vm.c): each call is a call exit, the code after it a
  * jump unit */
-HLE_GAME_JUMP(0x40659e, "op 0f: if")
-HLE_GAME_JUMP(0x4065ae, "op 0f: after the block of a true condition")
-HLE_GAME_JUMP(0x4065ed, "op 0f: after the else block")
-HLE_GAME_JUMP(0x4065f6, "op 11: wait for a click")
-HLE_GAME_JUMP(0x4065fb, "op 11: after the wait, clear the text window")
-HLE_GAME_JUMP(0x40660c, "op 04 10: while")
-HLE_GAME_JUMP(0x40661e, "op 04 10: after the loop's block")
-HLE_GAME_JUMP(0x406658, "op 13: call label")
-HLE_GAME_JUMP(0x40666b, "op 13: after the label's block")
-HLE_GAME_JUMP(0x406a9a, "op 14: call offset")
-HLE_GAME_JUMP(0x406aa7, "op 14: after the script")
-HLE_GAME_JUMP(0x406aad, "op 16: wait")
-HLE_GAME_JUMP(0x406abd, "op 16: after the frames")
-HLE_GAME_JUMP(0x406ac7, "op 16: after the click")
-HLE_GAME_JUMP(0x406671, "op 04 13: menu loop")
-HLE_GAME_JUMP(0x4066b8, "op 04 13: round start (pump)")
-HLE_GAME_JUMP(0x4066bd, "op 04 13: after the pump")
-HLE_GAME_JUMP(0x4066e6, "op 04 13: after the frame block, scan the inputs")
-HLE_GAME_JUMP(0x4066f6, "op 04 13: after testing click")
-HLE_GAME_JUMP(0x406704, "op 04 13: after the click block")
-HLE_GAME_JUMP(0x406714, "op 04 13: after testing click for its release")
-HLE_GAME_JUMP(0x406728, "op 04 13: after testing right click")
-HLE_GAME_JUMP(0x406736, "op 04 13: after the right click block")
-HLE_GAME_JUMP(0x40674a, "op 04 13: after testing right click for its release")
-HLE_GAME_JUMP(0x406761, "op 04 13: after testing up")
-HLE_GAME_JUMP(0x40676f, "op 04 13: after the up block")
-HLE_GAME_JUMP(0x406783, "op 04 13: after testing up for its release")
-HLE_GAME_JUMP(0x40679a, "op 04 13: after testing down")
-HLE_GAME_JUMP(0x4067a8, "op 04 13: after the down block")
-HLE_GAME_JUMP(0x4067bc, "op 04 13: after testing down for its release")
-HLE_GAME_JUMP(0x4067d3, "op 04 13: after testing left")
-HLE_GAME_JUMP(0x4067e1, "op 04 13: after the left block")
-HLE_GAME_JUMP(0x4067f5, "op 04 13: after testing left for its release")
-HLE_GAME_JUMP(0x406810, "op 04 13: after testing right")
-HLE_GAME_JUMP(0x406822, "op 04 13: after the right block")
-HLE_GAME_JUMP(0x40683b, "op 04 13: after testing right for its release")
-HLE_GAME_JUMP(0x4069ce, "op 15: print a number")
-HLE_GAME_JUMP(0x4069f7, "op 15: after the digits")
-HLE_GAME_JUMP(0x406f7c, "op 04 1e: jump to a MES file")
-HLE_GAME_JUMP(0x406fcd, "op 04 1f: call a MES file")
-HLE_GAME_JUMP(0x40704a, "op 04 1f: after the called file")
-HLE_GAME_JUMP(0x4070d5, "op 04 21: FLAG file")
-HLE_GAME_CALL_EXIT(0x4065ae, "op 0f: run the block of a true condition (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4065ed, "op 0f: run the else block (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4065fb, "op 11: wait for a click (0x406acc)")
-HLE_GAME_CALL_EXIT(0x40661e, "op 04 10: run the loop's block (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x40666b, "op 13: run the label's block (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x406aa7, "op 14: run the script at the offset (0x4060f9)")
-HLE_GAME_CALL_EXIT(0x406abd, "op 16: wait n frames (0x4075c6)")
-HLE_GAME_CALL_EXIT(0x406ac7, "op 16: wait for a click (0x406acc)")
-HLE_GAME_CALL_EXIT(0x4066b8, "op 04 13: run label 38 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4066bd, "op 04 13: pump messages (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x4066e6, "op 04 13: run label 39 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4066f6, "op 04 13: test click (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406704, "op 04 13: run label 32 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x406714, "op 04 13: test click again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406728, "op 04 13: test right click (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406736, "op 04 13: run label 33 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x40674a, "op 04 13: test right click again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406761, "op 04 13: test up (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x40676f, "op 04 13: run label 34 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x406783, "op 04 13: test up again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x40679a, "op 04 13: test down (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x4067a8, "op 04 13: run label 35 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4067bc, "op 04 13: test down again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x4067d3, "op 04 13: test left (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x4067e1, "op 04 13: run label 36 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4067f5, "op 04 13: test left again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406810, "op 04 13: test right (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406822, "op 04 13: run label 37 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x40683b, "op 04 13: test right again (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x4069f7, "op 15: run the digits as a script (0x4060f9)")
-HLE_GAME_CALL_EXIT(0x40704a, "op 04 1f: run the called file (0x4060f9)")
-
-/* Stage 4: the text (src/game/text.c); the animation slots (anim.c) are
- * C functions that nothing native calls any more */
-HLE_GAME_OVERRIDE(0x401900, "draw one character (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x4063ee, "text cursor advance (src/game/text.c)")
-HLE_GAME_OVERRIDE(0x406b24, "clear the text window (src/game/text.c)")
 
 /* Stage 4: the VM loop and the waits (src/game/loop.c), split at the calls
  * that pump messages, wait or run a block like the handlers above. They
- * are entered by call too (0x4060d4 from WinMain, 0x4061cd, 0x4074d5,
+ * are entered by call too (0x4061cd, 0x4074d5,
  * 0x4075c6 and 0x406acc from the handlers): recomp.py sends such calls
  * through dispatch. The click handler path after 0x406124/0x406134
  * (0x40613f-0x40616c) stays native with ext 20. */
-HLE_GAME_JUMP(0x4060d4, "VM entry: set up, load the MES file")
-HLE_GAME_JUMP(0x4060f9, "VM loop head (pump)")
-HLE_GAME_JUMP(0x4060fe, "VM loop: after the pump, animate, test the left button or fetch")
-HLE_GAME_JUMP(0x406124, "VM loop: after testing the left button")
-HLE_GAME_JUMP(0x406134, "VM loop: after testing the right button")
-HLE_GAME_JUMP(0x40614a, "VM loop: click handler, after testing the left button for its release")
-HLE_GAME_JUMP(0x406153, "VM loop: click handler, after testing the right button for its release")
-HLE_GAME_JUMP(0x406164, "VM loop: click handler, after its block")
-HLE_GAME_JUMP(0x4061c2, "VM: after a block, skip it")
-HLE_GAME_JUMP(0x4061cd, "VM: run a block (nested loop)")
-HLE_GAME_JUMP(0x4061d3, "VM: return from a block")
-HLE_GAME_JUMP(0x406315, "VM text: after an ASCII character, the next")
-HLE_GAME_JUMP(0x406383, "VM text: after a Big5 character")
-HLE_GAME_JUMP(0x4074d5, "input test: pump")
-HLE_GAME_JUMP(0x4074db, "input test: after the pump, test the input")
-HLE_GAME_JUMP(0x4075c6, "frame wait: pump")
-HLE_GAME_JUMP(0x4075d7, "frame wait: after the pump, animate, wait on")
-HLE_GAME_JUMP(0x406acc, "click wait: Ctrl, or a frame")
-HLE_GAME_JUMP(0x406adf, "click wait: after the frame, test")
-HLE_GAME_JUMP(0x406ae6, "click wait: after the test")
-HLE_GAME_JUMP(0x406afb, "click wait for the release: after the frame, test")
-HLE_GAME_JUMP(0x406b02, "click wait for the release: after the test")
-HLE_GAME_CALL_EXIT(0x4060fe, "VM loop: pump messages (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x406124, "VM loop: test the left button (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406134, "VM loop: test the right button (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x40614a, "VM loop: click handler, wait for the left button (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406153, "VM loop: click handler, wait for the right button (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406164, "VM loop: click handler, run its block (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4061c2, "VM: run the block at an 01 (0x4061cd)")
-HLE_GAME_CALL_EXIT(0x4061d3, "VM: the block as a nested loop (0x4060f9)")
-HLE_GAME_CALL_EXIT(0x406315, "VM text: the character delay (0x4075c6)")
-HLE_GAME_CALL_EXIT(0x406383, "VM text: the Big5 character delay (0x4075c6)")
-HLE_GAME_CALL_EXIT(0x4074db, "input test: pump messages (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x4075d7, "frame wait: pump messages (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x406adf, "click wait: a frame (0x4075c6)")
-HLE_GAME_CALL_EXIT(0x406ae6, "click wait: test the button (0x4074d5)")
-HLE_GAME_CALL_EXIT(0x406afb, "click wait for the release: a frame (0x4075c6)")
-HLE_GAME_CALL_EXIT(0x406b02, "click wait for the release: test (0x4074d5)")
 
-/* Stage 5A: the town map (src/game/map*.c). Sub-ops 5, 7 and 12, the sprite
- * step 0x4042f7 and the pumping routines (0x404450, 0x405216, 0x405597,
- * 0x403e30, 0x4051c2) stay native, with the 04 26 handler's `native`
- * predicate (the dispatcher 0x403a70 itself is called only by the C 04 26
- * handler game_op_map, which does its work in C now). */
-HLE_GAME_OVERRIDE(0x403b28, "map: sub-op 2, the cell grid from the layer (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403bd2, "map: sub-op 3, the sprite tiles over the grid (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403d45, "map: sub-op 4, draw the changed cells (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x403eff, "map: draw one cell (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x4040f0, "map: clear bit 3 of a cell (src/game/map_draw.c)")
-HLE_GAME_OVERRIDE(0x404731, "map: move a sprite up (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404937, "map: move a sprite down (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404a9a, "map: move a sprite left (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x404c9f, "map: move a sprite right (src/game/map_move.c)")
-HLE_GAME_OVERRIDE(0x405691, "map: one step of an auto-walk (src/game/map_path.c)")
-HLE_GAME_OVERRIDE(0x405966, "map: plan a walk to a cell (src/game/map_path.c)")
-HLE_GAME_OVERRIDE(0x404f8c, "map: area trigger under a sprite (src/game/map.c)")
-HLE_GAME_OVERRIDE(0x40500e, "map: collision test for a sprite (src/game/map.c)")
+/* The town map (src/game/map*.c): the 04 26 handler 0x4073ee runs the whole
+ * map in direct-style C (map_pump.c, through ctl_piece); nothing else enters
+ * the native map code (0x403a70-0x4060a2), which is dead below. */
+HLE_GAME_DEAD(0x403b28, "map: sub-op 2, the cell grid from the layer (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403bd2, "map: sub-op 3, the sprite tiles over the grid (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403d45, "map: sub-op 4, draw the changed cells (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x403eff, "map: draw one cell (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x4040f0, "map: clear bit 3 of a cell (src/game/map_draw.c)")
+HLE_GAME_DEAD(0x404731, "map: move a sprite up (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404937, "map: move a sprite down (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404a9a, "map: move a sprite left (src/game/map_move.c)")
+HLE_GAME_DEAD(0x404c9f, "map: move a sprite right (src/game/map_move.c)")
+HLE_GAME_DEAD(0x405691, "map: one step of an auto-walk (src/game/map_path.c)")
+HLE_GAME_DEAD(0x405966, "map: plan a walk to a cell (src/game/map_path.c)")
+HLE_GAME_DEAD(0x404f8c, "map: area trigger under a sprite (src/game/map.c)")
+HLE_GAME_DEAD(0x40500e, "map: collision test for a sprite (src/game/map.c)")
 
-/* Stage 6 (src/game/map_pump.c): the chain that pumps messages. The 04 26
- * handler 0x4073ee runs sub-ops 5, 7 and 12 in C down to the first pump; each
- * pump site's return address is a jump unit, the pump 0x40609c itself two
- * (pushad and the HLE pump 0x401bf0; the result), and the handler's tail
- * 0x40740f the last. Calls whose return address is below are call exits. */
-HLE_GAME_JUMP(0x40609c, "map pump: pushad, message pump")
-HLE_GAME_JUMP(0x4060a2, "map pump: after the message pump, popad, buttons and mouse")
-HLE_GAME_JUMP(0x40448b, "player: after the pump in the cursor path")
-HLE_GAME_JUMP(0x4044a9, "player: after the pump for the left button")
-HLE_GAME_JUMP(0x4044b7, "player: after the pump, follow the mouse")
-HLE_GAME_JUMP(0x4045eb, "player: after the pump in the keyboard path")
-HLE_GAME_JUMP(0x4051e3, "map frame: after the pump, a click on the screen's button")
-HLE_GAME_JUMP(0x40520f, "map frame: after the pump, wait for the button to go up")
-HLE_GAME_JUMP(0x405233, "event check: after the first pump")
-HLE_GAME_JUMP(0x405273, "event check: after the second pump")
-HLE_GAME_JUMP(0x40539f, "event check: after the pump, wait for the button to go up")
-HLE_GAME_JUMP(0x40559d, "right click: after the pump, plan the walk")
-HLE_GAME_JUMP(0x407410, "op 04 26: after the map sub-op and the pop of ESI")
-HLE_GAME_CALL_EXIT(0x4060a2, "map pump: the message pump (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x40448b, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4044a9, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4044b7, "player: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x4045eb, "player: the message pump (0x401bf0)")
-HLE_GAME_CALL_EXIT(0x4051e3, "map frame: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40520f, "map frame: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x405233, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x405273, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40539f, "event check: pump (0x40609c)")
-HLE_GAME_CALL_EXIT(0x40559d, "right click: pump (0x40609c)")
+HLE_GAME_DEAD(0x40609c, "map pump: pushad, message pump")
+HLE_GAME_DEAD(0x4060a2, "map pump: after the message pump, popad, buttons and mouse")
+HLE_GAME_DEAD(0x40448b, "player: after the pump in the cursor path")
+HLE_GAME_DEAD(0x4044a9, "player: after the pump for the left button")
+HLE_GAME_DEAD(0x4044b7, "player: after the pump, follow the mouse")
+HLE_GAME_DEAD(0x4045eb, "player: after the pump in the keyboard path")
+HLE_GAME_DEAD(0x4051e3, "map frame: after the pump, a click on the screen's button")
+HLE_GAME_DEAD(0x40520f, "map frame: after the pump, wait for the button to go up")
+HLE_GAME_DEAD(0x405233, "event check: after the first pump")
+HLE_GAME_DEAD(0x405273, "event check: after the second pump")
+HLE_GAME_DEAD(0x40539f, "event check: after the pump, wait for the button to go up")
+HLE_GAME_DEAD(0x40559d, "right click: after the pump, plan the walk")
+HLE_GAME_DEAD(0x407410, "op 04 26: after the map sub-op and the pop of ESI")
 /* the native bodies are the oracles' code and nothing else enters them */
 HLE_GAME_DEAD(0x403a70, "map: 04 26 dispatcher")
 HLE_GAME_DEAD(0x403e30, "map: sub-op 5")
@@ -370,22 +217,21 @@ HLE_GAME_DEAD(0x405fb6, "map: approach cells")
  * goes on at 0x4070b6 */
 HLE_GAME_JUMP(0x4070b6, "op 1a: after the slot control (src/game/ops_sys.c)")
 /* 04 16 mode 3 waits for the fade in 0x406f41 (src/game/screen.c, ops_sys.c) */
-HLE_GAME_JUMP(0x406f41, "op 04 16 3: wait for the fade, then restore the palette tables")
 
 /* Stage 5B (src/game/screen.c): the surface lock and unlock and the cursor
  * restore, which native code (the map, the window procedure) still calls.
  * The other screen routines (cursor draw, show, hide, blits, fill, XOR,
  * palette, fades) are called only from C and have no override. */
 HLE_GAME_OVERRIDE(0x401190, "surface lock (src/game/screen.c)")
-HLE_GAME_OVERRIDE(0x4011f0, "cursor restore (src/game/screen.c)")
 HLE_GAME_OVERRIDE(0x4012b0, "surface unlock (src/game/screen.c)")
+
+/* the logo's window procedure: installed (SetWindowLongA) only by the logo
+ * player 0x401e20, an HLE override, so nothing enters it */
+HLE_GAME_DEAD(0x401fd0, "logo window procedure (logo player is HLE)")
 
 /* Stage 6: the dissolve wipe (src/game/wipe.c): op 19 sub-op 4 calls it as a
  * call exit (return 0x40738b), it pumps messages in between (0x401b90) */
-HLE_GAME_JUMP(0x401a50, "dissolve wipe (src/game/wipe.c)")
-HLE_GAME_JUMP(0x401b90, "dissolve wipe: after the pump")
 HLE_GAME_JUMP(0x40738b, "op 19 4: after the wipe")
-HLE_GAME_CALL_EXIT(0x401b90, "dissolve wipe: pump messages (0x401bf0)")
 HLE_GAME_CALL_EXIT(0x40738b, "op 19 4: the dissolve wipe (0x401a50)")
 
 /* Timing probes (x86_probe, logged with NANPA2_PROBE=1), run before these
@@ -396,7 +242,6 @@ HLE_GAME_CALL_EXIT(0x40738b, "op 19 4: the dissolve wipe (0x401a50)")
  * is inside the script hit test 0x4071a4 with edi = its rectangle table
  * (NANPA2_HOTSPOTS=1; its C handler in src/game/ops.c fires it too). */
 HLE_PROBE(0x40616e, "script VM opcode fetch")
-HLE_PROBE(0x401a50, "wipe entry")
 HLE_PROBE(0x40738b, "wipe return in opcode 0x407386")
 HLE_PROBE(0x4062ff, "ASCII character draw")
 HLE_PROBE(0x40636d, "Big5 character draw")

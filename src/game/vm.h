@@ -113,64 +113,64 @@ void game_menu_item_regs(void);    /* 0x4068e1 */
 void game_string_arg_regs(void);   /* 0x406dc4 */
 void game_parse_args_regs(void);   /* 0x40741b */
 
-/* ---- src/game/ops.c: opcode handlers (jump units) ---- */
-uint32_t game_op_set_flags(void);       /* 0a 0x406491 */
-uint32_t game_op_set_flags_expr(void);  /* 0b 0x4064b5 */
-uint32_t game_op_set_reg(void);         /* 0c 0x4064d9 */
-uint32_t game_op_store_words(void);     /* 0d 0x4064f8 */
-uint32_t game_op_store_bytes(void);     /* 0e 0x406557 */
-uint32_t game_op_continue(void);        /* 04 11 0x406638 */
-uint32_t game_op_break(void);           /* 04 12 0x40663b */
-uint32_t game_op_set_label(void);       /* 12 0x40663e */
-uint32_t game_op_text_colour(void);     /* 18 0x4069be */
-uint32_t game_op_click_handler(void);   /* 04 20 0x4070bc */
-uint32_t game_op_hit_test(void);        /* 04 23 0x4071a4 */
-uint32_t game_op_args_only(void);       /* 04 22 0x40739b */
+/* ---- the VM (R2: direct style; src/game/loop.c, ops.c, ops_vm.c) ---- */
 
-/* ---- src/game/ops_vm.c: handlers split at the blocks and waits they run ---- */
-uint32_t game_op_if(void);               /* 0f 0x40659e */
-uint32_t game_op_if_then(void);          /* 0f 0x4065ae */
-uint32_t game_op_if_else(void);          /* 0f 0x4065ed */
-uint32_t game_op_wait(void);             /* 11 0x4065f6 */
-uint32_t game_op_wait_clear(void);       /* 11 0x4065fb */
-uint32_t game_op_while(void);            /* 04 10 0x40660c */
-uint32_t game_op_while_next(void);       /* 04 10 0x40661e */
-uint32_t game_op_call_label(void);       /* 13 0x406658 */
-uint32_t game_op_call_label_done(void);  /* 13 0x40666b */
-uint32_t game_op_call_offset(void);      /* 14 0x406a9a */
-uint32_t game_op_call_offset_done(void); /* 14 0x406aa7 */
-uint32_t game_op_delay(void);            /* 16 0x406aad */
-uint32_t game_op_delay_done(void);       /* 16 0x406abd */
-uint32_t game_op_delay_click_done(void); /* 16 0x406ac7 */
-uint32_t game_op_print_number(void);      /* 15 0x4069ce */
-uint32_t game_op_print_number_done(void); /* 15 0x4069f7 */
+/* the program counter (the native ESI): an offset in segment 0 */
+extern uint32_t vm_pc;
+/* nested vm_loop() calls above the top level (the native ESP != [top ESP]) */
+extern int vm_depth;
+
+/* 0x4060d4 after its set-up: load the MES file named at VM_SCRIPT_NAME and
+ * run the VM until the script ends or the game quits */
+void game_vm_run(void);
+/* 0x4060f9: run until a block ends; the block result AL (0 end, 1 continue,
+ * 2 break) */
+int vm_loop(void);
+/* 0x4061cd: run the block at vm_pc (its 01) as a nested loop; its AL. The
+ * caller charges its own `call`. */
+int vm_run_block(void);
+/* `call 0x4060f9` from vm_pc: a nested loop (called scripts, digits) */
+int vm_call_loop(void);
+/* a restart of the top-level loop (04 1e, 04 21 from a nested VM) */
+_Noreturn void vm_restart(void);
+/* 0x4074d5: pump, then 1 if input k is down. 0x4075c6: wait n / 4 + 1 frames.
+ * 0x406acc: wait for a click. They pump; WM_QUIT leaves by ctl_quit(). */
+int vm_input_down(uint32_t k);
+void vm_wait_frames(uint32_t n);
+void vm_wait_click(void);
+/* 0x406395: set up '@', the segments and the word array's pointers */
+void vm_init(void);
+/* 0x406dc4: argument 0 copied as a string to dst; the new dst; *src_end the
+ * script offset past it, *last its last byte */
+uint32_t vm_string_arg(uint32_t dst, uint32_t *src_end, uint32_t *last);
+
+/* Opcode handlers: entered with vm_pc past the opcode bytes, they return -1
+ * (on with the loop) or the block result (the native `ret` out of the running
+ * block). The ops that are still register-level pieces are below. */
+int vm_op_set_flags(void);       /* 0a */
+int vm_op_set_flags_expr(void);  /* 0b */
+int vm_op_set_reg(void);         /* 0c */
+int vm_op_store_words(void);     /* 0d */
+int vm_op_store_bytes(void);     /* 0e */
+int vm_op_if(void);              /* 0f */
+int vm_op_wait(void);            /* 11 */
+int vm_op_set_label(void);       /* 12 */
+int vm_op_call_label(void);      /* 13 */
+int vm_op_call_offset(void);     /* 14 */
+int vm_op_print_number(void);    /* 15 */
+int vm_op_delay(void);           /* 16 */
+int vm_op_text_colour(void);     /* 18 */
+int vm_op_while(void);           /* 04 10 */
+int vm_op_continue(void);        /* 04 11 */
+int vm_op_break(void);           /* 04 12 */
+int vm_op_menu(void);            /* 04 13 */
+int vm_op_jump_mes(void);        /* 04 1e */
+int vm_op_call_mes(void);        /* 04 1f */
+int vm_op_click_handler(void);   /* 04 20 */
+int vm_op_flag_file(void);       /* 04 21 */
+int vm_op_args_only(void);       /* 04 22 */
+int vm_op_hit_test(void);        /* 04 23 */
 void game_format_number_regs(void);       /* 0x4069fd */
-uint32_t game_op_jump_mes(void);          /* 04 1e 0x406f7c */
-uint32_t game_op_call_mes(void);          /* 04 1f 0x406fcd */
-uint32_t game_op_call_mes_done(void);     /* 04 1f 0x40704a */
-uint32_t game_op_flag_file(void);         /* 04 21 0x4070d5 */
-uint32_t game_op_menu(void);              /* 04 13 0x406671 */
-uint32_t game_op_menu_round(void);        /* 04 13 0x4066b8 */
-uint32_t game_op_menu_pumped(void);       /* 04 13 0x4066bd */
-uint32_t game_op_menu_framed(void);       /* 04 13 0x4066e6 */
-uint32_t game_op_menu_tested0(void);  /* 04 13 0x4066f6 */
-uint32_t game_op_menu_handled0(void); /* 04 13 0x406704 */
-uint32_t game_op_menu_waited0(void);  /* 04 13 0x406714 */
-uint32_t game_op_menu_tested1(void);  /* 04 13 0x406728 */
-uint32_t game_op_menu_handled1(void); /* 04 13 0x406736 */
-uint32_t game_op_menu_waited1(void);  /* 04 13 0x40674a */
-uint32_t game_op_menu_tested2(void);  /* 04 13 0x406761 */
-uint32_t game_op_menu_handled2(void); /* 04 13 0x40676f */
-uint32_t game_op_menu_waited2(void);  /* 04 13 0x406783 */
-uint32_t game_op_menu_tested3(void);  /* 04 13 0x40679a */
-uint32_t game_op_menu_handled3(void); /* 04 13 0x4067a8 */
-uint32_t game_op_menu_waited3(void);  /* 04 13 0x4067bc */
-uint32_t game_op_menu_tested4(void);  /* 04 13 0x4067d3 */
-uint32_t game_op_menu_handled4(void); /* 04 13 0x4067e1 */
-uint32_t game_op_menu_waited4(void);  /* 04 13 0x4067f5 */
-uint32_t game_op_menu_tested5(void);  /* 04 13 0x406810 */
-uint32_t game_op_menu_handled5(void); /* 04 13 0x406822 */
-uint32_t game_op_menu_waited5(void);  /* 04 13 0x40683b */
 
 /* ---- src/game/ops_sys.c: handlers around native subsystem routines ---- */
 uint32_t game_op_menu_items(void);      /* 04 14 0x406842 */
@@ -188,74 +188,54 @@ uint32_t game_op_anim(void);            /* 1a 0x407096 */
 uint32_t game_op_anim_done(void);       /* 1a 0x4070b6 */
 uint32_t game_op_misc(void);            /* 19 0x407204 */
 uint32_t game_op_wipe_done(void);        /* 0x40738b */
-uint32_t game_wipe(void);                /* 0x401a50, src/game/wipe.c */
-uint32_t game_wipe_pumped(void);         /* 0x401b90 */
+/* src/game/wipe.c: the dissolve wipe 0x401a50 (surface s1 over s0); the piece wrapper runs it
+ * from op 19 sub-op 4's handler and goes on at next_pc with EAX the result */
+uint32_t game_wipe(uint32_t s0, uint32_t s1);
+uint32_t game_wipe_piece(uint32_t s0, uint32_t s1, uint32_t next_pc);
 uint32_t game_op_music(void);           /* 04 24 0x4073a5 */
 uint32_t game_op_voice(void);           /* 04 25 0x4073cd */
 uint32_t game_op_map(void);             /* 04 26 0x4073ee (map_pump.c) */
 
-/* ---- src/game/loop.c: the VM loop, blocks, text, waits (stage 4) ---- */
-uint32_t game_vm_entry(void);           /* 0x4060d4 */
-uint32_t game_vm_loop(void);            /* 0x4060f9 */
-uint32_t game_vm_pumped(void);          /* 0x4060fe */
-uint32_t game_vm_click_tested0(void);   /* 0x406124 */
-uint32_t game_vm_click_tested1(void);   /* 0x406134 */
-uint32_t game_vm_block_done(void);      /* 0x4061c2 */
-uint32_t game_vm_run_block(void);       /* 0x4061cd */
-uint32_t game_vm_block_return(void);    /* 0x4061d3 */
-uint32_t game_vm_string_next(void);     /* 0x406315 */
-uint32_t game_vm_big5_next(void);       /* 0x406383 */
-uint32_t game_input_test(void);         /* 0x4074d5 */
-uint32_t game_input_tested(void);       /* 0x4074db */
-uint32_t game_wait_frames(void);        /* 0x4075c6 */
-uint32_t game_wait_frames_pumped(void); /* 0x4075d7 */
-uint32_t game_wait_click(void);         /* 0x406acc */
-uint32_t game_wait_click_framed(void);  /* 0x406adf */
-uint32_t game_wait_click_tested(void);  /* 0x406ae6 */
-uint32_t game_wait_click_release_framed(void); /* 0x406afb */
-uint32_t game_wait_click_release_tested(void); /* 0x406b02 */
-uint32_t game_vm_click_up0(void);       /* 0x40614a */
-uint32_t game_vm_click_up1(void);       /* 0x406153 */
-uint32_t game_vm_click_done(void);      /* 0x406164 */
-
 /* ---- src/game/screen.c (stage 5B): palette and fades ---- */
 void game_palette_save(void);           /* 0x40756c */
 void game_palette_restore(void);        /* 0x407599 */
-void game_palette_fill(uint32_t v);     /* 0x40754d */
+void game_palette_fill(uint16_t v);     /* 0x40754d */
 void game_palette_upload(void);         /* 0x401ca0 */
-void game_fade_start(void);             /* 0x401d30 */
+uint32_t game_fade_start(void);         /* 0x401d30; the last blue distance (EAX) */
 uint32_t game_fade_active(void);        /* 0x401e10 */
-uint32_t game_palette_wait_piece(void); /* 0x406f41: 04 16 3 waits for the fade */
+void game_palette_wait(void);           /* 0x406f41: 04 16 3 waits for the fade, restores the tables */
 
-/* surfaces, cursor, rectangles (cdecl arguments at ESP, results in EAX) */
-void game_lock_regs(void);              /* 0x401190 */
+/* surfaces, cursor, rectangles (screen.c). Surface arguments of the lock and unlock are the
+ * DirectDraw objects (guest addresses); the pixel pointer is a guest address (x86_ptr). */
+uint32_t game_surface_lock(uint32_t surf);    /* 0x401190 */
+uint32_t game_surface_unlock(uint32_t surf);  /* 0x4012b0; EAX as the routine leaves it */
+void game_lock_regs(void);              /* 0x401190, cdecl at ESP: map_draw.c's game_ncall */
 void game_unlock_regs(void);            /* 0x4012b0 */
-uint32_t game_surface_lock(uint32_t surf);
-void game_surface_unlock(uint32_t surf);
+uint32_t game_frame_alloc(uint32_t bytes); /* scratch on the emulated stack for the HLE boundary */
+void game_frame_free(uint32_t bytes);
 void game_cursor_restore(void);         /* 0x4011f0 */
-void game_cursor_restore_regs(void);
-void game_cursor_draw(void);            /* 0x4012e0 */
+uint32_t game_cursor_draw(void);        /* 0x4012e0; the cursor's x (EAX) */
 void game_cursor_show(void);            /* 0x401c40 */
 void game_cursor_hide(void);            /* 0x401c60 */
-void game_cursor_setpos(void);          /* 0x401c80 (cdecl x, y) */
-void game_blit_copy(void);              /* 0x401430 (dx, dy, sx, sy, w, h, surfaces) */
-void game_blit_masked(void);            /* 0x4014f0 */
-void game_blit_swap(void);              /* 0x401670 */
-void game_fill_rect(void);              /* 0x4017b0 (x, y, w, h, colour << 4, surface) */
-void game_xor_rect(void);
-void game_picture_load(void);           /* 0x406e20, ECX = load the file named by arg 0 */               /* 0x401870 */
+void game_cursor_setpos(uint32_t x, uint32_t y); /* 0x401c80 */
+/* the rectangles: (dx, dy, sx, sy, w, h) as 32-bit words the handler computed, surfaces src, dst */
+void game_blit_copy(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                    uint8_t src, uint8_t dst);   /* 0x401430 */
+void game_blit_masked(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                      uint8_t src, uint8_t dst); /* 0x4014f0 */
+void game_blit_swap(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t w, uint32_t h,
+                    uint8_t src, uint8_t dst);   /* 0x401670 */
+void game_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colour,
+                    uint32_t surf);              /* 0x4017b0, colour << 4 */
+void game_xor_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colour,
+                   uint32_t surf);               /* 0x401870 */
+uint32_t game_picture_load(int named);  /* 0x406e20: named = load the file named by arg 0; EAX of the last unlock */
 
 /* ---- src/game/text.c ---- */
-void game_draw_char(uint32_t c, uint32_t x, uint32_t y, uint32_t size, uint32_t fg,
-                    uint32_t bg);       /* 0x401900 */
-void game_draw_char_regs(void);
+void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t fg, uint8_t bg); /* 0x401900 */
 void game_text_advance(void);           /* 0x4063ee */
 void game_text_newline(void);           /* 0x406415 */
-void game_clear_text_window(void);      /* 0x406b24, EBX = colour */
-
-/* Temporary seam (startup.c): run the script VM, still register-level pieces
- * entered at 0x4060d4, until it ends. The orchestrator replaces it. */
-void game_vm_run(void);
+void game_clear_text_window(uint32_t colour); /* 0x406b24, colour << 4 (the fill's) */
 
 /* ---- src/game/anim.c ---- */
 void game_anim_step(void);              /* 0x403624 */

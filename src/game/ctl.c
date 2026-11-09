@@ -7,6 +7,7 @@
 
 int ctl_pump(void)
 {
+	hle_trace_pump();
 	int r = win32_pump();
 	/* the native pump returns from PeekMessageA/DispatchMessageA, which leave
 	 * ECX and EDX changed (hle.c, override_call 0x401bf0) */
@@ -17,12 +18,17 @@ int ctl_pump(void)
 
 static jmp_buf *catch_top;
 
-_Noreturn void ctl_quit(void)
+_Noreturn void ctl_unwind(void)
 {
-	COST(1);
 	if (!catch_top)
 		x86_trap(0x40638d, "WM_QUIT with nothing to unwind to");
 	longjmp(*catch_top, 1);
+}
+
+_Noreturn void ctl_quit(void)
+{
+	COST(1);
+	ctl_unwind();
 }
 
 void ctl_pump_or_quit(void)
