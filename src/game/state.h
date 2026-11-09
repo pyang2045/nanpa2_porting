@@ -1,14 +1,12 @@
 /*
  * The game state as C structs (docs/refactor.md, R1).
  *
- * The state used to live in the emulated 32-bit memory at the addresses of
- * nanpa2.exe's data and bss, read and written with rd16(0x4452e8) and the
- * like. It is now one object, G, that is the whole data area 0x431000-0x4c0000 in
- * its native layout, backed by one alias (x86_alias, state_init): code that
- * still reads an address, the HLE layer, bulk copies and the script VM (whose
- * segments are addresses) get G's bytes, and the unchecked indices of the
- * script land where they did natively. The comments give the native address
- * of each field. New code names the field.
+ * The game state is one object, G: the whole data area of nanpa2.exe that the game
+ * writes (0x431000-0x4c0000) in its native layout, so that the unchecked indices of
+ * the scripts land where they did natively, and the FLAG file and the checkpoints
+ * see the bytes they always did. The comments give the native address of each field,
+ * and an address is also an index into G (game/gmem.h). Code names the field. G is
+ * initialised from the asset (state_init) and is the only game state.
  */
 #ifndef NANPA2_GAME_STATE_H
 #define NANPA2_GAME_STATE_H
@@ -16,7 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "x86/x86.h"
+/* The layout of G is the file format of the saves and of the asset: little-endian throughout */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "the game state is little-endian (the FLAG files and the data image are)"
+#endif
+
 
 #pragma pack(push, 1)
 
@@ -114,7 +116,7 @@ _Static_assert(sizeof(struct save_image) == SAVE_SIZE, "the save image is 0xc00 
 #define RT_LABELS 60u
 #pragma pack(push, 1)
 struct vm_rt {
-	uint32_t unused_top_esp;   /* 0x445cdc the native top-level VM's ESP; R3: nothing reads or writes it */
+	uint32_t pad_cdc;          /* 0x445cdc the native top-level VM stack pointer: dead since R3, outside the FLAG image */
 	uint8_t cursor_shown;      /* 0x445ce0 the game cursor is drawn (ext 15) */
 	uint8_t click_busy;        /* 0x445ce1 a click handler's block is running */
 	uint16_t click_handler[2]; /* 0x445ce2 blocks for the left and right button (ext 20) */
@@ -136,7 +138,7 @@ struct vm_rt {
 	uint32_t frame;            /* 0x446292 frames since start (the 60 Hz timer) */
 	uint32_t stopwatch;        /* 0x446296 frame of the last op 19 2 x 0 */
 	uint32_t store_segment;    /* 0x44629a segment op 0d stores through */
-	uint32_t surface[4];       /* 0x44629e DirectDraw surface objects, 0 the screen */
+	uint32_t surface[4];       /* 0x44629e platform surface handles (platform/surface.h), 0 the screen */
 	uint32_t pitch[4];         /* 0x4462ae their pitches */
 };
 #pragma pack(pop)
@@ -166,7 +168,7 @@ RT_CHECK(pitch, 0x4462aeu);
 _Static_assert(sizeof(struct vm_rt) == 0x4462beu - RT_BASE, "vm_rt covers 0x445cdc-0x4462be");
 
 /* Palette, fade, cursor, window and DirectDraw globals, 0x4aac50-0x4ac51c. The
- * timer callback (0x4028c0, src/hle/hle.c) steps the fade and blinks the cursor
+ * timer tick (0x4028c0, src/game/timer.c) steps the fade and blinks the cursor
  * from here. */
 #define SC_BASE 0x4aac50u
 #pragma pack(push, 1)
@@ -174,26 +176,26 @@ struct screen_state {
 	uint32_t cursor_saved_y;   /* 0x4aac50 where the cursor sprite's background was saved */
 	uint32_t cursor_saved_x;   /* 0x4aac54 */
 	uint8_t pal_start[1024];   /* 0x4aac58 the palette entries as the fade started (RGBA x 256) */
-	uint32_t scratch_surface;  /* 0x4ab058 the 640x480 scratch surface object (text) */
-	uint32_t hwnd;             /* 0x4ab05c */
+	uint32_t scratch_surface;  /* 0x4ab058 the 640x480 scratch surface (text): a surface handle */
+	uint32_t hwnd;             /* 0x4ab05c the window: unused since R4 (kept for the layout) */
 	int32_t pal_delta[256][3]; /* 0x4ab060 target - displayed, per channel */
 	uint8_t cursor_saved[1024]; /* 0x4abc60 background under the cursor, 32 rows of 32 bytes */
 	uint32_t cursor_y;         /* 0x4ac060 */
 	uint32_t cursor_x;         /* 0x4ac064 */
 	uint32_t letterbox;        /* 0x4ac068 1: the 640x480 image sits 40 lines down */
-	uint32_t hinstance;        /* 0x4ac06c */
-	uint32_t font[3];          /* 0x4ac070 font handles by size */
+	uint32_t hinstance;        /* 0x4ac06c unused since R4 */
+	uint32_t font[3];          /* 0x4ac070 font handles by size (platform/text.h) */
 	uint8_t pal_entries[1024]; /* 0x4ac07c PALETTEENTRY[256]: red, green, blue, flags */
 	uint8_t pad_47c[4];        /* 0x4ac47c */
-	uint8_t surface_desc[0x24]; /* 0x4ac480 DDSURFACEDESC of the last Lock ... */
-	uint32_t lock_ptr;         /* 0x4ac4a4 ... its lpSurface */
+	uint8_t surface_desc[0x24]; /* 0x4ac480 DDSURFACEDESC of the last Lock: unused since R4 ... */
+	uint32_t lock_ptr;         /* 0x4ac4a4 ... its lpSurface: unused since R4 (a lock returns a pointer) */
 	uint8_t surface_desc_rest[0x44]; /* 0x4ac4a8 */
 	uint32_t active;           /* 0x4ac4ec the timer runs the game only while set (WM_ACTIVATEAPP) */
-	uint32_t ddraw;            /* 0x4ac4f0 */
-	uint32_t palette_obj;      /* 0x4ac4f4 the DirectDraw palette object */
+	uint32_t ddraw;            /* 0x4ac4f0 unused since R4 (the DirectDraw object) */
+	uint32_t palette_obj;      /* 0x4ac4f4 unused since R4 (the DirectDraw palette object) */
 	uint32_t logo;             /* 0x4ac4f8 the logo movie is playing */
 	uint32_t pad_4fc;          /* 0x4ac4fc */
-	uint32_t timer_id;         /* 0x4ac500 */
+	uint32_t timer_id;         /* 0x4ac500 unused since R4 (the timer handle) */
 	uint32_t fade_active;      /* 0x4ac504 a palette fade is running */
 	uint32_t fade_step;        /* 0x4ac508 of 16 */
 	uint32_t fade_wait;        /* 0x4ac50c ticks since the last step */
@@ -258,7 +260,7 @@ _Static_assert(offsetof(struct anim_state, random_seed) == 0x4313c4u - AN_BASE, 
 #define MAPD_CELLS 0x1f40u
 #pragma pack(push, 1)
 struct map_vars {
-	uint32_t locked_screen;    /* 0x435548 the pixel pointers of the three locked surfaces */
+	uint32_t locked_screen;    /* 0x435548 the pixel pointers of the three locked surfaces: unused since R4 (map_draw.c holds them) */
 	uint32_t locked_tiles;     /* 0x43554c */
 	uint32_t locked_sprites;   /* 0x435550 */
 	uint8_t pad_554[2];        /* 0x435554 */
@@ -323,7 +325,7 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
 #define ANI_BASE 0x4a62beu
 #define ANI_SIZE 0x4992u
 
-/* The sound words the native DirectSound code kept (src/hle/sound.c replaces it;
+/* The sound words the native DirectSound code kept (src/platform/sound.c replaces it;
  * nothing in C reads them) and the cursor bitmap */
 #define SND_BASE 0x4be540u
 #define CBITS_BASE 0x4be900u
@@ -331,8 +333,8 @@ _Static_assert(sizeof(struct map_data) == 0x435e78u - MAPD_BASE, "map_data");
 /* The whole initialised and zero-initialised data of nanpa2.exe that the game
  * writes, 0x431000-0x4c0000, in its native layout (so every address the native
  * code computed, including the unchecked indices of the script, lands where it
- * did). One alias backs it (state_init). Outside it the emulated memory holds the
- * code, the read-only data, the stack and the heap. */
+ * did). The rest of the exe (code, read-only data, the C runtime) is not part of the
+ * engine: nothing reads it. */
 #define DATA_BASE 0x431000u
 #define DATA_END 0x4c0000u
 struct game_state {
@@ -369,9 +371,9 @@ GS_CHECK(cursor_bits, CBITS_BASE);
 _Static_assert(sizeof(struct game_state) == DATA_END - DATA_BASE, "game_state covers 0x431000-0x4c0000");
 extern struct game_state G;
 
-/* After the image is installed: the groups that have moved become aliases
- * of their addresses (taking the content the asset gave them). */
-void state_init(void);
+/* After the asset is loaded (asset.h): G takes the data area of its image, and the image is
+ * released. 1 ok. */
+int state_init(void);
 
 /* Field access with the width and zero extension of rd8/rd16/wr8/wr16 */
 #define SV(f) ((uint32_t)G.save.n.f)

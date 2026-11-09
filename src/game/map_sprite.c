@@ -79,7 +79,7 @@ static void step(struct sprite *s, uint32_t *eax)
 		break;
 	case 13: walk_to_destination(s, eax); break;
 	default:
-		x86_trap(0x404410, "map: a sprite movement kind the C does not run");
+		game_trap(0x404410, "map: a sprite movement kind the C does not run");
 	}
 	s->frame ^= 1;
 }

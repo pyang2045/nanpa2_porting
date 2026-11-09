@@ -18,9 +18,8 @@
  * copied with the screen's own bit 3 kept; a cell with sprite tiles is
  * composed in three work planes (G.map.work) and written out.
  *
- * The locked surface pixels are guest addresses of the HLE layer's surfaces;
- * while locked the drawing holds C pointers to them (x86_ptr). The guest
- * addresses stay in G.map.v (the data area is checked).
+ * While the surfaces are locked the drawing holds the pixel pointers (lk), not
+ * G: the fields of G.map.v the native code kept them in are unused.
  */
 #include "game/map.h"
 
@@ -37,12 +36,6 @@ static struct {
 static inline uint32_t ld32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static inline void st32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
 
-static uint32_t lock_surface(uint32_t surface)
-{
-	uint32_t p = game_surface_lock(surface);
-	return p;
-}
-
 static uint32_t unlock_surface(uint32_t surface)
 {
 	uint32_t eax = game_surface_unlock(surface);
@@ -52,12 +45,9 @@ static uint32_t unlock_surface(uint32_t surface)
 /* the three locks and unlocks around a drawing pass */
 static void lock_all(void)
 {
-	MV_SET(locked_screen, lock_surface(RT(surface[0])));
-	MV_SET(locked_tiles, lock_surface(RT(surface[2])));
-	MV_SET(locked_sprites, lock_surface(RT(surface[3])));
-	lk.screen = x86_ptr(MV(locked_screen), 1);
-	lk.tiles = x86_ptr(MV(locked_tiles), 1);
-	lk.sprites = x86_ptr(MV(locked_sprites), 1);
+	lk.screen = game_surface_lock(RT(surface[0]));
+	lk.tiles = game_surface_lock(RT(surface[2]));
+	lk.sprites = game_surface_lock(RT(surface[3]));
 	lk.pitch = RT(pitch[0]);
 }
 
@@ -146,7 +136,7 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
 			uint32_t tiles = p + 4;
 			uint32_t row = ry; /* the low word of EBP */
 			if (!h || !w)
-				x86_trap(0x403bd2, "map: a sprite pattern with no cells");
+				game_trap(0x403bd2, "map: a sprite pattern with no cells");
 			for (uint32_t r = 0; r < h; r++) {
 				struct cell *cp = cell;
 				uint32_t col = rx;

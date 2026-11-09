@@ -162,7 +162,7 @@ static uint32_t op_unpack(void)
 	seg1_set16(dst, w);
 	seg1_set16(dst + 2, h);
 	if (!w || !h)
-		x86_trap(0x405415, "map: unpacking a layer with no cells");
+		game_trap(0x405415, "map: unpacking a layer with no cells");
 	src += 4;
 	dst += 4;
 	uint32_t run = 0, v = 0;
@@ -201,7 +201,7 @@ static uint32_t op_copy_cells(void)
 	dst &= 0xffff;
 	uint32_t rows = (d - b + 1) & 0xffff, cols = (c - a + 1) & 0xffff;
 	if (!rows || !cols)
-		x86_trap(0x40548f, "map: copying an empty rectangle");
+		game_trap(0x40548f, "map: copying an empty rectangle");
 	uint32_t v = 0;
 	for (uint32_t r = 0; r < rows; r++) {
 		uint32_t s = src, t = dst;
@@ -426,7 +426,7 @@ uint32_t game_map_op(uint32_t op)
 		op_stop_walk();
 		break;
 	default:
-		x86_trap(0x403a7f, "map sub-op left to the native code reached C");
+		game_trap(0x403a7f, "map sub-op left to the native code reached C");
 	}
 	return eax;
 }

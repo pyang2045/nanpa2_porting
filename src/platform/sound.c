@@ -15,7 +15,7 @@
  *   so a jingle replaces the BGM; there is no separate effects channel.
  * - voice (buffer 0x4be564, file image 0x4be574). 0x403360 stops the old
  *   voice (0x403440), loads SPEECH%s into a static buffer, rewinds and plays
- *   it once. The lifted WndProc stops the voice on WM_LBUTTONDOWN,
+ *   it once. The game's window procedure stops the voice on WM_LBUTTONDOWN,
  *   WM_RBUTTONDOWN, the key-up of Return/Space/Esc and on deactivation.
  *
  * No buffer is ever given a volume, pan or frequency, so everything plays at
@@ -26,7 +26,7 @@
  * Dev hook: NANPA2_AUDIO_DUMP=out.wav writes the mixed output (44100 Hz
  * S16 stereo) to a WAV file. Without an audio device the SDL dummy driver
  * runs the mixer in real time, so the dump and game timing are the same. */
-#include "hle.h"
+#include "platform/sound.h"
 
 #include <SDL.h>
 #include <math.h>
@@ -37,7 +37,7 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3_ex.h"
 
-#include "dev.h"
+#include "dev/dev.h"
 #include "fsys.h"
 
 #define RATE 44100

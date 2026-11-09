@@ -1301,3 +1301,36 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
   gained a charge).
 - ctest (selftest_dir, selftest, replay_det, wavcheck, no_game_bytes, asset_only) pass; plain headless
   run, 300000 frames of seed 48 from the town saves, 0 warnings or traps.
+
+## 2026-11-09 (refactor R4: a free-standing C engine, no emulated PC)
+
+- 8123dcd: the checkpoint key `raw.gdata` (hash of `G` with the platform's handles, lock descriptor and locked
+  pixel pointers zeroed), added on the R3 code; `--replay` with `--record` writes the replayed messages. The
+  four `golden_r3` recordings replayed on it with every old key matched and re-recorded as `golden_r4`
+  (messages, `li.*` and `raw.clock` equal to the old ones, plus `raw.gdata`): the new definition proven
+  before anything changed.
+- aee4867: files and sound are direct calls. `src/platform/files.[ch]` keeps `crt.c`'s path rules;
+  `file.c` is plain C (same open attempts in the same order, the decompressor input length of the native
+  block `((size + 8 + 15) & ~15) - 8` for the pacing charge). Found: 0x401050 tests the name against "FLAG"
+  (0x431058), not "DATA" (re-notes.md "Findings of R4").
+- b168ef3: DirectDraw, GDI text, Win32 and the 16 ms timer are platform calls (`platform/surface.h`,
+  `text.h`, `window.h`); `hle_invoke`, the thunks and the COM objects are gone; the timer tick (0x4028c0) is
+  `src/game/timer.c`. The primary surface keeps the handle value of the emulated heap (register S).
+- 5d5612e: `src/x86` removed: `G` is initialised from the asset image (`src/asset.c`) and stands alone;
+  `game/gmem.h` indexes it by G addresses (the original's numbering) and traps outside it; `src/trap.c`
+  (`game_trap`: the native address, the frame and script). FLAG files go through `state_save_export/import`
+  (the segment bases are not taken from a file). Dead `native_pc`/`exit_pc`/`loop_pc` parameters and
+  `unused_top_esp` removed. `raw.cpu/data/heap/stack/pg` and `NANPA2_DATA_CHECK` retired.
+- f40feb6, b55d64f, f1bd5f8, and the documentation commits: `src/hle` dissolved into `src/platform` and
+  `src/dev`; build scripts without the recomp/capstone leftovers (`tools/build.sh`, `build_msys2.sh`);
+  `NANPA2_LOAD_EXE=1` for the exe-whole data; self-test through the serializer.
+- Removed: `src/x86/` (x86.c, x86.h), `src/hle/` crt.c, ddraw.c, hle.c, hle.h and the import/COM tables of
+  win32.c; src went from 15412 to 14226 lines (+1872/-3058 over the stage), no file of the game folder touched.
+- Checks: the four `golden_r4` replays match on every chunk and twice on the final build (271/331/33/161
+  checkpoints, `li.*`, `raw.clock`, `raw.gdata`); the FLAG0 and FLAG6 the final build wrote in all four runs
+  are byte-identical to 5b37d43's; the install's own FLAG files (copied) loaded in a bot run recorded on
+  5b37d43 and replayed on the final build (33 checkpoints); a plain 300000-frame run of seed 48 from the
+  town saves: 4800.3 s of game time in 45 s, TOWN.MES 7 times, 513 file opens identical to 5b37d43's, 0 traps or
+  warnings; ctest 7 of 7 (smoke skipped; replay_det 5.6 s instead of 35).
+- Portability: 64-bit little-endian assumed and checked at build time; strict-width syntax pass over every
+  source (details in docs/refactor.md "Portability audit"). Linux and Windows builds are still untested.

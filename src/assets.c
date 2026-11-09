@@ -7,15 +7,15 @@
 
 #include "fsys.h"
 #include "launch.h"
-#include "x86/x86.h"
+#include "asset.h"
 
 #define ASSET_NAME "nanpa2.dat"
 #define EXE_NAME "nanpa2.exe"
 
-/* the modes that run the original code need the exe (the oracle) */
+/* NANPA2_LOAD_EXE=1: take the data from the whole exe instead of nanpa2.dat (the asset test compares the two) */
 static const char *exe_mode(void)
 {
-	static const char *const names[] = { "NANPA2_INTERP" };
+	static const char *const names[] = { "NANPA2_LOAD_EXE" };
 	for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
 		const char *e = getenv(names[i]);
 		if (e && *e && strcmp(e, "0"))
@@ -45,7 +45,7 @@ static int asset_path(int which, char *out, size_t cap)
 	return 1;
 }
 
-/* the header of an asset of this build (the full check is x86_asset_read's) */
+/* the header of an asset of this build (the full check is asset_read's) */
 static int header_ok(const char *path)
 {
 	uint8_t h[16];
@@ -67,7 +67,7 @@ static int exe_ok(const char *path)
 		return 0;
 	size_t n = fread(head, 1, sizeof head, f);
 	fclose(f);
-	return x86_exe_check(head, n);
+	return asset_exe_check(head, n);
 }
 
 const char *assets_check(const char *dir)
@@ -93,7 +93,7 @@ const char *assets_check(const char *dir)
 static int make_somewhere(const char *exe, char *path, size_t cap, int *rc)
 {
 	for (int i = 0; asset_path(i, path, cap); i++) {
-		*rc = x86_asset_make(exe, path);
+		*rc = asset_make(exe, path);
 		if (*rc == 1 || *rc < 0)
 			return *rc == 1;
 	}
@@ -116,7 +116,7 @@ int assets_open(const char *exe_arg, char *err, size_t cap)
 				 "inside data1.cab on the CD)", why, exe);
 			return 0;
 		}
-		int st = x86_load_image(exe);
+		int st = asset_load_exe(exe);
 		if (st <= 0) {
 			snprintf(err, cap, st < 0 ? "%s is not the nanpa2.exe this engine runs (the Taiwan "
 					 "release built 2000-07-10)" : "cannot load %s", exe);
@@ -129,7 +129,7 @@ int assets_open(const char *exe_arg, char *err, size_t cap)
 	for (int i = 0; asset_path(i, p, sizeof p); i++) {
 		if (!exists(p))
 			continue;
-		int st = x86_asset_read(p);
+		int st = asset_read(p);
 		if (st == 1) {
 			SDL_Log("assets: %s", p);
 			return 1;
@@ -154,7 +154,7 @@ int assets_open(const char *exe_arg, char *err, size_t cap)
 		}
 		SDL_Log("assets: cannot write " ASSET_NAME " to the game folder or the save folder, "
 			"loading %s whole", exe);
-		int st = x86_load_image(exe);
+		int st = asset_load_exe(exe);
 		if (st <= 0) {
 			snprintf(err, cap, "cannot load %s", exe);
 			return 0;
@@ -162,7 +162,7 @@ int assets_open(const char *exe_arg, char *err, size_t cap)
 		return 1;
 	}
 	SDL_Log("assets: made %s from %s", p, exe);
-	if (x86_asset_read(p) != 1) {
+	if (asset_read(p) != 1) {
 		snprintf(err, cap, "cannot load %s just made", p);
 		return 0;
 	}
@@ -181,7 +181,7 @@ int assets_make(const char *exe_arg, const char *out, char *path, size_t pathcap
 	int rc = 0;
 	if (out) {
 		snprintf(path, pathcap, "%s", out);
-		rc = x86_asset_make(exe, path);
+		rc = asset_make(exe, path);
 	} else
 		make_somewhere(exe, path, pathcap, &rc);
 	if (rc == 1)

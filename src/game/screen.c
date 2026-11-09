@@ -1,5 +1,5 @@
 /*
- * The palette (stage 5B): the two colour tables, the DirectDraw palette
+ * The palette: the two colour tables, the palette
  * entries built from them, the fade between the displayed entries and the
  * tables, and the wait for the fade to end.
  *
@@ -8,7 +8,7 @@
  * builds 256 PALETTEENTRY records at PAL_ENTRIES from them. A fade
  * (0x401d30) stores, per entry and channel, the distance from the entries
  * displayed now to the tables, and the start colours at PAL_START; the
- * 16 ms timer callback (src/hle/hle.c, native 0x4028c0) then moves the
+ * 16 ms timer tick (src/game/timer.c, native 0x4028c0) then moves the
  * entries 16 steps along it, and clears PAL_FADING at the end.
  * Semantics: re-notes.md "Palette and fades".
  *
@@ -18,8 +18,9 @@
 #include "game/pace.h"
 #include "game/file.h"
 #include "game/vm.h"
-#include "x86/x86.h"
-#include "game/state.h"
+#include "game/gmem.h"
+#include "platform/window.h"
+#include "platform/surface.h"
 
 #define PAL_BASE_N 16u
 #define PAL_PICTURE_N 240u
@@ -27,7 +28,6 @@
  * 5:5:5 (red in bits 10-14), G.rt.palette_saved[256] the same 16 + 240 colours saved (0x40756c),
  * G.sc.pal_entries PALETTEENTRY[256] (red, green, blue, flags), G.sc.pal_delta[256][3] target - displayed,
  * G.sc.pal_start the entries as the fade started. */
-#define PAL_ENTRIES 0x4ac07cu  /* the guest address of pal_entries, passed to SetEntries */
 
 /* 0x40756c / 0x407599: save the tables to PAL_SAVED, or put them back,
  * unless @[9] bit 4 is set. */
@@ -83,8 +83,7 @@ void game_palette_upload(void)
 		e[1] = (w >> 2) & 0xf8;
 		e[2] = (w & 0x1f) << 3;
 	}
-	uint32_t obj = SC(palette_obj);
-	HLE(rd32(rd32(obj) + 0x18), obj, 0, 0, 0x100, PAL_ENTRIES);
+	pal_set(0, 256, G.sc.pal_entries);
 }
 
 /* 0x401d30: start a fade from the displayed entries to the tables. Returns
@@ -137,28 +136,24 @@ void game_palette_wait(void)
 }
 
 /*
- * Surfaces and the game cursor (stage 5B).
+ * Surfaces and the game cursor.
  *
- * The screen is surface 0 of SURFACES (DirectDraw objects, pitches in
- * PITCHES); the scratch surface 0x4ab058 and the rest are numbered
- * after it. Every routine that draws on or locks the screen first takes
- * the game's own cursor off it and puts it back afterwards: the cursor is
- * a 32x32 sprite (two bit planes per frame of CURSOR_BITS: where the
- * second plane is clear the pixel turns black, where the first is set it
- * turns white) drawn straight into the locked screen, with the pixels
- * under it kept in SAVED_BG so that they can be put back. When
- * SCREEN_SHIFT is set the picture is drawn 40 lines below the surface's
- * top, and every rectangle on surface 0 moves with it. Semantics:
- * re-notes.md "Surfaces and cursor".
+ * The screen is surface 0 of G.rt.surface (platform surface handles, pitches in G.rt.pitch);
+ * the scratch surface G.sc.scratch_surface and the rest are numbered after it. Every routine
+ * that draws on or locks the screen first takes the game's own cursor off it and puts it back
+ * afterwards: the cursor is a 32x32 sprite (two bit planes per frame of G.cursor_bits: where
+ * the second plane is clear the pixel turns black, where the first is set it turns white) drawn
+ * straight into the locked screen, with the pixels under it kept in G.sc.cursor_saved so that
+ * they can be put back. When G.sc.letterbox is set the picture is drawn 40 lines below the
+ * surface's top, and every rectangle on surface 0 moves with it. Semantics: re-notes.md
+ * "Surfaces and cursor".
  *
- * The routines are ordinary functions of their arguments. A surface lock hands out the
- * guest address of the pixels (the DirectDraw lock descriptor and
- * G.sc.lock_ptr hold it too); the drawing code reaches them through
- * x86_ptr for exactly the bytes a row touches.
+ * A lock hands out the surface's pixel pointer (src/platform/surface.h). The coordinates the
+ * scripts give are not checked, as natively: a rectangle that leaves a surface lands in the
+ * platform's slack around it, or (blits) is clipped by the platform.
  */
-#define SURFACES 0x44629eu    /* u32[]: surface objects, [0] the screen */
+#define SURFACES 0x44629eu    /* u32[]: surface handles, [0] the screen */
 #define PITCHES 0x4462aeu     /* u32[]: their pitches */
-#define LOCK_DESC 0x4ac480u   /* DDSURFACEDESC of the last Lock */
 /* G.sc.cursor_saved: 32 rows of 32 bytes; G.cursor_bits: the two planes (AND, XOR) of each frame, 0x100 apart, as
  * big-endian dwords per row. A frame number past the table reads on into the data that follows, as natively. */
 static uint32_t cursor_plane(uint32_t off)
@@ -167,30 +162,10 @@ static uint32_t cursor_plane(uint32_t off)
 	memcpy(&v, (uint8_t *)&G.cursor_bits + off, 4);
 	return v;
 }
-#define IAT_SETCURSORPOS 0x41b12cu
 #define SHIFT_LINES 0x28u
 
-#define COM_BLT 0x14u
-#define COM_BLTFAST 0x1cu
-#define COM_LOCK 0x64u
-#define COM_UNLOCK 0x80u
-
-/* Scratch words on the emulated stack for the HLE boundary (the RECT and
- * DDBLTFX the DirectDraw methods read from guest memory, the string and
- * device context of the GDI calls) until R4 removes it. */
-uint32_t game_frame_alloc(uint32_t bytes)
-{
-	cpu.r[ESP] -= bytes;
-	return cpu.r[ESP];
-}
-
-void game_frame_free(uint32_t bytes)
-{
-	cpu.r[ESP] += bytes;
-}
-
-/* the surface object and pitch of surface i (the index comes from the
- * script unchecked: past 3 it reads on into the tables after) */
+/* the surface handle of surface i (the index comes from the script unchecked: past 3 it reads
+ * on into the pitch table and the segment after, which name no surface) and its pitch */
 static uint32_t surface_at(uint32_t i)
 {
 	return rd32(SURFACES + 4 * i);
@@ -199,19 +174,6 @@ static uint32_t surface_at(uint32_t i)
 static uint32_t pitch_at(uint32_t i)
 {
 	return rd32(PITCHES + 4 * i);
-}
-
-/* the DirectDraw method at a vtable offset of the object */
-#define COM(obj, off, ...) HLE(rd32(rd32(obj) + (off)), (obj), __VA_ARGS__)
-
-static void com_lock(uint32_t surf)
-{
-	COM(surf, COM_LOCK, 0, LOCK_DESC, 1, 0);
-}
-
-static void com_unlock(uint32_t surf)
-{
-	COM(surf, COM_UNLOCK, 0);
 }
 
 /* 0x4011f0: put the pixels under the cursor back (the width and height
@@ -230,15 +192,14 @@ void game_cursor_restore(void)
 		h = 0x20;
 	}
 	uint32_t screen = G.rt.surface[0];
-	com_lock(screen);
-	uint32_t pitch = G.rt.pitch[0], row = SC(lock_ptr) + pitch * y + x;
+	uint32_t pitch = G.rt.pitch[0];
+	uint8_t *row = surf_lock(screen, NULL) + pitch * y + x;
 	if ((int32_t)h > 0) {
 		for (uint32_t r = 0; r < h; r++) {
-			memcpy(x86_ptr(row, w), G.sc.cursor_saved + 32 * r, w);
+			memcpy(row, G.sc.cursor_saved + 32 * r, w);
 			row += pitch;
 		}
 	}
-	com_unlock(screen);
 }
 
 /* 0x4012e0: save the pixels under the cursor and draw it at its place.
@@ -259,18 +220,18 @@ uint32_t game_cursor_draw(void)
 	uint32_t frame = SC(cursor_frame);
 	uint32_t plane1 = frame << 8, plane2 = 0x80 + (frame << 8);
 	uint32_t screen = G.rt.surface[0];
-	com_lock(screen);
-	uint32_t pitch = G.rt.pitch[0], top = SC(lock_ptr) + pitch * y + x;
+	uint32_t pitch = G.rt.pitch[0];
+	uint8_t *top = surf_lock(screen, NULL) + pitch * y + x;
 	if ((int32_t)h > 0) {
-		uint32_t row = top;
+		uint8_t *row = top;
 		for (uint32_t r = 0; r < h; r++) {
-			memcpy(G.sc.cursor_saved + 32 * r, x86_ptr(row, w), w);
+			memcpy(G.sc.cursor_saved + 32 * r, row, w);
 			row += pitch;
 		}
 		row = top;
 		for (uint32_t r = 0; r < h; r++) {
 			uint32_t bit = 0x80000000u;
-			uint8_t *px = (int32_t)w > 0 ? x86_ptr(row, w) : NULL;
+			uint8_t *px = row;
 			for (uint32_t c = 0; (int32_t)w > 0 && c < w; c++, bit >>= 1) {
 				if (!(cursor_plane(plane2 + 4 * r) & bit)) {
 					px[c] = 0;
@@ -282,7 +243,6 @@ uint32_t game_cursor_draw(void)
 			row += pitch;
 		}
 	}
-	com_unlock(screen);
 	SC_SET(cursor_saved_x, SC(cursor_x));
 	SC_SET(cursor_saved_y, SC(cursor_y));
 	return SC(cursor_x);
@@ -308,19 +268,18 @@ void game_cursor_hide(void)
 }
 
 /* 0x401c80: the host mouse pointer to (x, y), the screen shifted down when
- * SCREEN_SHIFT is set. */
+ * letterbox is set. */
 void game_cursor_setpos(uint32_t x, uint32_t y)
 {
 	if (SC(letterbox)) {
 		y += SHIFT_LINES;
 	}
-	HLE(rd32(IAT_SETCURSORPOS), x, y);
+	win_warp_cursor((int)x, (int)y);
 }
 
-/* 0x401190: lock the surface (the object's address) and return the guest
- * address of its pixels, after taking the cursor off the screen. On the
- * screen with SCREEN_SHIFT set the pointer is 40 lines down. */
-uint32_t game_surface_lock(uint32_t surf)
+/* 0x401190: lock the surface and return its pixels, after taking the cursor off the screen. On
+ * the screen with letterbox set the pointer is 40 lines down. */
+uint8_t *game_surface_lock(uint32_t surf)
 {
 	uint32_t screen = G.rt.surface[0];
 	if (surf == screen) {
@@ -328,9 +287,8 @@ uint32_t game_surface_lock(uint32_t surf)
 			game_cursor_restore();
 		}
 	}
-	com_lock(surf);
+	uint8_t *p = surf_lock(surf, NULL);
 	screen = G.rt.surface[0];
-	uint32_t p = SC(lock_ptr);
 	if (surf == screen) {
 		if (SC(letterbox)) {
 			p += 8 * (G.rt.pitch[0] * 5); /* lea ecx, [ecx + 4*ecx] */
@@ -340,12 +298,11 @@ uint32_t game_surface_lock(uint32_t surf)
 }
 
 /* 0x4012b0: unlock the surface, and draw the cursor again if it was the
- * screen. Returns EAX as the routine leaves it (0, or the screen object, or
+ * screen. Returns EAX as the routine leaves it (0, or the screen's handle, or
  * the cursor's x): the last unlock's result is the S of op 19 sub-ops 3
  * and 4 and of the map's redraws. */
 uint32_t game_surface_unlock(uint32_t surf)
 {
-	com_unlock(surf);
 	uint32_t screen = G.rt.surface[0];
 	if (surf != screen) {
 		return screen;
@@ -357,52 +314,40 @@ uint32_t game_surface_unlock(uint32_t surf)
 }
 
 /*
- * Rectangles (stage 5B): copy, masked copy, swap, fill and XOR on the
- * numbered surfaces. The copy arguments are (dx, dy, sx, sy, w, h, src,
- * dst): the source rectangle (sx, sy, w, h) of surface src goes to (dx,
- * dy) of surface dst (the native routine takes the two numbers in one word,
- * src << 8 | dst, of which it uses these 16 bits). On the screen with
- * SCREEN_SHIFT set every rectangle and position on surface 0 is 40 lines
- * lower. The cursor is taken off the screen first and drawn again after,
- * whatever surfaces are involved. Colour 8 is transparent in the masked
- * copy. The coordinates and sizes are the full 32-bit words the script
- * handlers compute (the upper halves carry over from their registers); the
- * rectangle given to DirectDraw holds them all.
+ * Rectangles: copy, masked copy, swap, fill and XOR on the numbered surfaces. The copy
+ * arguments are (dx, dy, sx, sy, w, h, src, dst): the source rectangle (sx, sy, w, h) of
+ * surface src goes to (dx, dy) of surface dst (the native routine takes the two numbers in one
+ * word, src << 8 | dst, of which it uses these 16 bits). On the screen with letterbox set every
+ * rectangle and position on surface 0 is 40 lines lower. The cursor is taken off the screen
+ * first and drawn again after, whatever surfaces are involved. Colour 8 is transparent in the
+ * masked copy. The coordinates and sizes are the full 32-bit words the script handlers compute
+ * (the upper halves carry over from their registers); the platform gets them as signed ints.
  */
-#define BLITFAST_WAIT 0x10u
-#define BLITFAST_KEYED 0x11u  /* wait, source colour key */
-#define BLT_COLORFILL_WAIT 0x1000400u
 #define TRANSPARENT 8u
 
-/* mov eax, [cursor]; test; je; [call 0x4011f0] (n further instructions
- * between them for the routine's own moves) */
-static void cursor_off(int n)
+static void cursor_off(void)
 {
 	if (SC(cursor_on)) {
 		game_cursor_restore();
 	}
 }
 
-static void cursor_on(int n)
+static void cursor_on(void)
 {
 	if (SC(cursor_on)) {
 		game_cursor_draw();
 	}
 }
 
-static void put_rect(uint32_t at, uint32_t l, uint32_t t, uint32_t r, uint32_t b)
+/* BltFast(dst, x, y, src, rectangle, keyed), and its time (pace.h): a plain copy costs less than
+ * one with the source's colour key */
+static void bltfast(uint32_t dst, uint32_t x, uint32_t y, uint32_t src, uint32_t l, uint32_t t, uint32_t r,
+                    uint32_t b, int keyed)
 {
-	wr32(at, l);
-	wr32(at + 4, t);
-	wr32(at + 8, r);
-	wr32(at + 12, b);
-}
-
-/* BltFast(this = dst, x, y, src, &rect, flags) */
-static void bltfast(uint32_t dst, uint32_t x, uint32_t y, uint32_t src, uint32_t rect,
-                    uint32_t flags)
-{
-	COM(dst, COM_BLTFAST, x, y, src, rect, flags);
+	int w = (int)(r - l), h = (int)(b - t);
+	if (w > 0 && h > 0)
+		ctl_work_us(PACE_BLIT_US(w, h, keyed && surf_has_colorkey(src)));
+	surf_blt_fast(dst, (int)x, (int)y, src, (int)l, (int)t, (int)r, (int)b, keyed);
 }
 
 /* 0x401430 */
@@ -421,13 +366,10 @@ void game_blit_copy(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t
 			dy += SHIFT_LINES;
 		}
 	}
-	uint32_t rect = game_frame_alloc(0x10);
-	put_rect(rect, sx, top, sx + w, bottom);
-	cursor_off(0);
+	cursor_off();
 	uint32_t dobj = surface_at(dst);
-	bltfast(dobj, dx, dy, surface_at(src), rect, BLITFAST_WAIT);
-	game_frame_free(0x10);
-	cursor_on(2);
+	bltfast(dobj, dx, dy, surface_at(src), sx, top, sx + w, bottom, 0);
+	cursor_on();
 }
 
 /* 0x4014f0: same arguments; on the screen the surface's colour key (8)
@@ -450,31 +392,26 @@ void game_blit_masked(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32
 				dy += SHIFT_LINES;
 			}
 		}
-		uint32_t rect = game_frame_alloc(0x10);
-		put_rect(rect, sx, top, sx + w, bottom);
-		cursor_off(0);
+		cursor_off();
 		uint32_t screen = surface_at(0);
-		bltfast(screen, dx, dy, surface_at(src), rect, BLITFAST_KEYED);
-		game_frame_free(0x10);
-		cursor_on(0);
+		bltfast(screen, dx, dy, surface_at(src), sx, top, sx + w, bottom, 1);
+		cursor_on();
 		return;
 	}
 	/* by hand: lock both, copy the rows, skipping colour 8 */
 	uint32_t sobj = surface_at(src), dobj = surface_at(dst);
-	uint32_t sp = game_surface_lock(sobj);
-	uint32_t dp = game_surface_lock(dobj);
+	uint8_t *sp = game_surface_lock(sobj);
+	uint8_t *dp = game_surface_lock(dobj);
 	uint32_t spitch = pitch_at(src), dpitch = pitch_at(dst);
 	sp += sy * spitch + sx;
 	dp += dpitch * dy + dx;
 	if ((int32_t)h > 0) {
 		for (uint32_t r = 0; r < h; r++) {
 			if ((int32_t)w > 0) {
-				const uint8_t *s = x86_ptr(sp, w);
-				uint8_t *d = x86_ptr(dp, w);
 				for (uint32_t i = 0; i < w; i++) {
-					uint32_t v = s[i];
+					uint32_t v = sp[i];
 					if (v != TRANSPARENT) {
-						d[i] = (uint8_t)v;
+						dp[i] = (uint8_t)v;
 					}
 				}
 			}
@@ -504,17 +441,12 @@ void game_blit_swap(uint32_t dx, uint32_t dy, uint32_t sx, uint32_t sy, uint32_t
 			dbottom += SHIFT_LINES;
 		}
 	}
-	uint32_t r1 = game_frame_alloc(0x30), r2 = r1 + 0x10, r3 = r1 + 0x20;
-	put_rect(r1, sx, top, sx + w, bottom);
-	put_rect(r2, dx, dtop, dx + w, dbottom);
-	put_rect(r3, 0, 0, w, h);
-	cursor_off(-1); /* cmp [cursor], edi; je */
+	cursor_off();
 	uint32_t scratch = SC(scratch_surface), sobj = surface_at(src), dobj = surface_at(dst);
-	bltfast(scratch, 0, 0, sobj, r1, BLITFAST_WAIT);
-	bltfast(sobj, sx, top, dobj, r2, BLITFAST_WAIT);
-	bltfast(dobj, dx, dtop, scratch, r3, BLITFAST_WAIT);
-	game_frame_free(0x30);
-	cursor_on(4);
+	bltfast(scratch, 0, 0, sobj, sx, top, sx + w, bottom, 0);
+	bltfast(sobj, sx, top, dobj, dx, dtop, dx + w, dbottom, 0);
+	bltfast(dobj, dx, dtop, scratch, 0, 0, w, h, 0);
+	cursor_on();
 }
 
 /* 0x4017b0 (x, y, w, h, colour << 4, surface): fill a rectangle with colour
@@ -531,17 +463,13 @@ void game_fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t col
 			bottom += SHIFT_LINES;
 		}
 	}
-	uint32_t rect = game_frame_alloc(0x74), fx = rect + 0x10; /* RECT, DDBLTFX */
-	put_rect(rect, x, top, x + w, bottom);
-	for (uint32_t i = 0; i < 0x19; i++)
-		wr32(fx + 4 * i, 0);
-	wr32(fx, 0x64);
-	wr32(fx + 0x50, (uint32_t)((int32_t)colour >> 4));
-	cursor_off(1);
+	cursor_off();
 	uint32_t obj = surface_at(surf);
-	COM(obj, COM_BLT, rect, 0, 0, BLT_COLORFILL_WAIT, fx);
-	game_frame_free(0x74);
-	cursor_on(1);
+	int iw = (int)w, ih = (int)(bottom - top);
+	if (iw > 0 && ih > 0)
+		ctl_work_us(PACE_BLIT_US(iw, ih, 0));
+	surf_fill(obj, (int)x, (int)top, (int)(x + w), (int)bottom, (uint32_t)((int32_t)colour >> 4));
+	cursor_on();
 }
 
 /* 0x401870 (x, y, w, h, colour << 4, surface): XOR the colour into the
@@ -555,18 +483,17 @@ void game_xor_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colo
 	pat = (pat << 8) + c;
 	pat = (pat << 8) + c;
 	uint32_t obj = surface_at(surf);
-	uint32_t p = game_surface_lock(obj);
+	uint8_t *p = game_surface_lock(obj);
 	uint32_t pitch = pitch_at(surf);
 	p += pitch * y + x;
 	if ((int32_t)h > 0) {
 		for (uint32_t r = 0; r < h; r++) {
 			if ((int32_t)w > 0) {
-				uint8_t *px = x86_ptr(p, (w + 3) & ~3u);
 				for (uint32_t i = 0; (int32_t)i < (int32_t)w; i += 4) {
 					uint32_t v;
-					memcpy(&v, px + i, 4);
+					memcpy(&v, p + i, 4);
 					v ^= pat;
-					memcpy(px + i, &v, 4);
+					memcpy(p + i, &v, 4);
 				}
 			}
 			p += pitch;
@@ -576,7 +503,7 @@ void game_xor_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t colo
 }
 
 /*
- * Picture load 0x406e20 (stage 5B). With `named` (the opcode had an
+ * Picture load 0x406e20. With `named` (the opcode had an
  * argument) the name is argument 0 of the opcode, read into STRING_BUF and
  * the file (a GP4 picture) loaded to PICTURE; otherwise the picture already
  * there is drawn again. The animation slots are reset first. The picture:
@@ -616,12 +543,12 @@ uint32_t game_picture_load(int named)
 	}
 	const uint8_t *src = pic + 0x208;
 	uint32_t surf = SV(surface_select);
-	uint32_t dst = game_surface_lock(surface_at(surf));
+	uint8_t *dst = game_surface_lock(surface_at(surf));
 	uint32_t pitch = pitch_at(surf);
 	dst += SV(pic_rect[1]) * pitch + (SV(pic_rect[0]) << 3);
 	uint32_t rows = SV(pic_rect[3]), dwords = SV(pic_rect[2]) << 1;
 	while (rows) {
-		memcpy(x86_ptr(dst, 4 * dwords), src, 4 * dwords);
+		memcpy(dst, src, 4 * dwords);
 		src += 4 * dwords;
 		dst += pitch;
 		rows--;

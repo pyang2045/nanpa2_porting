@@ -1,11 +1,12 @@
-#include "clock.h"
 
 #include <SDL.h>
 
-#include "hle.h"
+#include "platform/clock.h"
+#include "platform/surface.h"
+#include "platform/window.h"
 #include "platform/present.h"
-#include "replay.h"
-#include "status.h"
+#include "dev/replay.h"
+#include "dev/status.h"
 
 static double speed = 1.0;
 static uint64_t vclock;           /* virtual microseconds */
@@ -42,7 +43,7 @@ uint64_t clock_timer_ms(void)
 }
 
 /* Budget: the virtual time since the base point may not exceed the real time elapsed times the
- * speed. Ahead of it, sleep; far behind (HLE work, a stall, an unthrottled stretch), move the base
+ * speed. Ahead of it, sleep; far behind (a stall, an unthrottled stretch), move the base
  * point so the game never bursts to catch up. Waits on the game timer are unaffected: the pumps
  * that spin on them cost virtual time too, and the timer itself follows real time. */
 void clock_throttle(void)
@@ -66,12 +67,17 @@ void clock_work(uint32_t us)
 	static uint32_t last;
 	vclock += us;
 	clock_throttle();
-	win32_run_timer();
+	win_run_timer();
 	uint32_t now = SDL_GetTicks();
 	if (now - last >= 8) { /* the host's own service, as the timer thread and DirectDraw did */
 		last = now;
 		status_main();
-		ddraw_present(0);
+		screen_present(0);
 		SDL_PumpEvents();
 	}
+}
+
+uint64_t clock_log_ms(void)
+{
+	return replay_det() ? replay_ms() : SDL_GetTicks();
 }

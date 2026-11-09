@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Smoke test of a plain interactive launch and a headless one, from the live
 status file the game writes ($TMPDIR/nanpa2-status-<pid>.json,
-src/hle/status.c) about once a second.
+src/dev/status.c) about once a second.
 
   tests/smoke.py BUILD/nanpa2 GAME_DIR [--seconds 35] [--verbose]
 

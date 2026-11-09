@@ -23,8 +23,6 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
-#include "x86/x86.h"
-#include "game/state.h"
 
 #define SURFACES 0x44629eu /* u32[]: surface objects */
 #define PITCHES 0x4462aeu  /* u32[]: their pitches */
@@ -46,24 +44,24 @@ uint32_t game_wipe(uint32_t s0, uint32_t s1)
 	uint32_t row0 = 0;      /* the first line of the pass's rows */
 	uint32_t bit = 0x80;    /* the bit this pass adds to the mask byte */
 	uint32_t cancelled = 0;
-	x86_probe(0x401a50);
+	game_probe(0x401a50);
 	ctl_tlog("wipe+", 0);
 
 	/* prologue, the two locks */
-	uint32_t base0 = game_surface_lock(rd32(SURFACES + 4 * s0));
-	uint32_t base1 = game_surface_lock(rd32(SURFACES + 4 * s1));
+	uint8_t *base0 = game_surface_lock(rd32(SURFACES + 4 * s0));
+	uint8_t *base1 = game_surface_lock(rd32(SURFACES + 4 * s1));
 	uint32_t pitch1 = rd32(PITCHES + 4 * s1), pitch0 = rd32(PITCHES + 4 * s0);
 	uint32_t passes = 0x80;
 
 	for (;;) { /* 0x401ad5: a pass */
 		uint32_t frame0 = RT(frame);
 		mask[row0] |= (uint8_t)bit;
-		uint32_t dst = base0 + row0 * pitch0, src = base1 + row0 * pitch1;
+		uint8_t *dst = base0 + row0 * pitch0, *src = base1 + row0 * pitch1;
 		uint32_t pass_us = 0;
 		for (uint32_t rows = 0x19; rows;) {
 			uint8_t m = mask[row0];
-			uint8_t *d = x86_ptr(dst, 640);
-			const uint8_t *s = x86_ptr(src, 640);
+			uint8_t *d = dst;
+			const uint8_t *s = src;
 			for (uint32_t i = 0; i < 640; i++) {
 				if (m & (0x80u >> (i & 7)))
 					d[i] = s[i];

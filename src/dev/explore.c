@@ -23,7 +23,7 @@
  * NANPA2_INPUT can first load a save); NANPA2_EXPLORE_LOG=1 logs menus and
  * clicks. Runs are repeatable only roughly (the game timer is host-paced):
  * the seed and frame numbers locate a problem, they do not replay it. */
-#include "explore.h"
+#include "dev/explore.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -31,16 +31,11 @@
 #include <string.h>
 
 #include "game/expr.h"
-#include "game/state.h"
-#include "hle.h"
+#include "game/gmem.h"
+#include "platform/window.h"
 
 #define FRAME() RT(frame)
 #define SCRIPT 0x435e78u
-#define WM_MOUSEMOVE 0x200
-#define WM_LBUTTONDOWN 0x201
-#define WM_LBUTTONUP 0x202
-#define WM_RBUTTONDOWN 0x204
-#define WM_RBUTTONUP 0x205
 
 static int on, verbose;
 static uint64_t rng;
@@ -129,7 +124,7 @@ void explore_init(void)
 	if (!s)
 		return;
 	on = 1;
-	x86_trap_hook = on_trap;
+	game_trap_hook = on_trap;
 	rng = strtoull(s, NULL, 0) * 2654435761u + 1;
 	const char *e = getenv("NANPA2_EXPLORE_FRAMES");
 	if (e)
@@ -212,7 +207,7 @@ static int contains(uint32_t a, uint32_t b, const char *s)
 {
 	size_t n = strlen(s);
 	for (uint32_t p = a; p + n <= b; p++)
-		if (!memcmp(x86_ptr(SCRIPT + p, (uint32_t)n), s, n))
+		if (!memcmp(g_ptr(SCRIPT + p, (uint32_t)n), s, n))
 			return 1;
 	return 0;
 }
@@ -472,7 +467,7 @@ void explore_tick(void)
 	uint32_t f = FRAME();
 	for (int i = 0; i < nq;) {
 		if ((int32_t)(f - q[i].frame) >= 0) {
-			win32_post_ext(q[i].msg, q[i].wp, q[i].lp);
+			win_post_ext(q[i].msg, q[i].wp, q[i].lp);
 			q[i] = q[--nq];
 		} else {
 			i++;
@@ -482,7 +477,7 @@ void explore_tick(void)
 		static int quit;
 		if (!quit++) {
 			fprintf(stderr, "explore: end frame %u mes %s\n", f, mes);
-			win32_post_ext(0x12, 0, 0);
+			win_post_ext(0x12, 0, 0);
 		}
 		return;
 	}

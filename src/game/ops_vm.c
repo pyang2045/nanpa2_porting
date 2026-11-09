@@ -18,9 +18,8 @@
  */
 #include "game/ctl.h"
 #include "game/file.h"
+#include "game/state_view.h"
 #include "game/vm.h"
-#include "x86/x86.h"
-#include "game/state.h"
 
 
 /* call 0x4061d4: skip the block at pc; the depth counter is gone (AX = 0) */
@@ -201,7 +200,11 @@ int vm_op_jump_mes(void)
 static void flag_load(void)
 {
 	uint32_t keep = SV(vflags) & 0x60;
-	load(FLAG_NAME, MES_NAME);
+	/* the file is read over the current image, so a short one leaves the rest */
+	uint8_t img[STATE_SAVE_SIZE];
+	state_save_export(img);
+	size_t got = game_file_read((const char *)g_ptr(FLAG_NAME, 1), img, sizeof img);
+	state_save_import(img, got ? sizeof img : 0);
 	uint32_t f = (SV(vflags) & 0x9f) | keep;
 	SV_SET(vflags, f);
 	vm_init();
@@ -218,7 +221,9 @@ int vm_op_flag_file(void)
 		return restart();
 	}
 	if (mode == 1) {
-		game_file_save_at(FLAG_NAME, MES_NAME, 0xc00);
+		uint8_t img[STATE_SAVE_SIZE];
+		state_save_export(img);
+		game_file_save((const char *)g_ptr(FLAG_NAME, 1), img, sizeof img);
 		return -1;
 	}
 	uint32_t pc = vm_pc;

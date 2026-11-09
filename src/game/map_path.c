@@ -23,7 +23,6 @@
  * flood, 0x405fb6 approach, 0x405691 step, 0x405542 sub-op 30.
  */
 #include "game/map.h"
-#include "game/state.h"
 
 
 #define GRID_WALL 0xffu

@@ -8,23 +8,19 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
-#include "game/ctl.h"
 #include "game/expr.h"
 #include "game/vm.h"
-#include "hle/hle.h"
-#include "x86/x86.h"
-#include "game/state.h"
+#include "game/gmem.h"
 
-/* back to the loop, as the native `jmp 0x4060f9` at native_pc */
-static int to_loop(uint32_t pc, uint32_t native_pc)
+/* back to the loop (the native `jmp 0x4060f9`) at pc */
+static int to_loop(uint32_t pc)
 {
 	vm_pc = pc;
 	return -1;
 }
 
-/* There is another element after a 02 separator (native_pc: the
- * loop's backward jump); else the statement ends. */
-static int another(uint32_t *pc, uint32_t native_pc)
+/* There is another element after a 02 separator; else the statement ends. */
+static int another(uint32_t *pc)
 {
 	if (vm_script_byte(*pc) != VM_SEPARATOR)
 		return 0;
@@ -33,12 +29,12 @@ static int another(uint32_t *pc, uint32_t native_pc)
 }
 
 /* flag n, n+1, ... = expressions separated by 02 */
-static int set_flags(uint32_t pc, uint32_t n, uint32_t exit_pc, uint32_t loop_pc)
+static int set_flags(uint32_t pc, uint32_t n)
 {
 	do {
 		script_set_flag(n++, vm_eval(&pc));
-	} while (another(&pc, loop_pc));
-	return to_loop(pc, exit_pc);
+	} while (another(&pc));
+	return to_loop(pc);
 }
 
 /* 0a: the first flag number is a constant operand (0x4039f7; any other
@@ -47,7 +43,7 @@ int vm_op_set_flags(void)
 {
 	uint32_t pc = vm_pc, n;
 	script_read_constant(&pc, &n);
-	return set_flags(pc, n, 0x4064ab, 0x4064b3);
+	return set_flags(pc, n);
 }
 
 /* 0b: the first flag number is an expression. */
@@ -55,7 +51,7 @@ int vm_op_set_flags_expr(void)
 {
 	uint32_t pc = vm_pc;
 	uint32_t n = vm_eval(&pc);
-	return set_flags(pc, n, 0x4064cf, 0x4064d7);
+	return set_flags(pc, n);
 }
 
 /* The register named by a script byte ('@' = 0x40 ...), as an index: the
@@ -72,7 +68,7 @@ int vm_op_set_reg(void)
 	uint32_t pc = vm_pc;
 	uint32_t r = reg_index(&pc);
 	vm_set_reg(r, vm_eval(&pc));
-	return to_loop(pc, 0x4064f3);
+	return to_loop(pc);
 }
 
 /* 0d R i v0 [02 v1 ...]: words at R + 2i, R + 2i + 2, ... of a segment
@@ -92,8 +88,8 @@ int vm_op_store_words(void)
 		uint32_t v = vm_eval(&pc);
 		wr16(vm_segment_base(RT(store_segment)) + off, v);
 		off += 2;
-	} while (another(&pc, 0x406555));
-	return to_loop(pc, 0x40654b);
+	} while (another(&pc));
+	return to_loop(pc);
 }
 
 /* 0e R i v0 [02 v1 ...]: bytes at R + i, ... of the segment @[7] selects
@@ -108,8 +104,8 @@ int vm_op_store_bytes(void)
 		uint32_t v = vm_eval(&pc);
 		wr8(vm_segment_base(vm_segment_select()) + off, v);
 		off++;
-	} while (another(&pc, 0x40659c));
-	return to_loop(pc, 0x406594);
+	} while (another(&pc));
+	return to_loop(pc);
 }
 
 /* 04 11 / 04 12: end the running block (a nested VM) with AL = 1
@@ -118,7 +114,7 @@ int vm_op_store_bytes(void)
 static int end_block(int al)
 {
 	if (vm_depth == 0)
-		x86_trap(0x406638, "continue or break outside a block");
+		game_trap(0x406638, "continue or break outside a block");
 	return al;
 }
 
@@ -138,7 +134,7 @@ int vm_op_set_label(void)
 	uint32_t pc = vm_pc, n;
 	vm_parse_args(&pc, &n);
 	wr16(VM_LABELS + 2 * n, vm_arg(1));
-	return to_loop(pc, 0x406653);
+	return to_loop(pc);
 }
 
 /* 18 c: text colour = c. */
@@ -147,7 +143,7 @@ int vm_op_text_colour(void)
 	uint32_t pc = vm_pc, c;
 	vm_parse_args(&pc, &c);
 	SV_SET(text_colour, c);
-	return to_loop(pc, 0x4069c9);
+	return to_loop(pc);
 }
 
 /* 04 20 button, offset: the block at offset runs on a click of the button
@@ -157,7 +153,7 @@ int vm_op_click_handler(void)
 	uint32_t pc = vm_pc, button;
 	vm_parse_args(&pc, &button);
 	wr16(VM_CLICK_HANDLERS + 2 * button, vm_arg(1));
-	return to_loop(pc, 0x4070d0);
+	return to_loop(pc);
 }
 
 /* 04 23 table, x, y: S = the id of the first rectangle in the table that
@@ -172,7 +168,7 @@ int vm_op_hit_test(void)
 	uint32_t rec = base + table, x = vm_arg(1), y = vm_arg(2), id;
 	/* the timing probe of the native 0x4071bb: the exploration bot and
 	 * NANPA2_HOTSPOTS read the rectangle table through it */
-	probe_hit_table(rec);
+	game_trace_hit_table(rec);
 	for (;; rec += 10) {
 		id = rd16(rec);
 		if (id == 0xffff)
@@ -182,7 +178,7 @@ int vm_op_hit_test(void)
 			break;
 	}
 	vm_set_reg(VM_REG_S, id);
-	return to_loop(pc, 0x4071ff);
+	return to_loop(pc);
 }
 
 /* 04 22 ...: read an argument list and do nothing with it. */
@@ -190,5 +186,5 @@ int vm_op_args_only(void)
 {
 	uint32_t pc = vm_pc, a;
 	vm_parse_args(&pc, &a);
-	return to_loop(pc, 0x4073a0);
+	return to_loop(pc);
 }

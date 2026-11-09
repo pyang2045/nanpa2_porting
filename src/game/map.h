@@ -19,7 +19,7 @@
 #include "game/ctl.h"
 #include "game/state.h"
 #include "game/vm.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 
 #pragma pack(push, 1)
 /* the map state record M */
@@ -107,12 +107,12 @@ enum {
 /* ---- views ---- */
 
 /* the byte at offset off of script segment 1, n bytes; the segment runs on into
- * the memory after it (G, then the emulated memory) as it does natively */
+ * the memory after it in G as it does natively (past the end of G it traps) */
 static inline uint8_t *seg1_ptr(uint32_t off, uint32_t n)
 {
 	if (off + n <= SEG1_SIZE + IMG_SIZE_B + ANI_SIZE + 0x1000u)
 		return G.seg1 + off;
-	return x86_ptr(SEG1_BASE + off, n);
+	return g_ptr(SEG1_BASE + off, n);
 }
 static inline uint32_t seg1_u8(uint32_t off) { return *seg1_ptr(off, 1); }
 static inline uint32_t seg1_u16(uint32_t off) { uint16_t v; memcpy(&v, seg1_ptr(off, 2), 2); return v; }

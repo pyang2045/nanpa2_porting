@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Compare two recordings (nanpa2 --record, src/hle/replay.h) and report the first
+"""Compare two recordings (nanpa2 --record, src/dev/replay.h) and report the first
 divergent checkpoint and which state differs.
 
     tools/replay_diff.py A.rec B.rec [--li]
     tools/replay_diff.py --sequence A.rec B.rec [--logs A.log B.log]
     tools/replay_diff.py --sequence --logs A.log B.log
 
---li: only the layout independent keys (li.*), for runs of code with a different
-memory layout. Exit 0 when the checkpoints (and messages) agree, 1 otherwise.
+--li: only the layout independent keys (li.*). Keys that one recording has and the other does
+not are skipped when they are the retired ones of the emulated machine (raw.cpu, raw.data, raw.heap,
+raw.stack, raw.pg: recordings up to R3), so a recording of R3 and one of R4 compare on li.*,
+raw.clock and (if both have it) raw.gdata. Exit 0 when the checkpoints (and messages) agree, 1
+otherwise.
 
 --sequence: compare two recordings made with different pacing (another clock, so other
 ticks and other message times) by the content of the states they went through, not by
@@ -22,7 +25,7 @@ at other points of an animation).
 """
 import sys
 
-PAGE_LO, PAGE = 0x431000, 4096
+RETIRED = ("raw.cpu", "raw.data", "raw.heap", "raw.stack", "raw.pg")
 
 
 def parse(path):
@@ -39,11 +42,6 @@ def parse(path):
             else:
                 head.append(line)
     return head, events, cps
-
-
-def pages(a, b):
-    return ["%06x" % (PAGE_LO + i * PAGE) for i in range(min(len(a), len(b)) // 4)
-            if a[i * 4:i * 4 + 4] != b[i * 4:i * 4 + 4]]
 
 
 def lcs(a, b):
@@ -191,7 +189,7 @@ def main():
         print("%d messages against %d" % (len(ea), len(eb)))
         rc = 1
     for i, (x, y) in enumerate(zip(ca, cb)):
-        keys = [k for k in x[3] if not li or k.startswith("li.")]
+        keys = [k for k in x[3] if (not li or k.startswith("li.")) and not (k in RETIRED and k not in y[3])]
         bad = [k for k in keys if x[3][k] != y[3].get(k)]
         if x[:3] != y[:3]:
             print("checkpoint %d taken at tick %d pump %d against tick %d pump %d" % (i, x[1], x[2], y[1], y[2]))
@@ -199,10 +197,7 @@ def main():
         if bad:
             print("first divergent checkpoint: %d (%s tick %d pump %d)" % (i, x[0], x[1], x[2]))
             for k in bad:
-                if k == "raw.pg":
-                    print("  raw.pg: pages differ at", " ".join(pages(x[3][k], y[3].get(k, ""))[:16]))
-                else:
-                    print("  %s: %s  %s" % (k, x[3][k], y[3].get(k)))
+                print("  %s: %s  %s" % (k, x[3][k], y[3].get(k)))
             return 1
     if len(ca) != len(cb):
         print("%d checkpoints against %d" % (len(ca), len(cb)))

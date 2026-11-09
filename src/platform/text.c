@@ -1,4 +1,4 @@
-/* GDI text for the lifted code. Native 0x401900 (char, x, y, size, fg, bg)
+/* GDI text for the game. Native 0x401900 (char, x, y, size, fg, bg)
  * draws one Big5 or ASCII character with TextOutA at (0, 0) of the scratch
  * surface 0x4ab058 (font 0x4ac070[size & 3]: MingLiU at em heights 15, 24,
  * 32, weights 700, 700, 400; text colour 0xf0f0f0 on 0, opaque), then
@@ -9,7 +9,8 @@
  * bloc/bdat; MingLiU and Apple LiSung have hand-made strikes), otherwise its
  * outline through stb_truetype, unantialiased like GDI on an 8-bit DC; bold
  * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
-#include "hle.h"
+#include "platform/text.h"
+#include "platform/surface.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -22,7 +23,7 @@
 #ifdef _WIN32
 /* kernel32's MultiByteToWideChar (UINT, DWORD, LPCCH, int, LPWSTR, int),
  * declared here rather than with <windows.h> and its macros (min, max,
- * near, far, ERROR, ...) next to the emulator headers */
+ * near, far, ERROR, ...) next to the game's headers */
 __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigned long flags, const char *s,
 							 int n, wchar_t *w, int wn);
 #else
@@ -31,7 +32,6 @@ __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigne
 #endif
 
 #define MAX_FONTS 8
-#define MAX_DC 16
 
 /* Outline rasterization. A plain coverage threshold (INK) of an unhinted Ming
  * outline at 15 px gives strokes of 1 or 2 pixels at random and breaks or
@@ -68,12 +68,6 @@ static struct {
 	int bold;
 } fonts[MAX_FONTS];
 static int nfonts;
-
-static struct {
-	int font;
-	uint32_t fg, bg;
-	int opaque;
-} dcs[MAX_DC];
 
 /* Apple LiSung Light (Dynalab's Ming, the foundry of MingLiU) is a macOS font
  * downloaded on demand to <asset dir>/<hash>.asset/AssetData; it has 1-bit
@@ -241,39 +235,13 @@ int text_init(const char *font_path)
 	return 1;
 }
 
-uint32_t text_create_font(int height, int weight)
+uint32_t text_font_create(int height, int weight)
 {
 	if (nfonts >= MAX_FONTS)
 		return 0;
 	fonts[nfonts].height = height < 0 ? -height : height;
 	fonts[nfonts].bold = weight >= 600;
 	return 0x6000u + (uint32_t)nfonts++;
-}
-
-static int dc_index(uint32_t hdc)
-{
-	uint32_t i = hdc - 0x5000u;
-	return i < MAX_DC ? (int)i : -1;
-}
-
-void text_select(uint32_t hdc, uint32_t f)
-{
-	int i = dc_index(hdc);
-	if (i >= 0 && f >= 0x6000u && f < 0x6000u + (uint32_t)nfonts)
-		dcs[i].font = (int)(f - 0x6000u);
-}
-
-void text_set_color(uint32_t hdc, uint32_t fg, uint32_t bg, int mode)
-{
-	int i = dc_index(hdc);
-	if (i < 0)
-		return;
-	if (fg != 0xffffffffu)
-		dcs[i].fg = fg;
-	if (bg != 0xffffffffu)
-		dcs[i].bg = bg;
-	if (mode >= 0)
-		dcs[i].opaque = mode == 2;
 }
 
 static uint32_t big5_to_ucs(const unsigned char *s, int len)
@@ -521,14 +489,14 @@ static int strike_for(int em)
 	return r ? r : find_strike((em + 7) & ~7);
 }
 
-void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
+void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
+	       uint32_t bg_colour, int opaque)
 {
-	int di = dc_index(hdc);
-	uint32_t pixels;
 	int pitch, sw, sh;
-	if (di < 0 || len <= 0 || !ddraw_surface_info(hdc, &pixels, &pitch, &sw, &sh))
+	uint8_t *pixels = surf_lock(surface, &pitch);
+	if (len <= 0 || !surf_size(surface, &sw, &sh))
 		return;
-	unsigned char s[2] = { (unsigned char)rd8(str), len > 1 ? (unsigned char)rd8(str + 1) : 0 };
+	unsigned char s[2] = { str[0], len > 1 ? str[1] : 0 };
 	uint32_t ch = big5_to_ucs(s, len > 1 ? 2 : 1);
 	/* the first face that has the character */
 	int have_font = nfaces > 0;
@@ -540,7 +508,7 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 		}
 	if (getenv("NANPA2_LOG") && (ch == 0x3000 || (have_font && !stbtt_FindGlyphIndex(&F->info, (int)ch))))
 		fprintf(stderr, "text: %02x %02x len %d -> U+%04X (missing)\n", s[0], s[1], len, ch);
-	int fi = dcs[di].font;
+	int fi = font >= 0x6000u && font < 0x6000u + (uint32_t)nfonts ? (int)(font - 0x6000u) : 0;
 	int em = fonts[fi].height, bold = fonts[fi].bold;
 	if (have_font && !F->base[fi])
 		F->base[fi] = baseline(em);
@@ -549,14 +517,14 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 	int base = F->base[fi], strike = have_font ? F->strike[fi] : 0;
 	/* GDI uses palette indices on an 8-bit DC; the native caller only tests
 	 * for zero, so map any non-black colour to 0xff */
-	uint32_t fg = dcs[di].fg ? 0xff : 0, bg = dcs[di].bg ? 0xff : 0;
+	uint32_t fg = fg_colour ? 0xff : 0, bg = bg_colour ? 0xff : 0;
 	int cell_w = len > 1 ? em : (em + 1) / 2;
 
-	if (dcs[di].opaque)
+	if (opaque)
 		for (int yy = 0; yy < em; yy++)
 			for (int xx = 0; xx < cell_w + bold; xx++)
 				if (y + yy >= 0 && y + yy < sh && x + xx >= 0 && x + xx < sw)
-					wr8(pixels + (uint32_t)((y + yy) * pitch + x + xx), bg);
+					pixels[(y + yy) * pitch + x + xx] = (uint8_t)bg;
 	if (!have_font || ch == ' ' || ch == 0x3000)
 		return;
 
@@ -574,7 +542,7 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 				for (int b = 0; b <= bold; b++) {
 					int px = gx + xx + b, py = gy + yy;
 					if (px >= 0 && px < sw && py >= 0 && py < sh)
-						wr8(pixels + (uint32_t)(py * pitch + px), fg);
+						pixels[py * pitch + px] = (uint8_t)fg;
 				}
 			}
 		return;
@@ -603,7 +571,7 @@ void text_out(uint32_t hdc, int x, int y, uint32_t str, int len)
 			for (int b = 0; b <= bold; b++) {
 				int px = gx + xx + b, py = gy + yy;
 				if (px >= 0 && px < sw && py >= 0 && py < sh)
-					wr8(pixels + (uint32_t)(py * pitch + px), fg);
+					pixels[py * pitch + px] = (uint8_t)fg;
 			}
 		}
 	stbtt_FreeBitmap(bm, NULL);

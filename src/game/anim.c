@@ -13,20 +13,15 @@
  * (0x401ca0) are the native screen routines, called as the native code
  * calls them.
  *
- * R2: ordinary C. The slots are struct anim_slot in G.an; `start` and `pc`
- * hold guest addresses into G.ani, as the data area keeps them, and the
- * interpreter reads the instruction bytes through a pointer. No register
- * is part of any contract: the callers (the VM loop, the waits, the op 1a
- * handler) overwrite or ignore EAX, EBX, ECX, EDX and EDI after these,
- * and ESI is kept. Semantics: re-notes.md "Animation slots".
+ * The slots are struct anim_slot in G.an; `start` and `pc` hold G addresses into
+ * G.ani (game/gmem.h), as the data area keeps them, and the interpreter reads the
+ * instruction bytes through a pointer. Semantics: re-notes.md "Animation slots".
  */
 #include <string.h>
 
 #include "game/ctl.h"
 #include "game/pace.h"
-#include "game/state.h"
 #include "game/vm.h"
-#include "x86/x86.h"
 
 #define ANIM_SLOTS AN_BASE
 #define ANIM_SLOT_SIZE 24u
@@ -61,14 +56,16 @@ void game_palette_copy(const uint16_t *src)
 
 void game_palette_copy_at(uint32_t src)
 {
-	game_palette_copy((const uint16_t *)x86_ptr(src, 512));
+	uint16_t table[256]; /* the 16 + 240 colours: copied out, the source is not aligned */
+	memcpy(table, g_ptr(src, 512), sizeof table);
+	game_palette_copy(table);
 }
 
 /* slot n of the script: not range checked natively (a number past 9 runs on
  * into the words after the slots), so it is addressed, not indexed */
 static struct anim_slot *slot_at(uint32_t n)
 {
-	return (struct anim_slot *)x86_ptr(ANIM_SLOTS + n * ANIM_SLOT_SIZE, ANIM_SLOT_SIZE);
+	return (struct anim_slot *)g_ptr(ANIM_SLOTS + n * ANIM_SLOT_SIZE, ANIM_SLOT_SIZE);
 }
 
 /* the blit of a rectangle record {x0, y0, w, h, dx, dy} (u16 each, the
@@ -76,7 +73,7 @@ static struct anim_slot *slot_at(uint32_t n)
 static void blit(int masked, uint32_t rect)
 {
 	uint16_t v[6];
-	memcpy(v, x86_ptr(rect, sizeof v), sizeof v);
+	memcpy(v, g_ptr(rect, sizeof v), sizeof v);
 	(masked ? game_blit_masked : game_blit_copy)(v[0], v[1], v[2], v[3], v[4], v[5], 1, 0);
 }
 
@@ -95,7 +92,7 @@ static void run_slot(struct anim_slot *s)
 			return;
 		}
 		uint32_t pc = s->pc;
-		const uint8_t *ip = x86_ptr(pc, 3); /* the instruction: opcode, operand */
+		const uint8_t *ip = g_ptr(pc, 3); /* the instruction: opcode, operand */
 		uint32_t op = ip[0];
 		pc++;
 		switch (op) {
@@ -149,7 +146,7 @@ static void run_slot(struct anim_slot *s)
 			continue;
 		}
 		default:
-			x86_trap(0x403684, "ANI instruction outside the native table");
+			game_trap(0x403684, "ANI instruction outside the native table");
 		}
 		s->pc = pc;
 		return;
@@ -201,7 +198,7 @@ static void control(uint32_t op, uint32_t n, uint32_t a, uint32_t b)
 	switch (op) {
 	case 0: {
 		uint16_t off;
-		memcpy(&off, x86_ptr(2 * a + ANIM_DATA + 1, 2), 2);
+		memcpy(&off, g_ptr(2 * a + ANIM_DATA + 1, 2), 2);
 		uint32_t start = ANIM_DATA + off;
 		s->start = start;
 		s->pc = start;
@@ -242,7 +239,7 @@ static void control(uint32_t op, uint32_t n, uint32_t a, uint32_t b)
 		}
 		break;
 	default:
-		x86_trap(0x40351a, "animation sub-op outside the native table");
+		game_trap(0x40351a, "animation sub-op outside the native table");
 	}
 }
 

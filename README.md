@@ -18,30 +18,31 @@ Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TE
 
 ## Build
 
-The game is C (`src/game`); no game instruction of `nanpa2.exe` runs. What it still reads from the exe
-is its built-in data, which comes from `nanpa2.dat` (see "Game data"). The build needs neither the exe
-nor capstone, and the binary and `.app` hold nothing of the game (ctest `no_game_bytes`): this is the
-build to share, like xsystem4, the player supplies the game files. (The `recomp` backend, which lifted
-the game code with capstone, and the interpreter were removed in refactor stage R2.)
+The engine is plain C on SDL2: the game logic (`src/game`) runs on its own state and calls a small platform
+API (`src/platform`: files, surfaces, text, window, sound); no instruction of `nanpa2.exe` runs and
+nothing emulates the PC it was written for (see "Architecture"). What it still reads from the exe is its
+built-in data, which comes from `nanpa2.dat` (see "Game data"). The build needs a C11 compiler, CMake, Ninja
+and SDL2 (Python 3 for the tests), nothing else, and the binary and `.app` hold nothing of the game (ctest
+`no_game_bytes`): this is the build to share, like xsystem4, the player supplies the game files. The engine
+assumes a 64-bit little-endian host (`src/game/state.h` refuses to build otherwise); the game state and the
+save files have a fixed-width layout, with no dependence on the size of `long` or of a pointer.
 
-The scripts check the tools, name the packages
-when something is missing (they never run `sudo`), and pass `--exe`, `--game-dir`,
-`--build-dir`, `--release` (default) or `--debug`, `--test` (ctest) and `--backend` (passed as
-`-DNANPA2_BACKEND`) through to CMake. Re-running reuses the venv and the build folder.
+The scripts check the tools, name the packages when something is missing (they never run `sudo`), and pass
+`--game-dir`, `--build-dir`, `--release` (default) or `--debug` and `--test` (ctest) through to CMake.
+Re-running reuses the build folder.
 
 ### macOS (verified)
 
 ```sh
 brew install sdl2 cmake ninja python
-tools/build.sh                 # build/nanpa2 (interp)
+tools/build.sh                 # build/nanpa2
 tools/build.sh --test --app    # plus ctest and build/同級生２.app
-tools/build.sh --backend recomp --build-dir build-recomp  # creates tools/.venv with capstone
 ```
 
 ### Linux (not built or run yet)
 
 ```sh
-sudo apt install build-essential cmake ninja-build pkg-config libsdl2-dev python3 python3-venv
+sudo apt install build-essential cmake ninja-build pkg-config libsdl2-dev python3
 # Fedora: sudo dnf install gcc cmake ninja-build pkgconf-pkg-config SDL2-devel python3
 tools/build.sh --test
 ```
@@ -52,23 +53,39 @@ In an MSYS2 MINGW64 shell (MinGW-w64 GCC; MSVC is unchecked, see Platforms):
 
 ```sh
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja \
-  mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-python \
-  mingw-w64-x86_64-python-capstone
+  mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 mingw-w64-x86_64-python
 tools/build_msys2.sh --test
 ```
 
 It builds `nanpa2-port.exe` (a GUI program, so no console; set `NANPA2_LOG_FILE` for the
 log), named so it never replaces the game's own `nanpa2.exe`, and copies it with `SDL2.dll`
-and the MinGW runtime DLLs into `build/dist`. A `--backend recomp` build holds code lifted
-from your `nanpa2.exe`: for your machine only, never share that one. (capstone is needed for
-recomp only.)
+and the MinGW runtime DLLs into `build/dist`.
 
 ### By hand
 
 ```sh
-cmake -S . -B build -G Ninja   # interp; or -DNANPA2_BACKEND=recomp -DNANPA2_EXE=...
-ninja -C build                 #   -DNANPA2_PYTHON=... (Python with capstone)
+cmake -S . -B build -G Ninja   # -DNANPA2_GAME_DIR=game for the tests
+ninja -C build
 ```
+
+## Architecture
+
+```
+src/game/      the game: script VM, opcodes, expressions, text, animation, town map, palette and
+               fades, picture loading, start-up. It works on one state object G (state.h), the
+               original's data area in its own layout, and calls only the platform API below.
+src/platform/  the platform API and its host implementation (SDL2): files.h (the game's DOS paths on
+               the host, FLAG files in the save folder), surface.h (8-bit surfaces by handle, blits,
+               palette, the screen), text.h (Big5 glyphs), window.h (WM_* messages, the 16 ms timer,
+               the cursor), sound.h (music, voices), logo, clock (pacing), present (Metal or SDL_Renderer)
+src/dev/       dev tools: record and replay (state checkpoints), the exploration bot, scripted input,
+               the live status file
+src/           asset.c (nanpa2.dat), assets.c, trap.c, lzh.c and gp4.c (GP4/ANI pictures), fsys.c, launch.c, main.c
+```
+
+The refactor that led here (the original code run in an interpreter, then reimplemented in C on an
+emulated PC, then freed of it step by step) is in `docs/refactor.md`, stage by stage, with the
+architecture summary and how the save files stay byte-compatible.
 
 ## Game data
 
@@ -76,16 +93,15 @@ Copy the CD contents into `game/` and extract `nanpa2.exe` and `FLAG0`..`FLAG6` 
 `data1.cab` there (`unshield x data1.cab`). See `game/README.md`.
 
 `nanpa2.exe` is needed **once**. The engine reimplements the game code in C but still reads the
-exe's built-in data (tables, strings, the import directory, the start values of the
-globals); the first launch cuts those ranges (about 95 KB of data, no code) out of your
+exe's built-in data (tables, strings, the start values of the globals); the first launch cuts those ranges (about 95 KB of data, no code) out of your
 exe into `nanpa2.dat`, in the game folder, or in the save folder if the game folder is not
 writable. `nanpa2 --make-assets [--game DIR] [--exe PATH] [--out FILE]` does it by hand. From
 then on the game runs from `nanpa2.dat` and the exe may be deleted; keep the file with the
 game folder (or in the save folder). `nanpa2.dat` is made on your machine from your copy, is
 never committed or shipped, and is checked at each start (a damaged or foreign file is
 refused; with the exe present it is made again). Without both `nanpa2.dat` and `nanpa2.exe`
-the game says so and stops. `--exe` and `NANPA2_INTERP=1` load the whole exe
-instead and say so if it is missing.
+the game says so and stops. `--exe` and `NANPA2_LOAD_EXE=1` load the data from the whole
+exe instead (the asset test compares the two) and say so if it is missing.
 
 ## Run
 
@@ -159,10 +175,8 @@ Homebrew's paths: Homebrew's SDL2 is sdl2-compat, which loads SDL3 at run time, 
 `tools/bundle_macos.sh` copies both into `Contents/Frameworks`, rewrites the load paths to
 `@executable_path`/`@loader_path` and signs everything ad hoc. It runs on the macOS version
 the libraries were built for and later (`LSMinimumSystemVersion` is taken from them; with
-current Homebrew bottles that is macOS 26). It contains no game data; built with the
-default `interp` backend it contains nothing of `nanpa2.exe` either (ctest `no_game_bytes`
-scans it), **but a `recomp` app contains code translated from your own `nanpa2.exe`: do not
-share or upload that one.** On
+current Homebrew bottles that is macOS 26). It contains no game data and nothing of `nanpa2.exe`
+(ctest `no_game_bytes` scans it). On
 the first start choose the game folder in the picker (or put the app next to a `game`
 folder).
 
@@ -255,8 +269,8 @@ but neither has been built or run. Known points:
   (screen locked) is unknown there, so the smoke test cannot skip on it.
 - Windows: Big5 via `MultiByteToWideChar(950)`, MingLiU from `C:\Windows\Fonts`; the status
   file goes to `%TEMP%`; the viewer lists `DATA\*.GP4` with `_findfirst`; stale status files
-  of killed instances are not removed. Unchecked: MSVC (the generated `recomp.c` is plain C11
-  with GCC/Clang flags, so MinGW-w64 or clang-cl is the safer bet), non-ASCII paths (the C
+  of killed instances are not removed. Unchecked: MSVC (the sources use GNU extensions and POSIX `getline`, and CMake passes GCC/Clang
+  flags, so MinGW-w64 or clang-cl is the safer bet), non-ASCII paths (the C
   runtime's `fopen` takes the ANSI code page) and no folder picker. The target is a
   `WIN32_EXECUTABLE` named `nanpa2-port.exe` (SDL2main supplies WinMain), so no console
   opens; the log goes to `NANPA2_LOG_FILE`.

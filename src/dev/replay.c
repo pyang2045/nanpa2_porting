@@ -1,5 +1,4 @@
 /* Deterministic mode, recording and replay: see replay.h. */
-#include "replay.h"
 
 #include <ctype.h>
 #include <inttypes.h>
@@ -7,13 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "clock.h"
+#include "dev/replay.h"
+#include "platform/clock.h"
 #include "game/pace.h"
 #include "game/state_view.h"
-#include "hle.h"
+#include "platform/surface.h"
+#include "platform/window.h"
 
 #define WM_QUIT_MSG 0x12u
-#define PAGE 4096u
 
 static int det_state = -1; /* -1 not decided yet */
 static int recording, replaying;
@@ -165,9 +165,6 @@ static uint64_t saves_hash(int *count)
 
 /* ---- the checkpoint ---- */
 
-#define DATA_LO 0x431000u
-#define DATA_HI 0x4c0000u
-
 static int build_cp(char *out, size_t cap)
 {
 	size_t n = 0;
@@ -175,14 +172,14 @@ static int build_cp(char *out, size_t cap)
 	static uint8_t frame[640 * 480];
 	static uint32_t pal[256];
 	uint64_t hs = 0, hp = 0;
-	if (ddraw_snapshot(frame, pal)) {
+	if (screen_snapshot(frame, pal)) {
 		hs = replay_hash(frame, sizeof frame, 0);
 		hp = replay_hash(pal, sizeof pal, 0);
 	}
 	int nsaves;
 	uint64_t sv = saves_hash(&nsaves);
 	uint8_t img[STATE_SAVE_SIZE];
-	state_save_image(img);
+	state_save_export(img);
 	ADD("li.frame=%" PRIx32, state_frame());
 	ADD(" li.screen=%016" PRIx64, hs);
 	ADD(" li.pal=%016" PRIx64, hp);
@@ -192,18 +189,7 @@ static int build_cp(char *out, size_t cap)
 	ADD(" li.vm=%" PRIu64 "/%" PRIx64, vm_ops, vm_last);
 	ADD(" li.flags=%d/%016" PRIx64, nsaves, sv);
 	ADD(" raw.clock=%" PRIu64, (uint64_t)clock_us());
-	ADD(" raw.cpu=%016" PRIx64, replay_hash(&cpu.r[0], sizeof cpu.r, 0));
-	static uint8_t data[DATA_HI - DATA_LO];
-	x86_read_virtual(DATA_LO, data, sizeof data);
-	ADD(" raw.data=%016" PRIx64, replay_hash(data, sizeof data, 0));
-	uint32_t heap = x86_heap_top();
-	ADD(" raw.heap=%016" PRIx64, replay_hash(x86_ptr(HEAP_BASE, heap - HEAP_BASE), heap - HEAP_BASE, 0));
-	ADD(" raw.stack=%016" PRIx64, replay_hash(x86_ptr(cpu.r[ESP], STACK_TOP - cpu.r[ESP]), STACK_TOP - cpu.r[ESP], 0));
-	ADD(" raw.pg=");
-	for (uint32_t a = 0; a < sizeof data; a += PAGE) {
-		uint32_t len = sizeof data - a < PAGE ? (uint32_t)sizeof data - a : PAGE;
-		ADD("%04x", (unsigned)(replay_hash(data + a, len, 0) & 0xffff));
-	}
+	ADD(" raw.gdata=%016" PRIx64, state_data_hash());
 #undef ADD
 	return (int)n;
 }
@@ -234,22 +220,17 @@ static int diff_cp(const char *golden, const char *live, char *out, size_t cap)
 				break;
 			p = sp + 1;
 		}
+		/* keys of the emulated machine that R4 removed (recordings up to R3 carry them): not compared */
+		if (!lv && (!strncmp(tok, "raw.cpu=", 8) || !strncmp(tok, "raw.data=", 9) || !strncmp(tok, "raw.heap=", 9) ||
+			    !strncmp(tok, "raw.stack=", 10) || !strncmp(tok, "raw.pg=", 7)))
+			continue;
 		size_t vl = strlen(eq + 1);
 		size_t ll = lv ? strcspn(lv, " ") : 0;
 		if (lv && ll == vl && !strncmp(lv, eq + 1, vl))
 			continue;
 		ndiff++;
-		if (!strcmp(tok, "raw.pg") || !strncmp(tok, "raw.pg=", 7)) {
-			o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " raw.pg:");
-			int shown = 0;
-			for (uint32_t i = 0; lv && i * 4 < vl && i * 4 < ll; i++)
-				if (strncmp(eq + 1 + i * 4, lv + i * 4, 4) && shown++ < 8)
-					o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %06x",
-							      DATA_LO + i * PAGE);
-		} else {
-			o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %.*s golden=%s live=%.*s", (int)kl, tok,
-					      eq + 1, (int)ll, lv ? lv : "-");
-		}
+		o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %.*s golden=%s live=%.*s", (int)kl, tok,
+				      eq + 1, (int)ll, lv ? lv : "-");
 	}
 	free(g);
 	return ndiff;
@@ -297,7 +278,7 @@ static void checkpoint(int fin)
 
 void replay_pump(void)
 {
-	uint32_t t = win32_timer_ticks();
+	uint32_t t = win_timer_ticks();
 	if (t != cur_tick) {
 		cur_tick = t;
 		cur_k = 0;
@@ -312,11 +293,13 @@ void replay_pump(void)
 		while (next_rev < nrevs &&
 		       (revs[next_rev].tick < cur_tick || (revs[next_rev].tick == cur_tick && revs[next_rev].k <= cur_k))) {
 			struct rev *e = &revs[next_rev++];
-			win32_post_message(e->msg, e->wparam, e->lparam);
+			if (rec) /* --replay with --record: the same messages, to carry the recording over to a new checkpoint format */
+				fprintf(rec, "ev %u %u %x %x %x\n", cur_tick, cur_k, e->msg, e->wparam, e->lparam);
+			win_post(e->msg, e->wparam, e->lparam);
 		}
 		if (!have_fin && next_rev >= nrevs && next_rcp >= nrcps && !quit_sent) {
 			quit_sent = 1;
-			win32_post_message(WM_QUIT_MSG, 0, 0);
+			win_post(WM_QUIT_MSG, 0, 0);
 		}
 	}
 }

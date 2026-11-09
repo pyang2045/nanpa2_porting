@@ -9,11 +9,10 @@ endif()
 
 find_package(SDL2 REQUIRED)
 
-# Game code: the C engine (src/game) runs on the emulated address space of
-# src/x86 (docs/refactor.md). The interpreter (src/x86/interp.c) still
-# dispatches the units by native address until R2 is finished; it decodes no
-# game code any more (the game code is all C), so the build needs neither the
-# exe nor capstone and the binary holds nothing of the game.
+# The engine is plain C: the game logic (src/game) runs on the game state G (state.h) and calls the
+# platform API (src/platform: files, surfaces, text, window, sound; docs/refactor.md). Nothing of the exe's
+# code is used, so the build needs neither the exe nor any tool beyond a C11 compiler and SDL2, and the
+# binary holds nothing of the game.
 # Python: for the tests.
 find_package(Python3 COMPONENTS Interpreter)
 if(EXISTS "${CMAKE_SOURCE_DIR}/tools/.venv/bin/python")
@@ -47,6 +46,7 @@ set(GAME_SOURCES
   src/game/wipe.c
   src/game/state_view.c
   src/game/state.c
+  src/game/timer.c
 )
 
 set(SOURCES
@@ -56,21 +56,20 @@ set(SOURCES
   src/lzh.c
   src/gp4.c
   src/fsys.c
-  src/x86/x86.c
-  src/x86/asset.c
-  src/hle/hle.c
-  src/hle/crt.c
-  src/hle/win32.c
-  src/hle/clock.c
-  src/hle/ddraw.c
-  src/hle/text.c
-  src/hle/logo.c
+  src/asset.c
+  src/trap.c
+    src/platform/files.c
+  src/platform/window.c
+  src/platform/clock.c
+  src/platform/surface.c
+  src/platform/text.c
+  src/platform/logo.c
   src/cinepak.c
-  src/hle/sound.c
-  src/hle/dev.c
-  src/hle/replay.c
-  src/hle/explore.c
-  src/hle/status.c
+  src/platform/sound.c
+  src/dev/dev.c
+  src/dev/replay.c
+  src/dev/explore.c
+  src/dev/status.c
   ${GAME_SOURCES}
 )
 
@@ -120,13 +119,10 @@ if(UNIX AND NOT APPLE)
 endif()
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nanpa2 PRIVATE -Wall -Wextra -Wno-unused-parameter)
-  # the interpreter runs the whole game: optimized in Debug builds too
 endif()
 # macOS app bundle: build/同級生２.app with SDL inside (tools/bundle_macos.sh).
 # It holds no game data (the game folder is found or asked for at run time,
-# see src/launch.c). Built with NANPA2_BACKEND=interp it holds nothing of the
-# game either (test no_game_bytes); a recomp .app holds the game code lifted
-# from your nanpa2.exe, so never share that one.
+# see src/launch.c). It holds nothing of the game either (test no_game_bytes).
 #   ninja -C build nanpa2_app        or configure with -DNANPA2_APP_BUNDLE=ON
 if(APPLE)
   option(NANPA2_APP_BUNDLE "Build build/同級生２.app with the default target" OFF)
@@ -165,7 +161,7 @@ add_test(NAME selftest COMMAND ${CMAKE_COMMAND} -E env NANPA2_HEADLESS=1 NANPA2_
   "NANPA2_SAVE_DIR=${CMAKE_BINARY_DIR}/selftest-saves" $<TARGET_FILE:nanpa2> --game "${NANPA2_GAME_DIR}")
 set_tests_properties(selftest PROPERTIES TIMEOUT 30
   FIXTURES_REQUIRED selftest_dir PASS_REGULAR_EXPRESSION "save selftest: ok"
-  FAIL_REGULAR_EXPRESSION "MISMATCH|x86 trap")
+  FAIL_REGULAR_EXPRESSION "MISMATCH|game trap")
 add_test(NAME selftest_dir COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/selftest-saves")
 set_tests_properties(selftest_dir PROPERTIES FIXTURES_SETUP selftest_dir)
 

@@ -13,12 +13,12 @@
  *
  * Semantics: re-notes.md "Script opcodes".
  */
-#include "game/ctl.h"
+#include <stdio.h>
+
 #include "game/file.h"
 #include "game/map.h"
 #include "game/vm.h"
-#include "x86/x86.h"
-#include "game/state.h"
+#include "platform/sound.h"
 
 /* call 0x40741b: the argument list at vm_pc; returns argument 0's value (the
  * native EAX), *count = the number of arguments (the native ECX) */
@@ -36,8 +36,8 @@ static uint32_t ax_(uint32_t eax, uint32_t v)
 	return (eax & 0xffff0000u) | (v & 0xffffu);
 }
 
-/* `jmp 0x4060f9` at native_pc */
-static int loop_at(uint32_t native_pc)
+/* `jmp 0x4060f9`: on with the loop */
+static int loop_on(void)
 {
 	return -1;
 }
@@ -75,30 +75,29 @@ int vm_op_clear_text(void)
 	if (n)
 		colour = a << 4;
 	game_clear_text_window(colour);
-	return loop_at(0x406b1f);
+	return loop_on();
 }
 
 /* 04 17 / 04 18 x0 y0 x1 y1: fill (0x4017b0) or XOR (0x401870) the
  * rectangle of surface @[6] with the text colour. */
-static int colour_rect(void (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t),
-                       uint32_t exit_pc)
+static int colour_rect(void (*fn)(uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t))
 {
 	parse(NULL);
 	uint32_t surf = SV(surface_select);
 	uint32_t colour = ax_(surf, SV(text_colour)), r[4];
 	push_rect(colour, r);
 	fn(r[0], r[1], r[2], r[3], colour, surf);
-	return loop_at(exit_pc);
+	return loop_on();
 }
 
 int vm_op_fill_rect(void)
 {
-	return colour_rect(game_fill_rect, 0x406bc6);
+	return colour_rect(game_fill_rect);
 }
 
 int vm_op_xor_rect(void)
 {
-	return colour_rect(game_xor_rect, 0x406c1b);
+	return colour_rect(game_xor_rect);
 }
 
 /* 04 19 / 04 1a / 04 1b x0 y0 x1 y1 s dx dy d: copy (0x401430), swap
@@ -120,21 +119,21 @@ static void run_blit(blit_fn fn)
 	fn(eax, dy, r[0], r[1], r[2], r[3], rd8(ARG(4)), rd8(ARG(7)));
 }
 
-static int blit(blit_fn fn, uint32_t exit_pc)
+static int blit(blit_fn fn)
 {
 	parse(NULL);
 	run_blit(fn);
-	return loop_at(exit_pc);
+	return loop_on();
 }
 
 int vm_op_copy_rect(void)
 {
-	return blit(game_blit_copy, 0x406c80);
+	return blit(game_blit_copy);
 }
 
 int vm_op_swap_rect(void)
 {
-	return blit(game_blit_swap, 0x406ce5);
+	return blit(game_blit_swap);
 }
 
 /* With no arguments 04 1b draws the last picture's rectangle (0x44538a-
@@ -145,7 +144,7 @@ int vm_op_masked_rect(void)
 	parse(&n);
 	if (n) {
 		run_blit(game_blit_masked);
-		return loop_at(0x406d4e);
+		return loop_on();
 	}
 	uint32_t eax = 0x102;
 	eax = ax_(eax, SV(pic_rect[3]));
@@ -155,7 +154,7 @@ int vm_op_masked_rect(void)
 	eax = ax_(eax, SV(pic_rect[1]));
 	uint32_t ecx = ax_(0 /* the count n = 0 */, SV(pic_rect[0])) << 3;
 	game_blit_masked(ecx, eax, ecx, eax, w, h, 1, 2);
-	return loop_at(0x406d86);
+	return loop_on();
 }
 
 /* 04 14 n: with n = 1, count the visible items of the menu list at
@@ -181,7 +180,7 @@ int vm_op_menu_items(void)
 				n++;
 		}
 		SV_SET(menu_count, n);
-		return loop_at(0x4068dc);
+		return loop_on();
 	}
 	uint32_t rows = SV(menu_rows);
 	uint32_t table = VM_SCRIPT + SV(menu_list_ptr);
@@ -208,7 +207,7 @@ int vm_op_menu_items(void)
 		if (!--left)
 			break;
 	}
-	return loop_at(0x4068b3);
+	return loop_on();
 }
 
 /* 04 15 n ...: the game cursor. 0 show (0x401c40) and 1 hide (0x401c60),
@@ -221,21 +220,21 @@ int vm_op_cursor(void)
 	switch (a) {
 	case 0:
 		if (RT(cursor_shown))
-			return loop_at(0x40693d);
+			return loop_on();
 		game_cursor_show();
 		RT_SET(cursor_shown, 1);
-		return loop_at(0x40694f);
+		return loop_on();
 	case 1:
 		if (!RT(cursor_shown))
-			return loop_at(0x40695b);
+			return loop_on();
 		game_cursor_hide();
 		RT_SET(cursor_shown, 0);
-		return loop_at(0x40696d);
+		return loop_on();
 	case 2:
 		return -1; /* the table entry itself: no backward jump */
 	case 3:
 		game_cursor_setpos(rd16(ARG(1)), rd16(ARG(2)));
-		return loop_at(0x406989);
+		return loop_on();
 	case 4: {
 		uint32_t src = vm_segment_base(vm_segment_select()) + rd16(ARG(1)), dst = 0, v;
 		for (int i = 0; i < 0x80; i++) {
@@ -245,10 +244,10 @@ int vm_op_cursor(void)
 			src += 4;
 			dst += 4;
 		}
-		return loop_at(0x4069b9);
+		return loop_on();
 	}
 	}
-	x86_trap(0x40691b, "op 04 15: sub-op out of the table");
+	game_trap(0x40691b, "op 04 15: sub-op out of the table");
 }
 
 /* 04 16 n [v]: the palette. 2: set it now (0x401ca0) from the picture's
@@ -260,7 +259,7 @@ int vm_op_palette(void)
 {
 	uint32_t a = parse(NULL);
 	if (a != 2 && a != 3)
-		return loop_at(0x406f13);
+		return loop_on();
 	game_palette_save();
 	if (rd8(VM_ARG_TYPES + 1) == VM_ARG_EXPR) {
 		game_palette_fill(rd16(ARG(1)));
@@ -269,11 +268,11 @@ int vm_op_palette(void)
 		RT_SET(fade_steps, 1);
 		game_fade_start();
 		game_palette_wait(); /* 0x406f41 */
-		return loop_at(0x406f4f);
+		return loop_on();
 	}
 	game_palette_upload();
 	game_palette_restore();
-	return loop_at(0x406f77);
+	return loop_on();
 }
 
 /* 04 1c name, off: load a file into segment @[7] at off (0x401050). */
@@ -284,7 +283,7 @@ int vm_op_load_file(void)
 	vm_string_arg(STRING_BUF, &src, &last);
 	uint32_t buf = vm_segment_base(vm_segment_select()) + rd16(ARG(1));
 	game_file_load_at(STRING_BUF, buf);
-	return loop_at(0x406dbf);
+	return loop_on();
 }
 
 /* 04 1d [name]: picture to surface @[6] (0x406e20; with no argument the
@@ -294,7 +293,7 @@ int vm_op_picture(void)
 	uint32_t n;
 	parse(&n);
 	game_picture_load(n != 0);
-	return loop_at(0x406e1b);
+	return loop_on();
 }
 
 /* 04 24 n, m: n = 0 plays music m (0x402cb0), anything else stops it
@@ -303,11 +302,11 @@ int vm_op_music(void)
 {
 	uint32_t a = parse(NULL);
 	if (a) {
-		HLE0(0x4032c0);
-		return loop_at(0x4073b4);
+		sound_music_stop();
+		return loop_on();
 	}
-	HLE(0x402cb0, rd16(ARG(1)));
-	return loop_at(0x4073c8);
+	sound_music_play((int)rd16(ARG(1)));
+	return loop_on();
 }
 
 /* 04 25 name: play a voice clip (0x403360). */
@@ -316,8 +315,10 @@ int vm_op_voice(void)
 	parse(NULL);
 	uint32_t src, last;
 	vm_string_arg(STRING_BUF, &src, &last);
-	HLE(0x403360, STRING_BUF);
-	return loop_at(0x4073e9);
+	char rel[160];
+	snprintf(rel, sizeof rel, "SPEECH%.140s", (const char *)g_ptr(STRING_BUF, 1));
+	sound_voice_play(rel);
+	return loop_on();
 }
 
 /* 1a n, slot, a, b: animation slot control 0x403510 (sub-op n, the slot and
@@ -327,7 +328,7 @@ int vm_op_anim(void)
 {
 	uint32_t a = parse(NULL);
 	game_anim_control(a, rd16(ARG(1)), rd16(ARG(2)), rd16(ARG(3)));
-	return loop_at(0x4070b7);
+	return loop_on();
 }
 
 /* 19 n, a, b: sub-ops, the result in S.
@@ -367,11 +368,8 @@ static uint32_t misc_row_swap(void)
 	uint32_t y = rd16(ARG(1));
 	uint64_t m0 = (uint64_t)y * rd32(0x4462ae), m1 = (uint64_t)y * rd32(0x4462b2);
 	uint32_t off0 = (uint32_t)m0 + 0x40, off1 = (uint32_t)m1 + 0x40;
-	uint32_t esi = game_surface_lock(rd32(0x44629e));
-	uint32_t edi = game_surface_lock(rd32(0x4462a2));
-	edi += off1;
-	esi += off0;
-	uint8_t *pa = x86_ptr(esi, 0x200), *pb = x86_ptr(edi, 0x200);
+	uint8_t *pa = game_surface_lock(rd32(0x44629e)) + off0;
+	uint8_t *pb = game_surface_lock(rd32(0x4462a2)) + off1;
 	for (int i = 0; i < 0x80; i++) {
 		uint32_t a, b;
 		memcpy(&a, pa + 4 * i, 4);
@@ -414,7 +412,7 @@ int vm_op_misc(void)
 				eax = RT(fade_steps);
 			} else if (b == 2) {
 			} else {
-				x86_trap(0x4072b0, "op 19 2: sub-op out of the table");
+				game_trap(0x4072b0, "op 19 2: sub-op out of the table");
 			}
 		}
 		break;
@@ -428,10 +426,10 @@ int vm_op_misc(void)
 	case 4: /* the dissolve wipe: push esi (saved), 2, 0 and call 0x401a50 */
 		eax = game_wipe(0, 2);
 		vm_set_reg(VM_REG_S, eax);
-		return loop_at(0x407235);
+		return loop_on();
 	default:
-		x86_trap(0x40720f, "op 19: sub-op out of the table");
+		game_trap(0x40720f, "op 19: sub-op out of the table");
 	}
 	vm_set_reg(VM_REG_S, eax);
-	return loop_at(0x407235);
+	return loop_on();
 }

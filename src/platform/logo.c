@@ -22,7 +22,7 @@
  * palette, 8-bit mode and sound device are all set up afterwards by
  * 0x402620. The native ShowCursor(0) / SetWindowPos have no lasting effect
  * here (the cursor is drawn by the game from MOUSE.DAT). */
-#include "logo.h"
+#include "platform/logo.h"
 
 #include <SDL.h>
 #include <stdlib.h>
@@ -30,9 +30,9 @@
 
 #include "cinepak.h"
 #include "fsys.h"
-#include "hle.h"
+#include "platform/window.h"
 #include "platform/present.h"
-#include "status.h"
+#include "dev/status.h"
 
 struct avi {
 	unsigned char *data;
@@ -203,7 +203,7 @@ void logo_play(void)
 		shown++;
 		status_main();
 		SDL_Event ev;
-		win32_cursor_update(); /* the pointer may have left the image */
+		win_cursor_update(); /* the pointer may have left the image */
 		while (SDL_PollEvent(&ev)) {
 			if (ev.type == SDL_QUIT) {
 				SDL_PushEvent(&ev); /* for the game's own loop */

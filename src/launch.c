@@ -12,7 +12,6 @@
 #include "assets.h"
 #include "fsys.h"
 #include "platform/dialog.h"
-#include "x86/x86.h"
 
 #define PATH_CAP 1024
 

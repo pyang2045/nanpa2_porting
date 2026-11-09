@@ -22,9 +22,9 @@
  *                                                       (Alt+Enter, Cmd+F toggle)
  *   --record FILE / --replay FILE                       record the play (inputs and state
  *                                                       checkpoints) / replay it and
- *                                                       compare (src/hle/replay.h)
- *   --deterministic                                     the game clock follows the emulated
- *                                                       CPU, not the host
+ *                                                       compare (src/dev/replay.h)
+ *   --deterministic                                     the game clock is the virtual time
+ *                                                       of the pacing model, not the host's
  *   --pause-inactive                                    stop the game while the
  *                                                       window is in the background
  *                                                       (the original behaviour)
@@ -33,9 +33,10 @@
  * the remembered choice, next to the executable or .app, ./game, then a
  * folder picker.
  *
- * Playing runs the game's C reimplementation (src/game) on the hand-written
- * Win32/DirectX layer in src/hle, with the built-in data of the player's
- * nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe once).
+ * Playing runs the game's C reimplementation (src/game) on the platform API
+ * (src/platform: files, surfaces, text, window, sound), with the built-in data
+ * of the player's nanpa2.exe from nanpa2.dat (src/assets.c, made from the exe
+ * once). Nothing of the exe's code runs.
  */
 #include <SDL.h>
 #include <stdio.h>
@@ -46,16 +47,18 @@
 #include "fsys.h"
 #include "gp4.h"
 #include "platform/present.h"
-#include "hle/clock.h"
-#include "hle/dev.h"
-#include "hle/hle.h"
-#include "hle/logo.h"
+#include "platform/clock.h"
+#include "dev/dev.h"
+#include "platform/files.h"
+#include "platform/logo.h"
+#include "platform/sound.h"
+#include "platform/text.h"
 #include "game/startup.h"
 #include "game/state.h"
-#include "hle/replay.h"
-#include "hle/status.h"
+#include "dev/replay.h"
+#include "dev/status.h"
 #include "launch.h"
-#include "x86/x86.h"
+#include "asset.h"
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -202,14 +205,14 @@ static int run_game(const char *game, const char *exe, const char *font)
 		fprintf(stderr, "%s\n", err);
 		return 1;
 	}
-	state_init();
+	if (!state_init()) {
+		fprintf(stderr, "no game data image\n");
+		return 1;
+	}
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
-	if (!hle_init(game, save_env ? save_env : save ? save : ".")) {
-		fprintf(stderr, "cannot map the imports of nanpa2.exe\n");
-		return 1;
-	}
+	files_init(game, save_env ? save_env : save ? save : ".");
 	text_init(font);
 	dev_init();
 	replay_init(save_env ? save_env : save ? save : ".");
@@ -220,16 +223,12 @@ static int run_game(const char *game, const char *exe, const char *font)
 	if (replay_replaying() && !game_speed_set)
 		clock_init(0); /* a replay runs as fast as the host can */
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
-	 * script interpreter until the game ends */
-	uint32_t hinstance = MEM_BASE;
+	 * script VM until the game ends */
 	uint64_t t0 = SDL_GetPerformanceCounter();
-	x86_unaliased_snapshot();
-	game_main(hinstance);
-	if (x86_unaliased_check() && atoi(getenv("NANPA2_DATA_CHECK")) >= 2)
-		return 4;
+	game_main();
 	replay_finish();
 	SDL_free(save);
-	/* with NANPA2_SPEED=0: the game time against the host's, HLE time included */
+	/* with NANPA2_SPEED=0: the game time against the host's */
 	double secs = (double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency();
 	double game_secs = (double)clock_us() / 1e6;
 	SDL_Log("Game: %.1f s of game time in %.1f s (%.2fx)", game_secs, secs, secs > 0 ? game_secs / secs : 0.0);
