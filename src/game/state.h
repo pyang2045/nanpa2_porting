@@ -114,7 +114,7 @@ _Static_assert(sizeof(struct save_image) == SAVE_SIZE, "the save image is 0xc00 
 #define RT_LABELS 60u
 #pragma pack(push, 1)
 struct vm_rt {
-	uint32_t top_esp;          /* 0x445cdc ESP of the top-level VM (after its push ebp) */
+	uint32_t unused_top_esp;   /* 0x445cdc the native top-level VM's ESP; R3: nothing reads or writes it */
 	uint8_t cursor_shown;      /* 0x445ce0 the game cursor is drawn (ext 15) */
 	uint8_t click_busy;        /* 0x445ce1 a click handler's block is running */
 	uint16_t click_handler[2]; /* 0x445ce2 blocks for the left and right button (ext 20) */

@@ -113,8 +113,7 @@ void game_vm_run(void);
 /* 0x4060f9: run until a block ends; the block result AL (0 end, 1 continue,
  * 2 break) */
 int vm_loop(void);
-/* 0x4061cd: run the block at vm_pc (its 01) as a nested loop; its AL. The
- * caller charges its own `call`. */
+/* 0x4061cd: run the block at vm_pc (its 01) as a nested loop; its AL. */
 int vm_run_block(void);
 /* `call 0x4060f9` from vm_pc: a nested loop (called scripts, digits) */
 int vm_call_loop(void);

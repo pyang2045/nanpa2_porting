@@ -7,8 +7,7 @@
  * thread keeps writing if the main thread hangs, so a stall shows up too.
  *
  * Game state: frame counter 0x446292 (16 ms timer 0x4028c0), active flag
- * 0x4ac4ec (WM_ACTIVATEAPP; the timer does nothing while it is 0), the last
- * X86_POLL pc.
+ * 0x4ac4ec (WM_ACTIVATEAPP; the timer does nothing while it is 0).
  *
  * status_early() starts the thread before SDL_Init, so an instance that
  * hangs in the video setup (seen with the screen locked: the main thread
@@ -52,7 +51,7 @@ extern char **environ;
 #define WATCH_MAIN_MS 3000
 
 static SDL_Window *window;
-static double mips;
+static double speed;
 static char path[1024], tmp_path[1040];
 static SDL_Thread *thread;
 static SDL_mutex *lock;
@@ -149,7 +148,7 @@ static void warn(const char *key, const char *fmt, ...)
 }
 
 /* The watchdog: the most likely cause of a black or frozen window. */
-static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_t active, uint32_t pc)
+static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_t active)
 {
 	const struct present_stats *ps = &s->ps;
 	uint32_t up = now - start_ticks;
@@ -173,8 +172,8 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 	if (up < WATCH_MS)
 		return;
 	if (now - s->tick > WATCH_MAIN_MS) {
-		warn("main", "main thread stalled for %u ms (last X86_POLL pc %08x, worst nextDrawable wait %.0f ms)",
-		     now - s->tick, pc, ps->worst_wait_ms);
+		warn("main", "main thread stalled for %u ms (worst nextDrawable wait %.0f ms)",
+		     now - s->tick, ps->worst_wait_ms);
 		return;
 	}
 	int timer = win32_timer_running(), in_logo = SDL_AtomicGet(&logo);
@@ -183,8 +182,8 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 			warn("timer", "timer stopped: 0x4ac4ec=0 (game deactivated), frame counter %u for %u ms", frame,
 			     now - last_frame_change);
 		else
-			warn("frame", "frame counter stuck at %u for %u ms with 0x4ac4ec=%u: stuck polling at pc %08x",
-			     frame, now - last_frame_change, active, pc);
+			warn("frame", "frame counter stuck at %u for %u ms with 0x4ac4ec=%u",
+			     frame, now - last_frame_change, active);
 		return;
 	}
 	if (headless) {
@@ -197,8 +196,8 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 	uint32_t since_present = ps->last_present ? now - ps->last_present : up;
 	if (since_present > WATCH_MS) {
 		if (!d_in)
-			warn("noin", "no frame presented for %u ms: the presenter is not called (last X86_POLL pc %08x)",
-			     since_present, pc);
+			warn("noin", "no frame presented for %u ms: the presenter is not called",
+			     since_present);
 		else if (d_occl)
 			warn("occl", "no frame presented for %u ms: presents skipped, occluded=%lu (window covered or "
 			     "hidden; os_windows %d)", since_present, ps->skip_occluded, ps->os_windows);
@@ -221,8 +220,8 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 		else if (in_logo)
 			warn("logo", "screen black for %u ms during the logo movie", black);
 		else
-			warn("black", "screen black for %u ms: the game draws black (frame %u, 0x4ac4ec=%u, pc %08x)",
-			     black, frame, active, pc);
+			warn("black", "screen black for %u ms: the game draws black (frame %u, 0x4ac4ec=%u)",
+			     black, frame, active);
 		return;
 	}
 }
@@ -276,8 +275,8 @@ static void write_status(void)
 	s = snap;
 	SDL_UnlockMutex(lock);
 	now = SDL_GetTicks(); /* not before the snapshot (s.tick <= now) */
-	uint32_t frame = RT(frame), active = SC(active), pc = x86_poll_pc;
-	watchdog(&s, now, frame, active, pc);
+	uint32_t frame = RT(frame), active = SC(active);
+	watchdog(&s, now, frame, active);
 	if (!warning[0])
 		last_key[0] = 0; /* a cause that clears and comes back is logged again */
 
@@ -304,7 +303,7 @@ static void write_status(void)
 		"\"luma_in\": %d, \"luma_shown\": %d, \"black_ms\": %u, "
 		"\"probe\": {\"count\": %lu, \"luma\": %d, \"luma_src\": %d, \"age_ms\": %d, \"nonblack_age_ms\": %d}},\n"
 		"  \"game\": {\"frame\": %u, \"frame_still_ms\": %u, \"active_4ac4ec\": %u, \"timer\": %d, "
-		"\"poll_pc\": \"%08x\", \"mips\": %.1f, \"main_age_ms\": %u},\n"
+		"\"speed\": %.2f, \"main_age_ms\": %u},\n"
 		"  \"logo\": %d, \"music\": %d, \"voice\": \"%s\",\n"
 		"  \"native_game_insns\": %s,\n"
 		"  \"warning\": \"%s\", \"warning_key\": \"%s\", \"warnings\": %u, \"warned\": %s\n"
@@ -319,7 +318,7 @@ static void write_status(void)
 		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black,
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
 		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
-		now - last_frame_change, active, win32_timer_running(), pc, mips, now - s.tick,
+		now - last_frame_change, active, win32_timer_running(), speed, now - s.tick,
 		SDL_AtomicGet(&logo), music, vq, "null", wq, warning_key, warnings, warned);
 	write_json(buf);
 }
@@ -437,11 +436,11 @@ void status_stage(const char *name)
 	stage = name;
 }
 
-void status_init(SDL_Window *win, double mips_setting)
+void status_init(SDL_Window *win, double speed_setting)
 {
 	status_early();
 	window = win;
-	mips = mips_setting;
+	speed = speed_setting;
 	start_ticks = SDL_GetTicks();
 	last_frame_change = start_ticks;
 	scripted = dev_scripted();

@@ -10,11 +10,9 @@
  * of the game, or (while pieces of the register-level VM still exist) a
  * wrapper that runs direct-style code from a piece.
  *
- * Cost and polls are the pacing of the game (the clock follows the
- * instruction count, R0), kept exactly as the original code's; R3 replaces
- * them. COST(n) charges n instructions, POLL(at) is a backward jump of the
- * original at native address `at`: it runs the timer once enough
- * instructions have passed. Both are independent of the CPU model.
+ * Pacing (R3): the game waits on the 16 ms timer and spends time only in the
+ * few kinds of busy work of pace.h, each an explicit ctl_work_us(). There are
+ * no per-instruction charges.
  */
 #ifndef NANPA2_GAME_CTL_H
 #define NANPA2_GAME_CTL_H
@@ -23,25 +21,19 @@
 
 #include "x86/x86.h"
 
-#define COST(n) X86_COUNT(n)
-#define POLL(at) X86_POLL(at)
+/* Busy work of the original machine: advance the game clock by `us` microseconds (src/game/pace.h
+ * lists the costs and where they come from). */
+void ctl_work_us(uint32_t us);
 
-/* The message pump (native 0x401bf0): 0 on WM_QUIT, else 1. Charges what the
- * pump charges. Leaves ECX = EDX = 0 as the native pump did. */
+/* The message pump (native 0x401bf0): 0 on WM_QUIT, else 1. Costs PACE_PUMP_US. */
 int ctl_pump(void);
 
 /* NANPA2_TIMELOG=1: one stderr line "T <game ms> <frame> <label> <arg>" per probe: fade, wipe,
  * text and walk events, file opens. The game ms is the deterministic clock, else the host clock. */
 void ctl_tlog(const char *label, uint32_t arg);
 
-/* WM_QUIT seen: the 0x40638d reset (`mov esp, [top]`, COST(1)), then unwind
- * to the innermost ctl_catch, which returns 0. Not returning. The native
- * tail after the reset (pop ebp, ret to WinMain: 2 instructions) is the
- * catcher's to charge. */
+/* WM_QUIT seen: unwind to the innermost ctl_catch, which returns 0. Not returning. */
 _Noreturn void ctl_quit(void);
-
-/* The unwinding without the charge (the quit exits that charged it). */
-_Noreturn void ctl_unwind(void);
 
 /* Pump; on WM_QUIT ctl_quit(). The usual wait loop step. */
 void ctl_pump_or_quit(void);
@@ -54,8 +46,7 @@ int ctl_catch(void (*fn)(void *), void *arg);
  * Call the Win32 import, COM method, C runtime function or game unit at
  * native address `addr` as the code called it: the arguments are pushed on
  * the emulated stack (args[0] first argument), the callee runs, the stack is
- * restored (cdecl and stdcall alike), the result is EAX. No instruction cost
- * is charged: the caller charges its own pushes and call as before. */
+ * restored (cdecl and stdcall alike), the result is EAX. No game time. */
 uint32_t hle_invoke(uint32_t addr, int nargs, const uint32_t *args);
 #define HLE(addr, ...) hle_invoke((addr), (int)(sizeof((uint32_t[]){ __VA_ARGS__ }) / 4), \
 	(const uint32_t[]){ __VA_ARGS__ })

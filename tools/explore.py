@@ -50,7 +50,7 @@ def run(args):
             else:
                 os.makedirs(saves)
             env = dict(os.environ, NANPA2_HEADLESS='1', NANPA2_SAVE_DIR=saves,
-                       NANPA2_TURBO=str(args.turbo), NANPA2_EXPLORE=str(seed),
+                       NANPA2_SPEED=str(args.turbo), NANPA2_EXPLORE=str(seed),
                        NANPA2_EXPLORE_FRAMES=str(args.frames))
             log = open(os.path.join(d, 'log.txt'), 'w')
             p = subprocess.Popen([args.bin, '--game', args.game], env=env, stdout=log,

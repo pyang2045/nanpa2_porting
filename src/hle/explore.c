@@ -199,17 +199,11 @@ static uint32_t skip_expr(uint32_t p)
 static uint32_t eval(uint32_t p)
 {
 	uint16_t seed = AN(random_seed);
-	/* the bot's own work is not the game's: not its instruction count (the
-	 * game clock in deterministic mode) nor its poll countdown, or a replay,
-	 * which has no bot, would run on another clock than the recording */
-	uint64_t icount = x86_icount;
-	int countdown = x86_poll_countdown;
-	x86_poll_countdown = 0x7fffffff; /* no timer tick inside */
+	/* the bot's own work is not the game's: it calls the evaluator directly, which
+	 * spends no game time (only vm_eval charges), or a replay, which has no bot, would
+	 * run on another clock than the recording */
 	int bare;
-	uint32_t insns;
-	uint32_t v = script_eval(&p, &bare, &insns) & 0xffff;
-	x86_icount = icount;
-	x86_poll_countdown = countdown;
+	uint32_t v = script_eval(&p, &bare) & 0xffff;
 	AN_SET(random_seed, seed);
 	return v;
 }

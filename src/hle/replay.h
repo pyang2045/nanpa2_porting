@@ -4,8 +4,8 @@
  * The game's clock is the 16 ms timer, and its input comes from the host.
  * Both make two runs of the same play differ. In deterministic mode
  * (NANPA2_DETERMINISTIC=1, and implied by --record and --replay) the game
- * clock is the instruction count (25 million per second, whatever
- * --cpu-mips says), the message pump takes the host event queue at a
+ * clock is the virtual time of the pacing model (src/game/pace.h,
+ * src/hle/clock.h; whatever --speed says), the message pump takes the host event queue at a
  * count of pumps and not of milliseconds, and nothing the host or the audio
  * thread does reaches the game's state. Two runs with the same input are
  * then identical to the bit.
@@ -20,7 +20,7 @@
  *          (the 0xc00-byte image the save file holds), the scripts reached,
  *          the FLAG files in the save folder. They survive the refactor.
  *   raw.*  the emulated memory (.data and .bss in pages of 4 KB, heap, stack)
- *          and the instruction count; for checking the same code twice.
+ *          and the virtual clock; for checking the same code twice.
  * --replay FILE posts the recorded messages at the same pump and compares
  * every checkpoint with the recorded one; the first difference stops the
  * run (exit code 3) and names the checkpoint and what differs.

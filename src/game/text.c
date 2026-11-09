@@ -12,6 +12,7 @@
  * re-notes.md "Text routine".
  */
 #include "game/ctl.h"
+#include "game/pace.h"
 #include "game/vm.h"
 #include "x86/x86.h"
 #include "game/state.h"
@@ -52,63 +53,42 @@ void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t f
 		wr8(str + 1, c);
 		wr8(str + 2, 0);
 		len = 2;
-		COST(14);
 	} else {
 		wr8(str, c);
 		wr8(str + 1, 0);
 		len = 1;
-		COST(10);
 	}
 	size &= 3;
 	uint32_t n = 8 * size + 16;
+	ctl_work_us(PACE_CELL_US(n));
 	uint32_t scratch = SC(scratch_surface), vtbl = rd32(scratch);
 
 	/* the glyph, white on black, at (0, 0) of the scratch surface */
-	COST(9);
 	HLE(rd32(vtbl + SURFACE_GETDC), scratch, dc_at);
 	uint32_t dc = rd32(dc_at);
-	COST(5);
 	HLE(rd32(IAT_SELECTOBJECT), dc, rd32(FONTS + 4 * size));
-	COST(4);
 	HLE(rd32(IAT_SETTEXTCOLOR), dc, 0xf0f0f0);
-	COST(4);
 	HLE(rd32(IAT_SETBKCOLOR), dc, 0);
-	COST(4);
 	HLE(rd32(IAT_SETBKMODE), dc, BK_OPAQUE);
-	COST(8);
 	HLE(rd32(IAT_TEXTOUT), dc, 0, 0, str, len);
-	COST(6);
 	HLE(rd32(vtbl + SURFACE_RELEASEDC), scratch, dc);
 
 	/* the cell, from the scratch surface to the screen */
 	uint32_t screen = G.rt.surface[0];
-	COST(3);
 	uint32_t src = game_surface_lock(scratch);
-	COST(4);
 	uint32_t dst = game_surface_lock(screen) + G.rt.pitch[0] * y + x;
-	COST(10);
 	for (uint32_t row = 0; row < n; row++) {
-		COST(4);
 		uint8_t *s = x86_ptr(src, 32 > n ? 32 : n), *d = x86_ptr(dst, n);
 		for (uint32_t col = 0; col < n; col++) {
 			int on = s[col] != 0;
 			d[col] = on ? fg : bg;
-			COST(on ? 7 : 8);
-			if (col + 1 < n)
-				POLL(0x401a07);
 		}
 		memset(s, 0, 32);
 		src += SCRATCH_PITCH;
 		dst += G.rt.pitch[0];
-		COST(11 + 8);
-		if (row + 1 < n)
-			POLL(0x401a2b);
 	}
-	COST(3);
 	game_surface_unlock(scratch);
-	COST(3);
 	game_surface_unlock(G.rt.surface[0]);
-	COST(7);
 	game_frame_free(8);
 }
 
@@ -120,13 +100,10 @@ void game_text_newline(void)
 	SV_SET(text_x, SV(text_left));
 	uint32_t y = (SV(text_y) + h) & 0xffff;
 	SV_SET(text_y, y);
-	COST(10);
 	if (((y + h - 2) & 0xffff) < SV(text_bottom)) {
-		COST(1);
 		return;
 	}
 	SV_SET(text_y, SV(text_top));
-	COST(3);
 }
 
 /* 0x4063ee: the cursor past one character, to the next line when the
@@ -136,9 +113,7 @@ void game_text_advance(void)
 	uint32_t w = SV(text_advance);
 	uint32_t x = (SV(text_x) + w) & 0xffff;
 	SV_SET(text_x, x);
-	COST(8);
 	if (((x + w - 2) & 0xffff) < SV(text_right)) {
-		COST(1);
 		return;
 	}
 	game_text_newline();
@@ -163,7 +138,5 @@ void game_clear_text_window(uint32_t colour)
 	a = ((a & 0xffff0000u) | left) << 3;
 	SV_SET(text_x, left);
 	uint32_t x = a;
-	COST(20);
 	game_fill_rect(x, y, w, h, colour, surf);
-	COST(2);
 }

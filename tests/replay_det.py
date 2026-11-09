@@ -28,7 +28,7 @@ def run(exe, game, work, name, args, env_extra, timeout=300):
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(os.path.join(d, "saves"))
     env = dict(os.environ, NANPA2_HEADLESS="1", NANPA2_SAVE_DIR=os.path.join(d, "saves"),
-               NANPA2_CPU_MIPS="0", NANPA2_CP_TICKS="250")
+               NANPA2_SPEED="0", NANPA2_CP_TICKS="250")
     for k in [k for k in env if k.startswith(("NANPA2_EXPLORE", "NANPA2_INPUT", "NANPA2_REPLAY", "NANPA2_RECORD"))]:
         del env[k]
     env.update(env_extra)

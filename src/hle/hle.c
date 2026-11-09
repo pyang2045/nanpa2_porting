@@ -1,5 +1,7 @@
 #include "hle.h"
 #include "game/ctl.h"
+#include "game/pace.h"
+#include "clock.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -160,18 +162,6 @@ void hle_timer_callback(void)
 static void override_call(uint32_t addr)
 {
 	switch (addr) {
-	case 0x401bf0: /* message pump */
-		cpu.r[EAX] = (uint32_t)win32_pump();
-		/* The native pump returns from PeekMessageA/DispatchMessageA,
-		 * which leave ECX changed. Script op 0x1f (call a MES file,
-		 * 0x406fcd) relies on that: after the sub-file returns
-		 * through this pump it restores its state with
-		 * "mov cx, 0x1e / rep movsd" (0x40705e, 0x40706e), which loads
-		 * only CX. A stale heap pointer in ECX made that copy run off
-		 * memory (ecx 0x0104001e). */
-		cpu.r[ECX] = 0;
-		cpu.r[EDX] = 0; /* also volatile across the stdcall APIs */
-		return;
 	case 0x401e20: /* LOGO.AVI through MCI (src/hle/logo.c) */
 		win32_show_cursor(0); /* 0x401e27, before anything else */
 		logo_play();
@@ -238,7 +228,7 @@ static void override_call(uint32_t addr)
 		/* emulated CPU time of the native decoder: lifting it and counting
 		 * gave about 70 instructions per input byte + 1.2 per output byte
 		 * (0.7M for ELF.GP4, 2.4M for NAME.GP4) */
-		X86_COUNT(70u * (uint64_t)cap + (uint64_t)n * 6 / 5);
+		ctl_work_us(PACE_DECODE_US(cap, n));
 		free(out);
 		return;
 	}
@@ -257,12 +247,12 @@ static void hle_trace(uint32_t addr)
 	static int on = -1;
 	if (on < 0) {
 		const char *e = getenv("NANPA2_HLETRACE");
-		on = !e ? 0 : !strcmp(e, "2") ? 2 : 1; /* 2: with the instruction count */
+		on = !e ? 0 : !strcmp(e, "2") ? 2 : 1; /* 2: with the game clock in microseconds */
 	}
 	if (!on)
 		return;
 	if (on == 2)
-		fprintf(stderr, "ic %llu ", (unsigned long long)x86_icount);
+		fprintf(stderr, "us %llu ", (unsigned long long)clock_us());
 	fprintf(stderr, "hle %08x", addr);
 	int n = 1; /* arguments known: imports have their count, others show the first */
 	if (addr >= THUNK_IMPORT && addr < THUNK_COM) {

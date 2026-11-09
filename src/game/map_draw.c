@@ -39,17 +39,13 @@ static inline void st32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
 
 static uint32_t lock_surface(uint32_t surface)
 {
-	COST(2);
 	uint32_t p = game_surface_lock(surface);
-	COST(2); /* add esp, mov [LOCKED_*], eax */
 	return p;
 }
 
 static uint32_t unlock_surface(uint32_t surface)
 {
-	COST(2);
 	uint32_t eax = game_surface_unlock(surface);
-	COST(1);
 	return eax;
 }
 
@@ -89,38 +85,28 @@ uint32_t game_map_fill_grid(uint32_t eax)
 	uint32_t ebx = ((prod & 0xffff) + vx + vx + m->layer + 4) & 0xffff; /* layer offset */
 	struct cell *c = cells();
 	uint32_t vh = m->view_h;
-	COST(13);
 	for (uint32_t cx = vh; cx; cx--) {
 		uint32_t row = (vh - cx) & 0xffff;
 		eax = (eax & 0xffff0000u) | row;
-		COST(4);
 		if (row < m->map_h) {
 			uint32_t save_ebx = ebx;
 			struct cell *save_c = c;
 			uint32_t vw = m->view_w;
-			COST(4);
 			for (uint32_t n = vw; n; n--) {
 				uint32_t col = (vw - n) & 0xffff;
-				COST(4);
 				if (col >= m->map_w)
 					break;
 				c->tile = seg1_u16(ebx);
 				c->spr[0] = c->spr[1] = c->spr[2] = 0;
 				ebx += 2;
 				c++;
-				COST(6);
-				POLL(0x403bb0);
 			}
 			c = save_c + vw;
 			ebx = save_ebx;
 			eax = vw << 3;
-			COST(6);
 		}
 		ebx = (ebx & 0xffff0000u) | ((ebx + mw + mw) & 0xffff);
-		COST(3);
-		POLL(0x403bcf);
 	}
-	COST(1);
 	return eax;
 }
 
@@ -136,19 +122,13 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
 {
 	const struct map_rec *m = map_rec();
 	uint32_t s = m->sprites;
-	COST(2);
 	for (;;) {
-		COST(2);
 		if (seg1_u8(s) == SPRITE_END)
 			break;
 		struct sprite *sp = sprite_at(s);
-		COST(3); /* push ebx, test, jne */
 		if (sp->flags & SPRITE_OFF) {
-			COST(3);
 		} else if (!(sp->flags & SPRITE_DRAWN)) {
-			COST(5);
 		} else {
-			COST(2);
 			uint32_t vw = m->view_w;
 			uint32_t ry = (sp->y - m->view_y) & 0xffff;
 			uint32_t rx = (sp->x - m->view_x) & 0xffff;
@@ -165,32 +145,22 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
 			MV_SET(draw_h, h);
 			uint32_t tiles = p + 4;
 			uint32_t row = ry; /* the low word of EBP */
-			COST(37 + 6);
 			if (!h || !w)
 				x86_trap(0x403bd2, "map: a sprite pattern with no cells");
 			for (uint32_t r = 0; r < h; r++) {
 				struct cell *cp = cell;
 				uint32_t col = rx;
-				if (r)
-					COST(5); /* push ecx, edx, ebp, edi, movzx ecx */
 				for (uint32_t k = 0; k < w; k++) {
-					COST(4);
 					if ((col & 0xffff) <= ((vw - 1) & 0xffff)) {
-						COST(4);
 						if ((row & 0xffff) <= ((m->view_h - 1u) & 0xffff)) {
 							uint32_t t = (seg1_u16(tiles) + 1) & 0xffff;
-							COST(2);
 							if (cp->spr[0] == 0) {
 								cp->spr[0] = t;
-								COST(4);
 							} else if (cp->spr[1] == 0) {
 								cp->spr[1] = t;
-								COST(6);
 							} else {
-								COST(6);
 								if (cp->spr[2] == 0) {
 									cp->spr[2] = t;
-									COST(1);
 								}
 							}
 						}
@@ -198,21 +168,14 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
 					tiles += 2;
 					cp++;
 					col++;
-					COST(4);
-					POLL(0x403d26);
 				}
 				row++;
 				cell += vw;
-				COST(9);
-				POLL(0x403d39);
 			}
 			eax = vw << 3;
-			COST(3);
 		}
 		s += sizeof(struct sprite);
-		POLL(0x403d3f);
 	}
-	COST(1);
 	return eax;
 }
 
@@ -222,16 +185,12 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
  * bit 3 */
 static void cell_tile(const uint8_t *src, uint8_t *dst)
 {
-	COST(2);
 	for (uint32_t row = 0; row < 16; row++) {
 		for (uint32_t k = 0; k < 4; k++)
 			st32(dst + 4 * k, (ld32(src + 4 * k) & 0x07070707u) | (ld32(dst + 4 * k) & 0x08080808u));
 		src += TILE_PITCH;
 		dst += lk.pitch;
-		COST(27);
-		POLL(0x403fac);
 	}
-	COST(1);
 }
 
 /* 0x404132: the tile into the work planes: pixels as they are; the bits
@@ -239,7 +198,6 @@ static void cell_tile(const uint8_t *src, uint8_t *dst)
 static void work_load(const uint8_t *src)
 {
 	uint8_t *w = G.map.work;
-	COST(2);
 	for (uint32_t row = 0; row < 16; row++) {
 		for (uint32_t k = 0; k < 4; k++) {
 			uint32_t o = row * 16 + 4 * k, t = ld32(src + 4 * k);
@@ -249,10 +207,7 @@ static void work_load(const uint8_t *src)
 			st32(w + 0x200 + o, m ^ 0x07070707u);
 		}
 		src += TILE_PITCH;
-		COST(48);
-		POLL(0x4041f2);
 	}
-	COST(1);
 }
 
 /* 0x4041f9: a sprite tile over plane 0: its opaque pixels (bit 3 clear)
@@ -260,7 +215,6 @@ static void work_load(const uint8_t *src)
 static void work_overlay(const uint8_t *src)
 {
 	uint8_t *w = G.map.work;
-	COST(2);
 	for (uint32_t row = 0; row < 16; row++) {
 		for (uint32_t k = 0; k < 4; k++) {
 			uint32_t o = row * 16 + 4 * k, p = ld32(src + 4 * k);
@@ -268,10 +222,7 @@ static void work_overlay(const uint8_t *src)
 			st32(w + o, (ld32(w + o) & m) | (p & 0x07070707u));
 		}
 		src += TILE_PITCH;
-		COST(40);
-		POLL(0x40427e);
 	}
-	COST(1);
 }
 
 /* 0x404281: the composed cell to the screen: where the tile's bit 3 was
@@ -279,17 +230,13 @@ static void work_overlay(const uint8_t *src)
 static void work_store(uint8_t *dst)
 {
 	const uint8_t *w = G.map.work;
-	COST(2);
 	for (uint32_t row = 0; row < 16; row++) {
 		for (uint32_t k = 0; k < 4; k++) {
 			uint32_t o = row * 16 + 4 * k;
 			st32(dst + 4 * k, (ld32(w + o) & ld32(w + 0x200 + o)) | ld32(w + 0x100 + o));
 		}
 		dst += lk.pitch;
-		COST(19);
-		POLL(0x4042e4);
 	}
-	COST(1);
 }
 
 /* the sprite sheet pixels of sprite tile number t (+1) */
@@ -305,16 +252,12 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 	uint8_t *dst = lk.screen + dst_off;
 	const uint8_t *src = lk.tiles + (tile_offset(cell->tile & 0xfff) << 3);
 	uint32_t layers = 0;
-	COST(9 + 2 + 1); /* up to xor eax, cmp [edi+2], call */
 	if (cell->spr[0] != 0) {
 		layers = 1;
-		COST(3);
 		if (cell->spr[1] != 0) {
 			layers = 2;
-			COST(3);
 			if (cell->spr[2] != 0) {
 				layers = 3;
-				COST(3);
 			}
 		}
 	}
@@ -324,7 +267,6 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 		break;
 	case 1:
 		MV_SET(layer_tile[0], cell->spr[0]);
-		COST(4 + 6 + 2 + 1);
 		work_load(src);
 		work_overlay(sprite_pixels(MV(layer_tile[0])));
 		work_store(dst);
@@ -332,7 +274,6 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 	case 2:
 		MV_SET(layer_tile[0], cell->spr[0]);
 		MV_SET(layer_tile[1], cell->spr[1]);
-		COST(7 + 12 + 3 + 1);
 		work_load(src);
 		work_overlay(sprite_pixels(MV(layer_tile[1])));
 		work_overlay(sprite_pixels(MV(layer_tile[0])));
@@ -342,7 +283,6 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 		MV_SET(layer_tile[0], cell->spr[0]);
 		MV_SET(layer_tile[1], cell->spr[1]);
 		MV_SET(layer_tile[2], cell->spr[2]);
-		COST(10 + 18 + 4 + 1);
 		work_load(src);
 		work_overlay(sprite_pixels(MV(layer_tile[2])));
 		work_overlay(sprite_pixels(MV(layer_tile[1])));
@@ -350,7 +290,6 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 		work_store(dst);
 		break;
 	}
-	COST(2); /* popad, ret */
 }
 
 /* 0x4040f0: clear bit 3 of the 16 x 16 pixels at screen offset dst_off of the
@@ -358,15 +297,11 @@ static void cell_draw(const struct cell *cell, uint32_t dst_off)
 static void cell_clear_bit3(uint32_t dst_off)
 {
 	uint8_t *dst = lk.screen + dst_off;
-	COST(4);
 	for (uint32_t row = 0; row < 16; row++) {
 		for (uint32_t k = 0; k < 4; k++)
 			st32(dst + 4 * k, ld32(dst + 4 * k) & 0x07070707u);
 		dst += lk.pitch;
-		COST(14);
-		POLL(0x40412d);
 	}
-	COST(3);
 }
 
 /* ---- sub-op 4: the cells that changed */
@@ -383,40 +318,26 @@ uint32_t game_map_redraw_changed(void)
 	uint32_t vh = m->view_h, vw = m->view_w;
 	const struct cell *c = cells();
 	struct cell *sh = shadow();
-	COST(12); /* after the locks: push ebp ... movzx ecx */
 	for (uint32_t r = 0; r < vh; r++) {
 		uint32_t dst = dst_row;
-		COST(3);
 		for (uint32_t k = 0; k < vw; k++) {
 			if (c->tile != sh->tile) {
-				COST(3);
 			} else if (c->spr[0] != sh->spr[0]) {
-				COST(6);
 			} else if (c->spr[1] != sh->spr[1]) {
-				COST(9);
 			} else if (c->spr[2] != sh->spr[2]) {
-				COST(12);
 			} else {
-				COST(12);
 				goto next;
 			}
 			*sh = *c;
-			COST(5);
 			cell_draw(sh, dst);
 next:
 			c++;
 			sh++;
 			dst += 0x10;
-			COST(4);
-			POLL(0x403dfc);
 		}
 		dst_row += row_step;
-		COST(4);
-		POLL(0x403e02);
 	}
-	COST(1);
 	uint32_t eax = unlock_all();
-	COST(1);
 	return eax;
 }
 
@@ -435,30 +356,19 @@ uint32_t game_map_redraw_all(void (*between)(void))
 	uint32_t vh = m->view_h, vw = m->view_w;
 	const struct cell *c = cells();
 	struct cell *sh = shadow();
-	COST(12); /* push ebp ... movzx ecx */
 	for (uint32_t r = 0; r < vh; r++) {
 		uint32_t dst = dst_row;
-		COST(3);
 		for (uint32_t k = 0; k < vw; k++) {
 			*sh = *c;
-			COST(4 + 1);
 			cell_clear_bit3(dst);
-			COST(1);
 			cell_draw(sh, dst);
 			c++;
 			sh++;
 			dst += 0x10;
-			COST(4);
-			POLL(0x403ec6);
 		}
 		dst_row += row_step;
-		COST(4);
-		POLL(0x403ecc);
 	}
-	COST(1); /* call 0x405216 */
 	between();
-	COST(1); /* pop ebp */
 	uint32_t eax = unlock_all();
-	COST(1);
 	return eax;
 }

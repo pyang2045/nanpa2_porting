@@ -7,17 +7,18 @@
 
 #include "game/state.h"
 #include "hle/hle.h"
+#include "hle/clock.h"
 #include "hle/replay.h"
 
 int ctl_pump(void)
 {
 	hle_trace_pump();
-	int r = win32_pump();
-	/* the native pump returns from PeekMessageA/DispatchMessageA, which leave
-	 * ECX and EDX changed (hle.c, override_call 0x401bf0) */
-	cpu.r[ECX] = 0;
-	cpu.r[EDX] = 0;
-	return r;
+	return win32_pump();
+}
+
+void ctl_work_us(uint32_t us)
+{
+	clock_work(us);
 }
 
 void ctl_tlog(const char *label, uint32_t arg)
@@ -33,17 +34,11 @@ void ctl_tlog(const char *label, uint32_t arg)
 
 static jmp_buf *catch_top;
 
-_Noreturn void ctl_unwind(void)
+_Noreturn void ctl_quit(void)
 {
 	if (!catch_top)
 		x86_trap(0x40638d, "WM_QUIT with nothing to unwind to");
 	longjmp(*catch_top, 1);
-}
-
-_Noreturn void ctl_quit(void)
-{
-	COST(1);
-	ctl_unwind();
 }
 
 void ctl_pump_or_quit(void)

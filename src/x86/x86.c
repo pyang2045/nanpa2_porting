@@ -6,9 +6,6 @@
 
 struct cpu cpu;
 uint8_t *x86_mem;
-int x86_poll_countdown = 1;
-uint32_t x86_poll_pc;
-uint64_t x86_icount;
 void (*x86_trap_hook)(void);
 
 /* ---- NANPA2_IMAGE_TRACE=FILE: which bytes of the PE image the run touched */
