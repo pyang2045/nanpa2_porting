@@ -214,6 +214,7 @@ static void sync_check(const char *name, int vm, uint32_t off)
 
 void dev_file_opened(const char *name)
 {
+	{ extern void ctl_tlog(const char *, uint32_t); ctl_tlog(name, 0); }
 	explore_file(name);
 	sync_check(name, 0, 0);
 }

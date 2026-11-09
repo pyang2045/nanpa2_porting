@@ -116,6 +116,7 @@ uint32_t game_fade_start(void)
 	}
 	memcpy(G.sc.pal_start, G.sc.pal_entries, sizeof G.sc.pal_start);
 	SC_SET(fade_active, 1);
+	ctl_tlog("fade+", 0);
 	COST(6 + 26 * PAL_BASE_N + 3 + 27 * PAL_PICTURE_N + 4 + 1 + 0x100 + 4);
 	return last;
 }

@@ -234,6 +234,7 @@ static uint32_t player_click(struct sprite *s, struct pump_state p)
 void game_map_player_step(struct sprite *s, uint32_t *eax)
 {
 	MV_SET(moved, 0);
+	ctl_tlog("step", 0);
 	uint32_t frame0 = s->frame, x0 = s->x, y0 = s->y;
 	uint32_t ch;
 	COST(9);

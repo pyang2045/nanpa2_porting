@@ -1,9 +1,13 @@
 #include "game/ctl.h"
 
+#include <SDL.h>
 #include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "game/state.h"
 #include "hle/hle.h"
+#include "hle/replay.h"
 
 int ctl_pump(void)
 {
@@ -14,6 +18,17 @@ int ctl_pump(void)
 	cpu.r[ECX] = 0;
 	cpu.r[EDX] = 0;
 	return r;
+}
+
+void ctl_tlog(const char *label, uint32_t arg)
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("NANPA2_TIMELOG") != NULL;
+	if (!on)
+		return;
+	uint64_t ms = replay_det() ? replay_ms() : SDL_GetTicks();
+	fprintf(stderr, "T %llu %u %s %x\n", (unsigned long long)ms, RT(frame), label, arg);
 }
 
 static jmp_buf *catch_top;

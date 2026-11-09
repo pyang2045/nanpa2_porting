@@ -30,6 +30,10 @@
  * pump charges. Leaves ECX = EDX = 0 as the native pump did. */
 int ctl_pump(void);
 
+/* NANPA2_TIMELOG=1: one stderr line "T <game ms> <frame> <label> <arg>" per probe: fade, wipe,
+ * text and walk events, file opens. The game ms is the deterministic clock, else the host clock. */
+void ctl_tlog(const char *label, uint32_t arg);
+
 /* WM_QUIT seen: the 0x40638d reset (`mov esp, [top]`, COST(1)), then unwind
  * to the innermost ctl_catch, which returns 0. Not returning. The native
  * tail after the reset (pop ebp, ret to WinMain: 2 instructions) is the

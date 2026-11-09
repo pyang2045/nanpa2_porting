@@ -43,6 +43,7 @@
  * until R4). */
 void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t fg, uint8_t bg)
 {
+	ctl_tlog("ch", c);
 	uint32_t f = game_frame_alloc(8);
 	uint32_t str = f + 4, dc_at = f;
 	uint32_t len;
@@ -149,6 +150,7 @@ void game_text_advance(void)
  * rectangle words carry the bits `shl eax, 3` shifts out of the low half. */
 void game_clear_text_window(uint32_t colour)
 {
+	ctl_tlog("clr", colour);
 	uint32_t a = SV(surface_select), surf = a;
 	a = (a & 0xffff0000u) | ((SV(text_bottom) - SV(text_top) + 1) & 0xffff);
 	uint32_t h = a;

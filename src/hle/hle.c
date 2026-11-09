@@ -1,4 +1,5 @@
 #include "hle.h"
+#include "game/ctl.h"
 
 #include <SDL.h>
 #include <stdio.h>
@@ -144,6 +145,7 @@ void hle_timer_callback(void)
 			SC_SET(fade_wait, 0);
 			SC_SET(fade_step, 0);
 			SC_SET(fade_active, 0);
+			ctl_tlog("fade-", 0);
 			x86_probe(0x4028c1); /* fade ends (probe log) */
 		}
 	}

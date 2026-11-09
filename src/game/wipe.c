@@ -47,6 +47,7 @@ uint32_t game_wipe(uint32_t s0, uint32_t s1)
 	uint32_t bit = 0x80;    /* the bit this pass adds to the mask byte */
 	uint32_t cancelled = 0;
 	x86_probe(0x401a50);
+	ctl_tlog("wipe+", 0);
 
 	/* prologue, the two locks */
 	COST(19);
@@ -127,5 +128,6 @@ uint32_t game_wipe(uint32_t s0, uint32_t s1)
 	COST(4);
 	uint32_t r = game_surface_unlock(rd32(SURFACES + 4 * s1));
 	COST(7);
+	ctl_tlog("wipe-", 0);
 	return r;
 }
