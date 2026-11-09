@@ -138,7 +138,7 @@ struct vm_rt {
 	uint32_t frame;            /* 0x446292 frames since start (the 60 Hz timer) */
 	uint32_t stopwatch;        /* 0x446296 frame of the last op 19 2 x 0 */
 	uint32_t store_segment;    /* 0x44629a segment op 0d stores through */
-	uint32_t surface[4];       /* 0x44629e DirectDraw surface objects, 0 the screen */
+	uint32_t surface[4];       /* 0x44629e platform surface handles (platform/surface.h), 0 the screen */
 	uint32_t pitch[4];         /* 0x4462ae their pitches */
 };
 #pragma pack(pop)
@@ -176,26 +176,26 @@ struct screen_state {
 	uint32_t cursor_saved_y;   /* 0x4aac50 where the cursor sprite's background was saved */
 	uint32_t cursor_saved_x;   /* 0x4aac54 */
 	uint8_t pal_start[1024];   /* 0x4aac58 the palette entries as the fade started (RGBA x 256) */
-	uint32_t scratch_surface;  /* 0x4ab058 the 640x480 scratch surface object (text) */
-	uint32_t hwnd;             /* 0x4ab05c */
+	uint32_t scratch_surface;  /* 0x4ab058 the 640x480 scratch surface (text): a surface handle */
+	uint32_t hwnd;             /* 0x4ab05c the window: unused since R4 (kept for the layout) */
 	int32_t pal_delta[256][3]; /* 0x4ab060 target - displayed, per channel */
 	uint8_t cursor_saved[1024]; /* 0x4abc60 background under the cursor, 32 rows of 32 bytes */
 	uint32_t cursor_y;         /* 0x4ac060 */
 	uint32_t cursor_x;         /* 0x4ac064 */
 	uint32_t letterbox;        /* 0x4ac068 1: the 640x480 image sits 40 lines down */
-	uint32_t hinstance;        /* 0x4ac06c */
-	uint32_t font[3];          /* 0x4ac070 font handles by size */
+	uint32_t hinstance;        /* 0x4ac06c unused since R4 */
+	uint32_t font[3];          /* 0x4ac070 font handles by size (platform/text.h) */
 	uint8_t pal_entries[1024]; /* 0x4ac07c PALETTEENTRY[256]: red, green, blue, flags */
 	uint8_t pad_47c[4];        /* 0x4ac47c */
-	uint8_t surface_desc[0x24]; /* 0x4ac480 DDSURFACEDESC of the last Lock ... */
-	uint32_t lock_ptr;         /* 0x4ac4a4 ... its lpSurface */
+	uint8_t surface_desc[0x24]; /* 0x4ac480 DDSURFACEDESC of the last Lock: unused since R4 ... */
+	uint32_t lock_ptr;         /* 0x4ac4a4 ... its lpSurface: unused since R4 (a lock returns a pointer) */
 	uint8_t surface_desc_rest[0x44]; /* 0x4ac4a8 */
 	uint32_t active;           /* 0x4ac4ec the timer runs the game only while set (WM_ACTIVATEAPP) */
-	uint32_t ddraw;            /* 0x4ac4f0 */
-	uint32_t palette_obj;      /* 0x4ac4f4 the DirectDraw palette object */
+	uint32_t ddraw;            /* 0x4ac4f0 unused since R4 (the DirectDraw object) */
+	uint32_t palette_obj;      /* 0x4ac4f4 unused since R4 (the DirectDraw palette object) */
 	uint32_t logo;             /* 0x4ac4f8 the logo movie is playing */
 	uint32_t pad_4fc;          /* 0x4ac4fc */
-	uint32_t timer_id;         /* 0x4ac500 */
+	uint32_t timer_id;         /* 0x4ac500 unused since R4 (the timer handle) */
 	uint32_t fade_active;      /* 0x4ac504 a palette fade is running */
 	uint32_t fade_step;        /* 0x4ac508 of 16 */
 	uint32_t fade_wait;        /* 0x4ac50c ticks since the last step */
@@ -260,7 +260,7 @@ _Static_assert(offsetof(struct anim_state, random_seed) == 0x4313c4u - AN_BASE, 
 #define MAPD_CELLS 0x1f40u
 #pragma pack(push, 1)
 struct map_vars {
-	uint32_t locked_screen;    /* 0x435548 the pixel pointers of the three locked surfaces */
+	uint32_t locked_screen;    /* 0x435548 the pixel pointers of the three locked surfaces: unused since R4 (map_draw.c holds them) */
 	uint32_t locked_tiles;     /* 0x43554c */
 	uint32_t locked_sprites;   /* 0x435550 */
 	uint8_t pad_554[2];        /* 0x435554 */

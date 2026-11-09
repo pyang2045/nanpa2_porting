@@ -29,6 +29,7 @@
 #include "dev/explore.h"
 #include "game/file.h"
 #include "game/gmem.h"
+#include "game/state_view.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "dev/replay.h"
@@ -321,23 +322,29 @@ void dev_inject(void)
 	}
 }
 
-/* Save/load round trip through the game's own code: 0x401160 save(name,
- * buf, size) as called by the script save opcode (0x407188, 0xc00 bytes of
- * 0x444e78 to "FLAGn" at 0x445d86), then 0x401050 load(name, dst) as the
- * load opcode (0x407152) calls it. Uses slot FLAG9, which the game never
- * names (its slots are FLAG0-6). */
+/* Save/load round trip through the game's own code: the FLAG serializer (game/state_view.h) and the
+ * file functions the script save and load opcodes (04 21) use. A known pattern in the save image is
+ * exported, written to the slot FLAG9 (which the game never names: its slots are FLAG0-6), read back
+ * and imported over a scrambled image, which must export the same bytes again; and the plain
+ * loader (0x401050) must read the file as it is. */
 int dev_save_selftest(void)
 {
-	/* the state object's scratch: the name in the VM's string buffer, the
-	 * image and its copy in the picture buffer (nothing runs yet) */
 	char *name = (char *)G.rt.string_buf;
-	uint8_t *src = G.img, *dst = G.img + 0x1000;
 	memcpy(name, "FLAG9", 6);
-	for (uint32_t i = 0; i < 0xc00; i++)
-		src[i] = (uint8_t)((i * 7 + 3) & 0xff);
-	game_file_save(name, src, 0xc00);
-	game_file_load(name, dst, 0xc00);
-	int ok = !memcmp(src, dst, 0xc00);
+	uint8_t *raw = (uint8_t *)&G.save;
+	for (uint32_t i = 0; i < STATE_SAVE_SIZE; i++)
+		raw[i] = (uint8_t)((i * 7 + 3) & 0xff);
+	uint8_t src[STATE_SAVE_SIZE], back[STATE_SAVE_SIZE], again[STATE_SAVE_SIZE];
+	state_save_export(src);
+	game_file_save(name, src, STATE_SAVE_SIZE);
+	int ok = game_file_read(name, back, sizeof back) == STATE_SAVE_SIZE && !memcmp(src, back, sizeof src);
+	memset(&G.save, 0xa5, sizeof G.save);
+	state_save_import(back, sizeof back);
+	state_save_export(again);
+	ok = ok && !memcmp(src, again, sizeof src);
+	uint8_t *dst = G.img + 0x1000;
+	game_file_load(name, dst, STATE_SAVE_SIZE);
+	ok = ok && !memcmp(src, dst, sizeof src);
 	fprintf(stderr, "save selftest: %s\n", ok ? "ok" : "MISMATCH");
 	return ok ? 0 : 1;
 }
