@@ -245,11 +245,11 @@ void dev_hit_table(uint32_t table)
 	while (n < 100 && rd16(table + 10 * n) != 0xffff)
 		n++;
 	uint32_t len = 10 * n;
-	if (table == last_at && len == last_len && !memcmp(last, x86_ptr(table, len), len))
+	if (table == last_at && len == last_len && !memcmp(last, g_ptr(table, len), len))
 		return;
 	last_at = table;
 	last_len = len;
-	memcpy(last, x86_ptr(table, len), len);
+	memcpy(last, g_ptr(table, len), len);
 	fprintf(stderr, "hotspots at %06x frame %u:", table, RT(frame));
 	for (uint32_t i = 0; i < n; i++) {
 		uint32_t e = table + 10 * i;

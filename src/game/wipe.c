@@ -23,7 +23,7 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "game/state.h"
 
 #define SURFACES 0x44629eu /* u32[]: surface objects */
@@ -46,7 +46,7 @@ uint32_t game_wipe(uint32_t s0, uint32_t s1)
 	uint32_t row0 = 0;      /* the first line of the pass's rows */
 	uint32_t bit = 0x80;    /* the bit this pass adds to the mask byte */
 	uint32_t cancelled = 0;
-	x86_probe(0x401a50);
+	game_probe(0x401a50);
 	ctl_tlog("wipe+", 0);
 
 	/* prologue, the two locks */

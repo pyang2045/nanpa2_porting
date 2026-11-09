@@ -38,7 +38,7 @@
 #include "game/file.h"
 #include "game/vm.h"
 #include "hle/hle.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "game/state.h"
 
 #define INPUT_SKIP 0x40u      /* Ctrl: no waiting for clicks */
@@ -65,7 +65,7 @@ static void vm_loop_top(void *arg)
 	setjmp(here);
 	vm_depth = 0;
 	vm_loop();
-	x86_trap(0x4061aa, "a block result at the top level of the VM");
+	game_trap(0x4061aa, "a block result at the top level of the VM");
 }
 
 /* 0x4060d4 after its set-up: load START.MES (or the file named at
@@ -225,7 +225,7 @@ static void string_chars(void)
 			return;
 		}
 		uint32_t bg = colour_bg(), fg = colour_fg(), y = SV(text_y), x = SV(text_x) << 3;
-		x86_probe(0x4062ff);
+		game_probe(0x4062ff);
 		game_draw_char(c, x, y, 0, fg, bg);
 		char_delay();
 		game_text_advance();
@@ -245,7 +245,7 @@ static void big5_char(uint32_t first)
 	}
 	uint32_t bg = colour_bg(), fg = colour_fg(), size = SV(text_size), y = SV(text_y),
 	         x = SV(text_x) << 3;
-	x86_probe(0x40636d);
+	game_probe(0x40636d);
 	game_draw_char(c, x, y, size, fg, bg);
 	char_delay();
 	game_text_advance();
@@ -294,7 +294,7 @@ static int fetch(void)
 		vm_pc += 2;
 		uint32_t index = (xx - 0x10) & 0xffffffffu;
 		if (index >= N_EXT)
-			x86_trap(0x40625b, "extended opcode outside the native table");
+			game_trap(0x40625b, "extended opcode outside the native table");
 		return run_handler(ext_handlers[index]);
 	}
 	if (op == VM_SEPARATOR) {
@@ -315,7 +315,7 @@ static int fetch(void)
 	vm_pc++;
 	uint32_t index = op - 0x0a;
 	if (index >= N_OPS)
-		x86_trap(0x406204, "opcode outside the native table (09, 1b-1f)");
+		game_trap(0x406204, "opcode outside the native table (09, 1b-1f)");
 	return run_handler(op_handlers[index]);
 }
 

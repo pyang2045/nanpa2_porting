@@ -13,7 +13,6 @@
 #include "hle.h"
 
 #define WM_QUIT_MSG 0x12u
-#define PAGE 4096u
 
 static int det_state = -1; /* -1 not decided yet */
 static int recording, replaying;
@@ -165,9 +164,6 @@ static uint64_t saves_hash(int *count)
 
 /* ---- the checkpoint ---- */
 
-#define DATA_LO 0x431000u
-#define DATA_HI 0x4c0000u
-
 static int build_cp(char *out, size_t cap)
 {
 	size_t n = 0;
@@ -182,7 +178,7 @@ static int build_cp(char *out, size_t cap)
 	int nsaves;
 	uint64_t sv = saves_hash(&nsaves);
 	uint8_t img[STATE_SAVE_SIZE];
-	state_save_image(img);
+	state_save_export(img);
 	ADD("li.frame=%" PRIx32, state_frame());
 	ADD(" li.screen=%016" PRIx64, hs);
 	ADD(" li.pal=%016" PRIx64, hp);
@@ -193,18 +189,6 @@ static int build_cp(char *out, size_t cap)
 	ADD(" li.flags=%d/%016" PRIx64, nsaves, sv);
 	ADD(" raw.clock=%" PRIu64, (uint64_t)clock_us());
 	ADD(" raw.gdata=%016" PRIx64, state_data_hash());
-	ADD(" raw.cpu=%016" PRIx64, replay_hash(&cpu.r[0], sizeof cpu.r, 0));
-	static uint8_t data[DATA_HI - DATA_LO];
-	x86_read_virtual(DATA_LO, data, sizeof data);
-	ADD(" raw.data=%016" PRIx64, replay_hash(data, sizeof data, 0));
-	uint32_t heap = x86_heap_top();
-	ADD(" raw.heap=%016" PRIx64, replay_hash(x86_ptr(HEAP_BASE, heap - HEAP_BASE), heap - HEAP_BASE, 0));
-	ADD(" raw.stack=%016" PRIx64, replay_hash(x86_ptr(cpu.r[ESP], STACK_TOP - cpu.r[ESP]), STACK_TOP - cpu.r[ESP], 0));
-	ADD(" raw.pg=");
-	for (uint32_t a = 0; a < sizeof data; a += PAGE) {
-		uint32_t len = sizeof data - a < PAGE ? (uint32_t)sizeof data - a : PAGE;
-		ADD("%04x", (unsigned)(replay_hash(data + a, len, 0) & 0xffff));
-	}
 #undef ADD
 	return (int)n;
 }
@@ -235,22 +219,17 @@ static int diff_cp(const char *golden, const char *live, char *out, size_t cap)
 				break;
 			p = sp + 1;
 		}
+		/* keys of the emulated machine that R4 removed (recordings up to R3 carry them): not compared */
+		if (!lv && (!strncmp(tok, "raw.cpu=", 8) || !strncmp(tok, "raw.data=", 9) || !strncmp(tok, "raw.heap=", 9) ||
+			    !strncmp(tok, "raw.stack=", 10) || !strncmp(tok, "raw.pg=", 7)))
+			continue;
 		size_t vl = strlen(eq + 1);
 		size_t ll = lv ? strcspn(lv, " ") : 0;
 		if (lv && ll == vl && !strncmp(lv, eq + 1, vl))
 			continue;
 		ndiff++;
-		if (!strcmp(tok, "raw.pg") || !strncmp(tok, "raw.pg=", 7)) {
-			o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " raw.pg:");
-			int shown = 0;
-			for (uint32_t i = 0; lv && i * 4 < vl && i * 4 < ll; i++)
-				if (strncmp(eq + 1 + i * 4, lv + i * 4, 4) && shown++ < 8)
-					o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %06x",
-							      DATA_LO + i * PAGE);
-		} else {
-			o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %.*s golden=%s live=%.*s", (int)kl, tok,
-					      eq + 1, (int)ll, lv ? lv : "-");
-		}
+		o += (size_t)snprintf(out + o, o < cap ? cap - o : 0, " %.*s golden=%s live=%.*s", (int)kl, tok,
+				      eq + 1, (int)ll, lv ? lv : "-");
 	}
 	free(g);
 	return ndiff;

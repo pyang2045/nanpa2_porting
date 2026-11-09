@@ -1,4 +1,4 @@
-/* Where the engine gets the exe's built-in data from: nanpa2.dat (src/x86/asset.c),
+/* Where the engine gets the exe's built-in data from: nanpa2.dat (src/asset.c),
  * cut once from the player's nanpa2.exe, or the exe itself for the modes that
  * run its code. */
 #ifndef NANPA2_ASSETS_H
@@ -11,7 +11,7 @@
  * from. Otherwise the reason. Needs fsys_set_root(dir). */
 const char *assets_check(const char *dir);
 
-/* Put the built-in data into emulated memory (x86_install_image), from the
+/* Put the built-in data into the image (asset_read, asset_load_exe) that state_init copies the game state from, from the
  * game folder (fsys root). exe_arg is --exe PATH or NULL.
  *   - with --exe, in the recomp build and in the dev modes that run the
  *     original code (NANPA2_DIFF, _DIFF_DIR, _FUZZ, _LOCKSTEP, _INTERP,

@@ -18,7 +18,7 @@
 #include "game/pace.h"
 #include "game/file.h"
 #include "game/vm.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "game/state.h"
 #include "hle/hle.h"
 #include "platform/surface.h"

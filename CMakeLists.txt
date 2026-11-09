@@ -57,8 +57,8 @@ set(SOURCES
   src/lzh.c
   src/gp4.c
   src/fsys.c
-  src/x86/x86.c
-  src/x86/asset.c
+  src/asset.c
+  src/trap.c
   src/hle/hle.c
   src/platform/files.c
   src/hle/win32.c

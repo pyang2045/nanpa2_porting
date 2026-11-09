@@ -6,9 +6,22 @@
 #include "game/vm.h"
 #include "hle/replay.h"
 
-void state_save_image(uint8_t out[STATE_SAVE_SIZE])
+void state_save_export(uint8_t out[STATE_SAVE_SIZE])
 {
 	memcpy(out, &G.save, STATE_SAVE_SIZE);
+	/* the segment bases as the original's addresses (G addresses: gmem.h) */
+	static const uint32_t segment_base[4] = { VM_SCRIPT, VM_SEGMENT1, VM_SEGMENT2, VM_SEGMENT2 };
+	memcpy(out + offsetof(struct save_image, n.segment), segment_base, sizeof segment_base);
+}
+
+void state_save_import(const uint8_t *in, size_t n)
+{
+	if (n > STATE_SAVE_SIZE)
+		n = STATE_SAVE_SIZE;
+	uint32_t segment[4];
+	memcpy(segment, G.save.n.segment, sizeof segment);
+	memcpy(&G.save, in, n);
+	memcpy(G.save.n.segment, segment, sizeof segment);
 }
 
 /* The fields of G that hold platform values: object handles, the window, the font handles, the

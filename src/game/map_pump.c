@@ -404,7 +404,7 @@ int vm_op_map(void)
 		ax = game_map_op(a);
 	} else {
 		if (a != 5 && a != 7 && a != 12)
-			x86_trap(0x403a7f, "04 26: sub-op outside the dispatch table");
+			game_trap(0x403a7f, "04 26: sub-op outside the dispatch table");
 		game_map_load_args();
 		switch (a) {
 		case 5: /* 0x403e30: redraw every cell, the event check, unlock */

@@ -11,6 +11,9 @@
  * state object G, or the emulated heap and stack): the C runtime that reads
  * them is behind the HLE boundary. Registers are not part of the contract. */
 void game_file_load(const char *name, void *dst, size_t cap);
+/* The first cap bytes of an uncompressed file (the FLAG files, read by the save serializer,
+ * game/state_view.h): the number of bytes read, 0 if it cannot be opened. */
+size_t game_file_read(const char *name, void *dst, size_t cap);
 /* 0x401160: write size bytes at buf to the file `name` ("wb", as given). The
  * FLAG save image is game_file_save(name, &G.save, SAVE_SIZE). */
 void game_file_save(const char *name, const void *buf, uint32_t size);

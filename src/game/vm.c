@@ -14,7 +14,7 @@
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "game/state.h"
 
 uint32_t vm_eval(uint32_t *pc)
@@ -28,7 +28,7 @@ uint32_t vm_eval(uint32_t *pc)
 		 * held; no script needs that */
 		char msg[80];
 		snprintf(msg, sizeof msg, "script at %04x: token %02x where a value belongs", start, bare);
-		x86_trap(0x4037fc, msg);
+		game_trap(0x4037fc, msg);
 	}
 	return v;
 }

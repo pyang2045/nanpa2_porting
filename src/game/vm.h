@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 #include "game/state.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 
 /* MES script image (loaded by 0x401050 from the file named at
  * VM_SCRIPT_NAME). The VM's program counter (ESI in the native code) is an

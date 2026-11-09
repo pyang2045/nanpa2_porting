@@ -11,7 +11,7 @@
 #include <stdio.h>
 
 #include "game/vm.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "game/state.h"
 
 enum {
@@ -85,7 +85,7 @@ static uint32_t next_random(uint32_t range)
 	AN_SET(random_seed, seed);
 	range &= 0xffff;
 	if (!range)
-		x86_divide_error(); /* div bx */
+		game_divide_error(); /* div bx */
 	return seed % range;
 }
 
@@ -114,7 +114,7 @@ static _Noreturn void bad_expression(uint32_t pc, const char *why)
 {
 	char msg[96];
 	snprintf(msg, sizeof msg, "script expression at %04x: %s", pc, why);
-	x86_trap(0x4037fc, msg);
+	game_trap(0x4037fc, msg);
 }
 
 uint32_t script_eval(uint32_t *pc, int *bare_token)
@@ -161,7 +161,7 @@ uint32_t script_eval(uint32_t *pc, int *bare_token)
 				case OP_DIV:
 				case OP_MOD:
 					if (!b)
-						x86_divide_error();
+						game_divide_error();
 					v = op == OP_DIV ? a / b : a % b;
 					break;
 				case OP_OR: v = a | b; break;

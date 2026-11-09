@@ -22,7 +22,7 @@
 #include "platform/sound.h"
 #include "platform/surface.h"
 #include "platform/window.h"
-#include "x86/x86.h"
+#include "game/gmem.h"
 
 /* the game's globals */
 #define CD_PREFIX 0x431030u    /* "X:\" of the CD found, or empty */
@@ -45,7 +45,7 @@ static uint32_t cd_search(void)
 		if (!files_drive_is_cd((char)('A' + drive)))
 			continue;
 		char path[64];
-		snprintf(path, sizeof path, "%sSPEECH\\A\\A10930.WAV", (const char *)x86_ptr(CD_PREFIX, 1));
+		snprintf(path, sizeof path, "%sSPEECH\\A\\A10930.WAV", (const char *)g_ptr(CD_PREFIX, 1));
 		found = files_open(path, "rb");
 		if (found)
 			break;
@@ -114,7 +114,7 @@ uint32_t game_main(void)
 	static const struct win_handlers handlers = { game_wndproc, game_timer_tick };
 	win_open(&handlers);
 	if (!cd_search()) {
-		win_message_box((const char *)x86_ptr(MSG_NO_CD, 1), (const char *)x86_ptr(MSG_NO_CD_TITLE, 1));
+		win_message_box((const char *)g_ptr(MSG_NO_CD, 1), (const char *)g_ptr(MSG_NO_CD_TITLE, 1));
 		return 0;
 	}
 	win_show_cursor(0); /* the first thing the logo player does, whether or not a movie plays */

@@ -36,7 +36,7 @@ static jmp_buf *catch_top;
 _Noreturn void ctl_quit(void)
 {
 	if (!catch_top)
-		x86_trap(0x40638d, "WM_QUIT with nothing to unwind to");
+		game_trap(0x40638d, "WM_QUIT with nothing to unwind to");
 	longjmp(*catch_top, 1);
 }
 

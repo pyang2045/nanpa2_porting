@@ -16,7 +16,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "x86/x86.h"
+/* The layout of G is the file format of the saves and of the asset: little-endian throughout */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "the game state is little-endian (the FLAG files and the data image are)"
+#endif
+
 
 #pragma pack(push, 1)
 
@@ -114,7 +118,7 @@ _Static_assert(sizeof(struct save_image) == SAVE_SIZE, "the save image is 0xc00 
 #define RT_LABELS 60u
 #pragma pack(push, 1)
 struct vm_rt {
-	uint32_t unused_top_esp;   /* 0x445cdc the native top-level VM's ESP; R3: nothing reads or writes it */
+	uint32_t pad_cdc;          /* 0x445cdc the native top-level VM stack pointer: dead since R3, outside the FLAG image */
 	uint8_t cursor_shown;      /* 0x445ce0 the game cursor is drawn (ext 15) */
 	uint8_t click_busy;        /* 0x445ce1 a click handler's block is running */
 	uint16_t click_handler[2]; /* 0x445ce2 blocks for the left and right button (ext 20) */
@@ -369,9 +373,9 @@ GS_CHECK(cursor_bits, CBITS_BASE);
 _Static_assert(sizeof(struct game_state) == DATA_END - DATA_BASE, "game_state covers 0x431000-0x4c0000");
 extern struct game_state G;
 
-/* After the image is installed: the groups that have moved become aliases
- * of their addresses (taking the content the asset gave them). */
-void state_init(void);
+/* After the asset is loaded (asset.h): G takes the data area of its image, and the image is
+ * released. 1 ok. */
+int state_init(void);
 
 /* Field access with the width and zero extension of rd8/rd16/wr8/wr16 */
 #define SV(f) ((uint32_t)G.save.n.f)

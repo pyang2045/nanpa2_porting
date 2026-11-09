@@ -136,7 +136,7 @@ uint32_t game_map_overlay_sprites(uint32_t eax)
 			uint32_t tiles = p + 4;
 			uint32_t row = ry; /* the low word of EBP */
 			if (!h || !w)
-				x86_trap(0x403bd2, "map: a sprite pattern with no cells");
+				game_trap(0x403bd2, "map: a sprite pattern with no cells");
 			for (uint32_t r = 0; r < h; r++) {
 				struct cell *cp = cell;
 				uint32_t col = rx;

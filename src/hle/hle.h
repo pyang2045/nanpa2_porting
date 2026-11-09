@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "x86/x86.h"
+#include "game/gmem.h"
 #include "platform/window.h"
 
 /* Dev probes (win32.c): the script VM fetched the opcode at offset off of

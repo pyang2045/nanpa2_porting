@@ -55,7 +55,7 @@
 #include "hle/replay.h"
 #include "hle/status.h"
 #include "launch.h"
-#include "x86/x86.h"
+#include "asset.h"
 
 #ifndef _WIN32
 #include <dirent.h>
@@ -202,7 +202,10 @@ static int run_game(const char *game, const char *exe, const char *font)
 		fprintf(stderr, "%s\n", err);
 		return 1;
 	}
-	state_init();
+	if (!state_init()) {
+		fprintf(stderr, "no game data image\n");
+		return 1;
+	}
 	/* NANPA2_SAVE_DIR: FLAG files elsewhere than the pref folder (tests) */
 	const char *save_env = getenv("NANPA2_SAVE_DIR");
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
@@ -222,10 +225,7 @@ static int run_game(const char *game, const char *exe, const char *font)
 	/* native WinMain body (0x402090): window, CD check, DirectDraw, then the
 	 * script interpreter until the game ends */
 	uint64_t t0 = SDL_GetPerformanceCounter();
-	x86_unaliased_snapshot();
 	game_main();
-	if (x86_unaliased_check() && atoi(getenv("NANPA2_DATA_CHECK")) >= 2)
-		return 4;
 	replay_finish();
 	SDL_free(save);
 	/* with NANPA2_SPEED=0: the game time against the host's, HLE time included */

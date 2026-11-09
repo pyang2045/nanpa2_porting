@@ -19,7 +19,7 @@ void game_timer_tick(void)
 		return;
 	if (SC(fade_active)) {
 		if (step_logged_start != RT(frame) && SC(fade_step) == 0 && SC(fade_wait) == 0)
-			x86_probe(0x4028c0); /* fade starts (probe log) */
+			game_probe(0x4028c0); /* fade starts (probe log) */
 		step_logged_start = RT(frame);
 		uint32_t wait = SC(fade_wait) + 1;
 		SC_SET(fade_wait, wait);
@@ -43,7 +43,7 @@ void game_timer_tick(void)
 			SC_SET(fade_step, 0);
 			SC_SET(fade_active, 0);
 			ctl_tlog("fade-", 0);
-			x86_probe(0x4028c1); /* fade ends (probe log) */
+			game_probe(0x4028c1); /* fade ends (probe log) */
 		}
 	}
 	uint32_t frame = RT(frame) + 1;

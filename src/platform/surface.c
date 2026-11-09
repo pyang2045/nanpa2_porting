@@ -9,7 +9,7 @@
 #include "hle/dev.h"
 #include "hle/hle.h"
 #include "platform/present.h"
-#include "x86/x86.h"
+#include "trap.h"
 
 #define MAX_SURF 16
 
@@ -55,7 +55,7 @@ static struct surf *surf_checked(uint32_t handle)
 {
 	struct surf *s = surf_of(handle);
 	if (!s)
-		x86_trap(0, "a surface number that names no surface");
+		game_trap(0, "a surface number that names no surface");
 	return s;
 }
 

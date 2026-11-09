@@ -19,7 +19,7 @@
 
 #include <stdint.h>
 
-#include "x86/x86.h"
+#include "game/gmem.h"
 
 /* Busy work of the original machine: advance the game clock by `us` microseconds (src/game/pace.h
  * lists the costs and where they come from). */

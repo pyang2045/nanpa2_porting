@@ -288,15 +288,6 @@ void probe_hit_table(uint32_t table)
 	dev_hit_table(table);
 }
 
-void x86_probe(uint32_t pc)
-{
-	static int on = -1;
-	if (on < 0)
-		on = getenv("NANPA2_PROBE") != NULL;
-	if (on)
-		fprintf(stderr, "probe %06x %u ms frame %u us %llu\n", pc, dev_now(), RT(frame), (unsigned long long)clock_us());
-}
-
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
 int win_pump(void)
 {

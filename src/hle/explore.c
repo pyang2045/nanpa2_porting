@@ -36,11 +36,6 @@
 
 #define FRAME() RT(frame)
 #define SCRIPT 0x435e78u
-#define WM_MOUSEMOVE 0x200
-#define WM_LBUTTONDOWN 0x201
-#define WM_LBUTTONUP 0x202
-#define WM_RBUTTONDOWN 0x204
-#define WM_RBUTTONUP 0x205
 
 static int on, verbose;
 static uint64_t rng;
@@ -129,7 +124,7 @@ void explore_init(void)
 	if (!s)
 		return;
 	on = 1;
-	x86_trap_hook = on_trap;
+	game_trap_hook = on_trap;
 	rng = strtoull(s, NULL, 0) * 2654435761u + 1;
 	const char *e = getenv("NANPA2_EXPLORE_FRAMES");
 	if (e)
@@ -212,7 +207,7 @@ static int contains(uint32_t a, uint32_t b, const char *s)
 {
 	size_t n = strlen(s);
 	for (uint32_t p = a; p + n <= b; p++)
-		if (!memcmp(x86_ptr(SCRIPT + p, (uint32_t)n), s, n))
+		if (!memcmp(g_ptr(SCRIPT + p, (uint32_t)n), s, n))
 			return 1;
 	return 0;
 }
