@@ -54,7 +54,7 @@ static int header_ok(const char *path)
 		return 0;
 	size_t n = fread(h, 1, sizeof h, f);
 	fclose(f);
-	return n == sizeof h && !memcmp(h, "N2AS", 4) && h[4] == 1 && !h[5] && !h[6] && !h[7] && h[8] == 0x6a &&
+	return n == sizeof h && !memcmp(h, "N2AS", 4) && h[4] >= 1 && h[4] <= 3 && !h[5] && !h[6] && !h[7] && h[8] == 0x6a &&
 	       h[9] == 0x7c && h[10] == 0x69 && h[11] == 0x39 && h[12] == 0 && h[13] == 0x10 && h[14] == 0x0c &&
 	       h[15] == 0;
 }

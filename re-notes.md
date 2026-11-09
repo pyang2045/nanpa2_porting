@@ -719,7 +719,7 @@ tools/recomp.py and the code pointers in .data 0x435576-0x4355fa, 0x435dfc-0x435
 
 ### nanpa2.dat: the exe's built-in data without its code (src/asset.c)
 
-Little-endian. Header 48 bytes: `"N2AS"`; u32 version 1; u32 PE TimeDateStamp 0x39697c6a; u32
+Little-endian. Header 48 bytes: `"N2AS"`; u32 version 3 (1 also kept the header page and .rdata, 2 the whole initialised .data; both still read); u32 PE TimeDateStamp 0x39697c6a; u32
 SizeOfImage 0xc1000; u32 size of the source exe; u32 range count; u64 FNV-1a of the source exe;
 u64 FNV-1a of everything after the header; u32 payload bytes; u32 0. Then the range table, 12
 bytes each (u32 virtual address, u32 size, u32 kind: 0 bytes stored in the payload, 1 zeros, not
@@ -727,11 +727,15 @@ stored), then the payload (the kind 0 ranges' bytes in table order). The loader 
 zeroed image (0x400000-0x4000000) and copies each range to its address; everything else
 (the code, the bss, the heap) is zero. It refuses any range that overlaps 0x401000-0x4077ff,
 reaches outside the 0xc1000-byte image or does not add up to the file size, and any file whose
-hash does not match. The writer keeps 0x400000-0x401000 (PE header) and 0x41b000-0x4ab000
-(.rdata and the initialized .data), split into data and zero runs of 32 bytes or more: 66 ranges,
-95,213 data bytes (546 header, 82,497 .rdata, 12,170 .data), 96,053 bytes in all. Not kept: .text
-0x401000-0x41b000 (game code, MP3 library, C runtime), the .data bss tail 0x4ab000-0x4c0000 and
-.rsrc. Established by image traces (docs/reimpl.md "The asset").
+hash does not match. The version 3 writer keeps only the ranges of `asset_content` (src/asset.c), the game's own text that
+G starts with: 0x431140-0x431160 (the message of the no-CD box and its title, Big5) and 0x445c70-0x445c78
+(a 7-byte text in the script-visible block): 124 bytes in all. Everything else G starts with is defined
+in code (`state_defaults`, src/game/state.c): the 12,170 non-zero bytes of the initialised .data are
+function pointers of the native code, its own strings (file-name formats, MCI and error texts), the
+MP3 library's tables (which lie in the area the ANI file is read into), and the start values listed in
+docs/refactor.md "G from code". Version 2 (0x431000-0x4ab000, 12,170 data bytes) and version 1 (66 ranges,
+95,213 data bytes: 546 header, 82,497 .rdata, 12,170 .data) are still accepted; `state_init` takes only
+the `asset_content` ranges from them.
 
 ## Palette and fades (0x401ca0, 0x401d30, 0x40752c-0x407599)
 

@@ -11,6 +11,9 @@ chance; so are runs of tables fixed by a public standard (standard_tables,
 computed here) and linear ramps (ramps). A positive control first plants a run of the exe's code into
 random bytes and must find it.
 
+A second check looks for every 16-byte run of the .data with at least 8 different byte values
+(the engine defines its start values in code; the only allowed .data text is the file names of ALLOWED).
+
 Exit 0: nothing found; 1: a match (offsets are listed); 77: no exe to compare
 with (skipped).
 """
@@ -105,6 +108,37 @@ def scan(data, idx, secs_by_name, limit=10):
     return hits
 
 
+SHORT = 16
+SHORT_DISTINCT = 8
+# the small format constants the source may hold (CLAUDE.md): file name formats of the game's own
+# folders and files, which the engine needs to find them
+ALLOWED = (b'SPEECH\\A\\A10930.WAV', b'MUSIC\\%02d.MP3', b'MUSIC\\%02d.WAV', b'%sSPEECH\\A\\A10930.WAV',
+           b'start.mes\0\r\n$', b'flag0\0\r\n$')
+
+
+def data_runs(secs):
+    """Every 16-byte run of the exe's .data with at least 8 different byte values: tables, texts
+    and code pointers authored by the game, short enough to be a string or a few words. A run
+    made of allowed file-name constants and zero padding is not counted."""
+    b = dict(secs)['.data']
+    allowed = set()
+    for a in ALLOWED:
+        o = b.find(a)
+        while o >= 0:
+            allowed.update(range(o, o + len(a)))
+            o = b.find(a, o + 1)
+    runs = set()
+    for o in range(len(b) - SHORT + 1):
+        w = b[o:o + SHORT]
+        if len(set(w)) >= SHORT_DISTINCT and not all(x in allowed or b[x] == 0 for x in range(o, o + SHORT)):
+            runs.add(w)
+    return runs
+
+
+def scan_short(data, runs, limit=10):
+    return [o for o in range(len(data) - SHORT + 1) if data[o:o + SHORT] in runs][:limit]
+
+
 def files(paths):
     for p in paths:
         if os.path.isdir(p):
@@ -146,11 +180,24 @@ def main():
         print('FAIL: the positive control (a planted run of .text) was not found')
         sys.exit(1)
 
+    runs = data_runs(secs)
+    print('%d distinct %d-byte runs of .data (8 or more different values) must not be in any file' %
+          (len(runs), SHORT))
+    planted_d = bytes(rnd.randrange(256) for _ in range(900)) + next(iter(runs)) + bytes(rnd.randrange(256) for _ in range(900))
+    if not scan_short(planted_d, runs):
+        print('FAIL: the positive control (a planted .data run) was not found')
+        sys.exit(1)
+
     bad = 0
     n = 0
     for f in files(sys.argv[2:]):
         data = open(f, 'rb').read()
         n += 1
+        short = scan_short(data, runs)
+        if short:
+            bad += 1
+            print('FAIL: %s holds a %d-byte run of the .data of nanpa2.exe at file offsets %s' %
+                  (f, SHORT, ', '.join('0x%x' % o for o in short)))
         hits = scan(data, idx, by_name)
         if hits:
             bad += 1

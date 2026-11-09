@@ -2,18 +2,16 @@
  * nanpa2.dat: the built-in data of the player's nanpa2.exe, without its code (R4: this file; it was
  * src/x86/asset.c together with the exe image loader of src/x86/x86.c).
  *
- * The engine reimplements every game function in C (docs/reimpl.md), but the
- * C still reads the exe's initialized data at its native addresses through
- * the vm.h accessors: tables, strings, the import directory and the globals'
- * start values. This file cuts exactly those ranges out of the player's exe
- * once (nanpa2 --make-assets, or on a first launch) so that the game runs
- * without the exe. It is generated on the player's machine and never shipped
- * or committed (.gitignore); this source holds the format and the list of
- * address ranges to keep, no bytes of the exe.
+ * The engine reimplements every game function in C (docs/reimpl.md) and defines the start values
+ * of its game state G in code (src/game/state.c). What it cannot carry in its source is the game's
+ * own text (the no-CD message and one more short text): this file cuts exactly those ranges out of
+ * the player's exe once (nanpa2 --make-assets, or on a first launch). It is generated on the
+ * player's machine and never shipped or committed (.gitignore); this source holds the format and
+ * the list of address ranges to keep, no bytes of the exe.
  *
  * Format (little-endian), re-notes.md "nanpa2.dat":
  *   0   "N2AS"
- *   4   u32 version (1)
+ *   4   u32 version (3: only the ranges of asset_content; 1 and 2 held more and are still read)
  *   8   u32 PE TimeDateStamp of the source exe (0x39697c6a)
  *   12  u32 SizeOfImage of the source exe (0xc1000)
  *   16  u32 size of the source exe file
@@ -36,17 +34,21 @@
 #include "asset.h"
 
 #define HDR 48u
+#define ASSET_VERSION 3u
 #define MIN_ZERO 32u /* shorter zero runs stay inside a data range */
 
-/* The ranges of the image kept: the PE header page, and .rdata with the
- * initialized part of .data. Left out: .text (0x401000-0x41b000: the game
- * code 0x401000-0x4077ac, the MP3 library, the C runtime), the bss tail of
- * .data (zero at load) and .rsrc. Established by NANPA2_IMAGE_TRACE runs
- * (docs/reimpl.md "The asset"). */
-static const struct { uint32_t lo, hi; } keep[] = {
-	{ 0x400000, 0x401000 },
-	{ 0x41b000, 0x4ab000 },
+/* The ranges of the image kept: the game's own text that G's initial state holds and the engine
+ * must not carry in its source (R4: asset version 3). The rest of G's initial state is defined in
+ * code (src/game/state.c state_defaults); everything else of the exe is read by nothing: the PE
+ * header, .text (the game code 0x401000-0x4077ac, the MP3 library, the C runtime), .rdata and
+ * .rsrc, and the pointers and strings of .data that only the native code used. Version 1 kept the
+ * header page and .rdata 0x41b000-0x4ab000, version 2 the whole initialised .data
+ * 0x431000-0x4ab000; both are still read (state_init takes only these ranges from them). */
+const struct asset_range asset_content[] = {
+	{ 0x431140, 0x431160 }, /* the message of the no-CD box and its title */
+	{ 0x445c70, 0x445c78 }, /* a 7-byte text in the script-visible block */
 };
+const unsigned asset_content_n = sizeof asset_content / sizeof asset_content[0];
 
 static void put32(uint8_t *p, uint32_t v)
 {
@@ -200,8 +202,8 @@ static int split(const uint8_t *img, struct seg **out)
 {
 	size_t cap = 64, n = 0;
 	struct seg *s = malloc(cap * sizeof *s);
-	for (size_t k = 0; k < sizeof keep / sizeof keep[0]; k++) {
-		uint32_t a = keep[k].lo, end = keep[k].hi;
+	for (size_t k = 0; k < asset_content_n; k++) {
+		uint32_t a = asset_content[k].lo, end = asset_content[k].hi;
 		while (a < end) {
 			uint32_t b = a, zl = zrun(img, a, end);
 			int zero = zl >= MIN_ZERO;
@@ -270,7 +272,7 @@ int asset_make(const char *exe_path, const char *out_path)
 		}
 	}
 	memcpy(buf, "N2AS", 4);
-	put32(buf + 4, 1);
+	put32(buf + 4, ASSET_VERSION);
 	put32(buf + 8, 0x39697c6au);
 	put32(buf + 12, 0xc1000u);
 	put32(buf + 16, exe_size);
@@ -315,7 +317,7 @@ int asset_read(const char *path)
 	}
 	fclose(f);
 	size_t total = (size_t)len;
-	int bad = total < HDR || memcmp(d, "N2AS", 4) || get32(d + 4) != 1 ||
+	int bad = total < HDR || memcmp(d, "N2AS", 4) || (get32(d + 4) < 1 || get32(d + 4) > ASSET_VERSION) ||
 		  get32(d + 8) != 0x39697c6au || get32(d + 12) != 0xc1000u;
 	uint32_t n = bad ? 0 : get32(d + 20), payload = bad ? 0 : get32(d + 40);
 	if (!bad && (n > 4096 || HDR + 12ull * n + payload != total ||

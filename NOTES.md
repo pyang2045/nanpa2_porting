@@ -1334,3 +1334,25 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
   warnings; ctest 7 of 7 (smoke skipped; replay_det 5.6 s instead of 35).
 - Portability: 64-bit little-endian assumed and checked at build time; strict-width syntax pass over every
   source (details in docs/refactor.md "Portability audit"). Linux and Windows builds are still untested.
+
+## 2026-11-09: asset version 2, the initialised .data only
+
+- `state_init` is the only reader of the asset image and copies 0x431000-0x4c0000; `g_ptr` traps below
+  0x431000, so the PE header page and .rdata 0x41b000-0x431000 were dead weight. With the image outside `G`
+  poisoned before `state_init`, the four `golden_r4` replays matched every checkpoint (271/331/33/161).
+- `nanpa2.dat` version 2 keeps 0x431000-0x4ab000 only (12,170 data bytes in 18 ranges); version 1 files are
+  still accepted (a superset). `asset_only` checks the version, that no range lies outside the data, and the size.
+
+## 2026-11-09: G defined in code, asset version 3
+
+- `state_defaults` (src/game/state.c) sets every start value of G the engine reads, as typed fields
+  (`data_head` split into `cd_prefix`, `msg_no_cd`, `msg_no_cd_title`; `save.n.w_308` named); the tile offset
+  table and the 16 base colours are computed. Details and addresses: docs/refactor.md "G from code".
+- `nanpa2.dat` version 3 holds only the game's own text that stays out of the source: 124 bytes in 2 ranges
+  (the no-CD message and title, and a 7-byte text at 0x445c71). Versions 1 and 2 still load.
+- Checked against the whole image (temporary diff of G vs the exe's data): differences only in the unread
+  ranges. The four goldens match on `li.*` and `raw.clock` (271/331/33/161) twice with a v3 asset, and once
+  each with a v1 and a v2 asset. The old recordings' `raw.gdata` hashed the unread bytes and no longer matches.
+- `no_game_bytes` also looks for every 16-byte run (8 or more different values) of the exe's .data in the
+  binary; the allowed ones are the file-name constants (`start.mes`, `flag0`, `MUSIC\%02d.*`, `SPEECH\A\A10930.WAV`).
+  `asset_only` checks the range list and size and that a version 2 file is still used.

@@ -64,6 +64,8 @@ def run(name, gamedir, extra=None, quit_ms=None, timeout=300, shots=False):
     return p
 
 
+CONTENT = [(0x431140, 0x431160), (0x445C70, 0x445C78)]  # asset_content in src/asset.c
+
 # ---- 1. the asset
 asset = os.path.join(scratch, "nanpa2.dat")
 p = subprocess.run([exe, "--make-assets", "--game", game, "--out", asset], capture_output=True, text=True,
@@ -72,7 +74,7 @@ if p.returncode != 0 or not os.path.exists(asset):
     fail("--make-assets: " + p.stdout + p.stderr)
 a = open(asset, "rb").read()
 magic, ver, stamp, isize, esize, n, ehash, chash, payload, _ = struct.unpack_from("<4sIIIIIQQII", a, 0)
-if magic != b"N2AS" or ver != 1 or stamp != 0x39697C6A or isize != 0xC1000:
+if magic != b"N2AS" or ver != 3 or stamp != 0x39697C6A or isize != 0xC1000:
     fail("bad header")
 tab = struct.unpack_from("<%dI" % (3 * n), a, 48)
 rng = [(tab[3 * i], tab[3 * i + 1], tab[3 * i + 2]) for i in range(n)]
@@ -81,6 +83,9 @@ if 48 + 12 * n + payload != len(a):
 for va, sz, kind in rng:
     if va < 0x400000 or va + sz > 0x400000 + isize:
         fail("range outside the image: %x+%x" % (va, sz))
+    if not any(lo <= va and va + sz <= hi for lo, hi in CONTENT):
+        fail("range %x+%x outside the game text ranges %s (everything else of G is defined in code)" %
+             (va, sz, [(hex(a), hex(b)) for a, b in CONTENT]))
     if va < 0x407800 and va + sz > 0x401000:
         fail("range %x+%x overlaps the game code" % (va, sz))
 e = open(src_exe, "rb").read()
@@ -89,6 +94,8 @@ runs = {text[o:o + 64] for o in range(0, len(text) - 63, 16) if len(set(text[o:o
 bad = [o for o in range(len(a) - 63) if a[o:o + 64] in runs]
 if bad:
     fail("the asset holds 64-byte runs of .text at file offsets %s" % bad[:5])
+if len(a) > 400:
+    fail("the asset should hold only the game text, about 150 bytes, is %d bytes" % len(a))
 print("asset: %d bytes, %d ranges (%d stored, %d zero), no code" %
       (len(a), n, sum(1 for r in rng if r[2] == 0), sum(1 for r in rng if r[2] == 1)))
 
@@ -142,9 +149,36 @@ print("neither: refused with a message")
 # ---- 5. a damaged asset with no exe
 bad_dir = folder("damaged", False)
 dam = bytearray(a)
-dam[200] ^= 0xFF
+dam[100] ^= 0xFF
 open(os.path.join(bad_dir, "nanpa2.dat"), "wb").write(dam)
 p = run("damaged", bad_dir, quit_ms=3000)
 if p.returncode == 0 or "damaged" not in p.stderr:
     fail("a damaged asset should be refused:\n" + p.stderr[-800:])
 print("damaged asset: refused")
+
+
+# ---- 6. an older asset (version 2: the whole initialised .data, in one range) is still used
+def fnv(b, h=0xcbf29ce484222325):
+    for c in b:
+        h = ((h ^ c) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+pe = struct.unpack_from("<I", e, 0x3c)[0]
+nsec = struct.unpack_from("<H", e, pe + 6)[0]
+secs = pe + 24 + struct.unpack_from("<H", e, pe + 20)[0]
+data = b""
+for i in range(nsec):
+    nm = e[secs + 40 * i:secs + 40 * i + 8].rstrip(b"\0")
+    va, rs, ro = struct.unpack_from("<III", e, secs + 40 * i + 12)
+    if nm == b".data":
+        data = e[ro:ro + 0x7A000]
+        assert va == 0x31000
+body = struct.pack("<III", 0x431000, len(data), 0) + data
+old = struct.pack("<4sIIIIIQQII", b"N2AS", 2, 0x39697C6A, 0xC1000, len(e), 1, fnv(e), fnv(body), len(data), 0) + body
+oldd = folder("old", False)
+open(os.path.join(oldd, "nanpa2.dat"), "wb").write(old)
+p = run("old", oldd, quit_ms=3000)
+if p.returncode != 0 or "assets: " + os.path.join(oldd, "nanpa2.dat") not in p.stderr:
+    fail("a version 2 asset should be used as it is:\n" + p.stderr[-800:])
+print("version 2 asset: used")
