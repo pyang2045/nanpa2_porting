@@ -1,5 +1,13 @@
 # NOTES
 
+## 2026-11-10 (iPad: landscape, system-driven flip, supersedes the flip notes below)
+iPadOS 27.2 accepts `requestGeometryUpdate` for an orientation but acts on it only at the next device
+orientation event, so forcing the 180 degree flip after unlocking was always late. The flip state machine
+is removed: unlocked while the device is on a landscape side (the system flips at once), locked as soon as
+the device notification reports portrait/upside-down, unlocked again on a landscape side. If the interface
+is ever portrait, `orient[portrait-recover]` requests landscape; `orient[iface-change]` logs ms since the
+device notification, to show whether the lock wins the race.
+
 ## 2026-11-10 (iPad: landscape lock)
 The Info.plist masks and SDL_HINT_ORIENTATIONS (b31db32) did not stop the iPad rotating to portrait.
 Apple (TN3192) deprecates UIRequiresFullScreen from iPadOS 26 and, from 27, ignores it; forum reports
