@@ -1477,3 +1477,21 @@ Checks: ctest passes with the real game folder and with a folder without FLAGs; 
 frames (title, name entry, S1-S6, save of FLAG0 and FLAG6) records identical `li.screen`, regs, clock and
 rng checkpoints with and without the real FLAGs (only `li.save`, `li.files` and `raw.gdata` differ: the
 padding bytes and the file list); a bot run on the generated saves loads them from the title.
+
+## 2026-11-10: the game runs from the CD image (.iso)
+
+`src/iso.c` (ISO 9660 + Joliet reader, index built at mount) sits behind `fsys` (`fsys_set_root` mounts a
+regular file as an image; `fsys_open/read/path/load_data` work unchanged; `fsys_list_iso` for the picture
+viewer and `decode_all`). The game's callers read whole files, so the FILE view is a cookie stream and sound
+and the logo use `fsys_read` directly. `launch.c`: a `.iso` is accepted wherever a folder is (`--game`,
+`NANPA2_GAME_DIR`, remembered, picked), the search looks for `*.iso` next to the executable, in `game/` and,
+on iOS, in Documents; the macOS picker also lets a file be chosen. FLAG lookups simply find nothing in the
+image, so `flag_load` generates the blank save (2eb9b57). Format: re-notes.md "ISO image". Commits: 049543a
+(reader, launch, tests), docs commit after the merge of master (16839a1).
+Checks: `decode_all NANPA2.iso` ok 705 bad 0; `iso_check` 12357 files (662 MB) identical, whole and through the
+stream, 8 s cold; ctest `iso` (set `NANPA2_ISO` or `-DNANPA2_ISO=`): a folder recording replays on the image
+with all checkpoints and the same fopen/music/voice sequence (2500 and 60000 frames); newgame from the image
+with an empty save folder (270000 frames, Prologue, saves written) recorded and replayed, 1081 checkpoints ok,
+then a load from those saves; save selftest ok; title/name-entry shot looked at; iOS simulator build and run
+from `Documents/Game.iso` reaches name entry (app uninstalled afterwards). Timing: mount 5 ms warm, open+4 KB
+0.002 ms against 0.04-0.06 ms from the folder (warm cache). Not tested: Windows/MSYS2, Linux, a real iPad.

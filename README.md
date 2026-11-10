@@ -76,7 +76,8 @@ contents, with DATA inside; FLAG0..FLAG6 of an installed game are optional) into
 its contents directly: with Finder (iPad connected by USB, Files tab, drag onto the app) or in the Files app
 (On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. In the
 simulator: `xcrun simctl get_app_container booted local.nanpa2 data`, then copy into `Documents/game`.
-Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
+A `.iso` of the CD dropped into Documents (any name, after `Documents/game` and `Documents` itself) works
+instead of a folder. Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
 
 It presents through the same Metal CRT presenter as macOS (`NANPA2_SDL_RENDERER=ON` selects the
 SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left button held, two-finger tap =
@@ -145,6 +146,7 @@ ignored. The ctest `standalone` runs the game with neither.)
 
 ```sh
 ./build/nanpa2 --game game        # play
+./build/nanpa2 --game NANPA2.iso  # play straight from the CD image, nothing extracted
 ./build/nanpa2 --view             # picture viewer: Left/Right, Esc
 ```
 
@@ -160,6 +162,13 @@ there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the 
 (macOS) and the choice is remembered in `game-folder.txt` in the save folder
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
+
+**From the CD image.** `--game`, `NANPA2_GAME_DIR`, the picker (macOS: choose the `.iso` file) and the
+remembered path all accept a `.iso` of the CD (ISO 9660, 2048-byte sectors, read-only; `DATA/01.GP4` must be
+in it). Automatic search also looks for a `*.iso` next to the executable or `.app` and in a `game` folder
+there. Saves always go to the save folder, never into the image. Supported on macOS, iOS and Linux; the
+Windows (MSYS2) build compiles the reader but ISO mode is untested there (files are staged through a temp
+file). `NANPA2_ISO=... ctest -R iso` checks every file against the extracted folder.
 
 ### Display
 
