@@ -281,10 +281,10 @@ static const char *ios_game_dir(int interactive)
 	char text[PATH_CAP + 900];
 	int n = snprintf(text, sizeof text,
 			 "找不到遊戲資料。請用 Finder（USB 連接）或「檔案」App，把遊戲資料夾"
-			 "（光碟內容加上 data1.cab 內的 FLAG0..FLAG6，內含 DATA 資料夾）複製到"
+			 "（光碟內容，內含 DATA 資料夾）複製到"
 			 "「在我的 iPad 上 > 同級生２」，然後重新開啟本程式。\n\n"
-			 "The game data was not found. Copy the game folder (the CD contents plus FLAG0..FLAG6 "
-			 "from data1.cab, with DATA inside) into this app's Documents through Finder (USB) or "
+			 "The game data was not found. Copy the game folder (the CD contents, with DATA "
+			 "inside) into this app's Documents through Finder (USB) or "
 			 "the Files app (On My iPad > 同級生２), then relaunch.");
 	if (launch_pref_dir() && n > 0 && (size_t)n < sizeof text)
 		snprintf(text + n, sizeof text - (size_t)n, "\n\nLog: %s/nanpa2.log", launch_pref_dir());
@@ -329,8 +329,7 @@ const char *launch_game_dir(const char *cli, int interactive)
 		return found;
 	char text[PATH_CAP + 400];
 	int n = snprintf(text, sizeof text,
-			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents with "
-			 "FLAG0..FLAG6 from data1.cab.\n\n"
+			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents.\n\n"
 			 "Choose it when asked, put it next to the app (in a folder named \"game\"), "
 			 "or start with --game DIR or NANPA2_GAME_DIR.");
 	if (log_file && launch_pref_dir() && n > 0 && (size_t)n < sizeof text)

@@ -13,6 +13,19 @@ void state_save_export(uint8_t out[STATE_SAVE_SIZE])
 	memcpy(out + offsetof(struct save_image, n.segment), segment_base, sizeof segment_base);
 }
 
+void state_save_blank(uint8_t out[STATE_SAVE_SIZE])
+{
+	/* the start-up state of the save image: the defaults, then the VM set-up every script start
+	 * does (0x406395). The running image is put back after. */
+	static struct save_image keep;
+	keep = G.save;
+	memset(&G.save, 0, sizeof G.save);
+	save_defaults();
+	vm_init();
+	state_save_export(out);
+	G.save = keep;
+}
+
 void state_save_import(const uint8_t *in, size_t n)
 {
 	if (n > STATE_SAVE_SIZE)

@@ -110,7 +110,7 @@ while [ -n "$queue" ]; do
 	queue=$next
 done
 note="No game code or data is included: the port reads the game files from the game folder
-(the CD contents, plus FLAG0..FLAG6 from data1.cab)."
+(the CD contents; saves FLAG0..FLAG6 of an install are optional)."
 cat >"$out/README.txt" <<EOF
 同級生２ native port for Windows, built $(date -u +%Y-%m-%d) from $(git -C "$here" rev-parse --short HEAD 2>/dev/null || echo 'a source tree').
 $note
