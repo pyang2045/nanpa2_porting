@@ -10,7 +10,13 @@
  *                                                       screenshot (NANPA2_SHOT_DIR)
  *   --speed X (or NANPA2_SPEED=X)                       game speed, 1.0 = the original's, 0 = as fast as
  *                                                       the host can (virtual clock)
- *   --no-crt                                            plain pixels (F12 toggles)
+ *   --display hd|480|sharp|smooth                       CRT HD (default), CRT 480, Sharp, Smooth
+ *                                                       (F12 cycles them; remembered in display.txt
+ *                                                       of the save folder for plain launches)
+ *   --no-crt                                            = --display sharp
+ *   --crt-lines N                                       CRT HD's virtual raster height (600..1600,
+ *                                                       default 1080; NANPA2_CRT_LINES)
+ *   --crt-scaler sharp|smooth                           CRT HD's scaler (NANPA2_CRT_SCALER)
  *   nanpa2 --logo-frame N --shot OUT.bmp               decode LOGO.AVI frame N
  *   --logo (or NANPA2_LOGO=1)                           play the LOGO.AVI publisher
  *                                                       movie (skipped by default;
@@ -222,12 +228,60 @@ static int run_game(const char *game, const char *font)
 	return 0;
 }
 
+/* The display mode: --display, else (plain launches only, not scripted, headless or shot runs) the one
+ * remembered in <save folder>/display.txt, else CRT HD; later changes by F12 are remembered. */
+static int pref_on;
+
+static void pref_path(char *out, size_t cap)
+{
+	snprintf(out, cap, "%s/display.txt", launch_pref_dir() ? launch_pref_dir() : ".");
+}
+
+static void pref_save(int mode)
+{
+	char p[1100];
+	pref_path(p, sizeof p);
+	FILE *f = fopen(p, "wb");
+	if (f) {
+		fprintf(f, "%s\n", mode == DISPLAY_CRT_HD ? "hd" : mode == DISPLAY_CRT_480 ? "480" :
+					mode == DISPLAY_SHARP ? "sharp" : "smooth");
+		fclose(f);
+	}
+}
+
+static void display_setup(int display, int use_pref)
+{
+	const char *e = getenv("NANPA2_DISPLAY");
+	if (display < 0 && e)
+		display = present_parse_mode(e);
+	pref_on = use_pref || getenv("NANPA2_DISPLAY_PREF");
+	if (display < 0 && pref_on) {
+		char p[1100], line[32] = "";
+		pref_path(p, sizeof p);
+		FILE *f = fopen(p, "rb");
+		if (f) {
+			if (fgets(line, sizeof line, f)) {
+				line[strcspn(line, "\r\n")] = 0;
+				display = present_parse_mode(line);
+			}
+			fclose(f);
+		}
+	}
+	present_set_mode(display < 0 ? DISPLAY_CRT_HD : display);
+	if (getenv("NANPA2_CRT_LINES"))
+		present_set_crt_lines(atoi(getenv("NANPA2_CRT_LINES")));
+	if (getenv("NANPA2_CRT_SCALER"))
+		present_set_crt_scaler(!strcmp(getenv("NANPA2_CRT_SCALER"), "smooth"));
+	if (pref_on)
+		present_on_mode_change(pref_save);
+}
+
 int main(int argc, char **argv)
 {
 	const char *game = NULL, *view = NULL, *shot = NULL, *font = NULL;
 	const char *crt_shot = NULL, *view_bmp = NULL;
 	int win_w = SCREEN_W, win_h = SCREEN_H;
-	int viewer = 0, crt = 1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
+	int viewer = 0, display = -1, fullscreen = 0, logo_frame_n = -1, crt_w = SCREEN_W * 2, crt_h = SCREEN_H * 2;
 	double speed = 1.0;
 	int speed_set = 0;
 	dev_install_hooks();
@@ -258,7 +312,15 @@ int main(int argc, char **argv)
 			viewer = 1;
 			view_bmp = argv[++i];
 		} else if (!strcmp(argv[i], "--no-crt"))
-			crt = 0;
+			display = DISPLAY_SHARP;
+		else if (!strcmp(argv[i], "--display") && i + 1 < argc) {
+			display = present_parse_mode(argv[++i]);
+			if (display < 0)
+				fprintf(stderr, "--display: hd, 480, sharp or smooth\n");
+		} else if (!strcmp(argv[i], "--crt-lines") && i + 1 < argc)
+			SDL_setenv("NANPA2_CRT_LINES", argv[++i], 1);
+		else if (!strcmp(argv[i], "--crt-scaler") && i + 1 < argc)
+			SDL_setenv("NANPA2_CRT_SCALER", argv[++i], 1);
 		else if (!strcmp(argv[i], "--logo-frame") && i + 1 < argc)
 			logo_frame_n = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--logo"))
@@ -363,7 +425,9 @@ int main(int argc, char **argv)
 	 * window can open behind the terminal; bring it to the front. */
 	if (!headless)
 		SDL_RaiseWindow(win);
-	present_set_crt(crt);
+	display_setup(display, !headless && !getenv("NANPA2_INPUT") && !shot && !crt_shot &&
+				      !getenv("NANPA2_REPLAY") && !getenv("NANPA2_RECORD") &&
+				      !getenv("NANPA2_DETERMINISTIC"));
 	if (fullscreen)
 		present_set_fullscreen(1);
 	if (viewer && crt_shot) {

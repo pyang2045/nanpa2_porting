@@ -237,7 +237,7 @@ static NSString *const shader_src = @
 	"                        texture2d<float> pal [[texture(1)]], texture2d<float> lt [[texture(2)]],\n"
 	"                        texture2d<float> rgb [[texture(4)]], constant U &u [[buffer(0)]]) {\n"
 	"  float2 src = float2(idx.get_width(), idx.get_height());\n"
-	"  float2 r = src / u.out_size, o = in.pos.xy;\n"
+	"  float2 r = src / u.out_size, o = floor(in.uv * u.out_size);\n"
 	"  float2 a = o * r, b = (o + 1.0) * r;\n"
 	"  int2 c = int2(floor(a + 1e-4));\n"
 	"  if (u.smooth == 0 && all(floor(b - 1e-4) == floor(a + 1e-4)))\n"
@@ -354,6 +354,7 @@ Uint32 present_window_flags(void)
 int present_init(SDL_Window *win)
 {
 	window = win;
+	present_common_init(win);
 	if (present_headless()) {
 		/* no Metal device or layer (present_common.h) */
 		soft = 1;
@@ -382,7 +383,10 @@ int present_init(SDL_Window *win)
 	pipe_lin = make_pipeline(lib, vs, @"fs_lin", MTLPixelFormatRGBA16Float);
 	pipe_blur = make_pipeline(lib, vs, @"fs_blur", MTLPixelFormatRGBA16Float);
 	pipe_crt = make_pipeline(lib, vs, @"fs_crt", layer.pixelFormat);
-	if (!pipe_lin || !pipe_blur || !pipe_crt)
+	pipe_up = make_pipeline(lib, vs, @"fs_up", MTLPixelFormatRGBA16Float);
+	pipe_hd = make_pipeline(lib, vs, @"fs_hd", layer.pixelFormat);
+	pipe_flat = make_pipeline(lib, vs, @"fs_flat", layer.pixelFormat);
+	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat)
 		return 0;
 
 	index_tex = make_texture(MTLPixelFormatR8Uint, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
@@ -431,23 +435,36 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 {
 	int x, y, w, h;
 	present_fit(dw, dh, &x, &y, &w, &h);
-	struct uniforms u = { (float)w, (float)h, crt, rgb_mode };
-	if (crt) {
-		id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
-		[enc setFragmentTexture:index_tex atIndex:0];
-		[enc setFragmentTexture:pal_tex atIndex:1];
-		[enc setFragmentTexture:rgb_tex atIndex:4];
-		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
-		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-		[enc endEncoding];
+	int mode = disp_mode;
+	int vh = disp_lines, vw = (disp_lines * 4 + 1) / 3;
+	struct uniforms u = { (float)w, (float)h, mode <= DISPLAY_CRT_480, rgb_mode, mode == DISPLAY_SMOOTH || (mode == DISPLAY_CRT_HD && disp_smooth), vw, vh, { 0, 0 } };
+	id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
+	[enc setFragmentTexture:index_tex atIndex:0];
+	[enc setFragmentTexture:pal_tex atIndex:1];
+	[enc setFragmentTexture:rgb_tex atIndex:4];
+	[enc setFragmentBytes:&u length:sizeof u atIndex:0];
+	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[enc endEncoding];
+	if (mode <= DISPLAY_CRT_480) {
 		blur_pass(cb, lin_tex, blur_tex, 1, 0);
 		blur_pass(cb, blur_tex, glow_tex, 0, 1);
 	}
-	id<MTLRenderCommandEncoder> enc = begin_pass(cb, target, pipe_crt);
+	if (mode == DISPLAY_CRT_HD) {
+		/* the picture onto the virtual raster */
+		if (!hd_tex || (int)hd_tex.width != vw || (int)hd_tex.height != vh)
+			hd_tex = make_texture(MTLPixelFormatRGBA16Float, vw, vh,
+					      MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget);
+		enc = begin_pass(cb, hd_tex, pipe_up);
+		[enc setFragmentTexture:lin_tex atIndex:0];
+		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
+		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+		[enc endEncoding];
+	}
+	enc = begin_pass(cb, target, mode == DISPLAY_CRT_HD ? pipe_hd : mode == DISPLAY_CRT_480 ? pipe_crt : pipe_flat);
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
 	[enc setFragmentTexture:index_tex atIndex:0];
 	[enc setFragmentTexture:pal_tex atIndex:1];
-	[enc setFragmentTexture:lin_tex atIndex:2];
+	[enc setFragmentTexture:mode == DISPLAY_CRT_HD ? hd_tex : lin_tex atIndex:2];
 	[enc setFragmentTexture:glow_tex atIndex:3];
 	[enc setFragmentTexture:rgb_tex atIndex:4];
 	[enc setFragmentSamplerState:linear_sampler atIndex:0];
@@ -483,11 +500,11 @@ static void probe(void)
 		if (!probe_tex)
 			return;
 	}
-	int saved_crt = crt;
-	crt = 0;
+	int saved_mode = disp_mode;
+	disp_mode = DISPLAY_SHARP;
 	id<MTLCommandBuffer> cb = [queue commandBuffer];
 	encode(cb, probe_tex, SCREEN_W, SCREEN_H);
-	crt = saved_crt;
+	disp_mode = saved_mode;
 	id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
 	SYNC_FOR_CPU(bl, probe_tex);
 	[bl endEncoding];
@@ -588,6 +605,7 @@ static void show(void)
 		[cb presentDrawable:drawable];
 		[cb commit];
 		present_note_shown();
+		present_common_tick();
 	}
 }
 
@@ -652,16 +670,6 @@ int present_capture(const char *bmp_path, int w, int h)
 	}
 }
 
-void present_set_crt(int on)
-{
-	crt = on;
-}
-
-int present_get_crt(void)
-{
-	return crt;
-}
-
 const char *present_name(void)
 {
 	return name;
@@ -677,14 +685,9 @@ void present_screen_to_window(int sx, int sy, int *wx, int *wy)
 	present_unmap_point(window, sx, sy, wx, wy);
 }
 
-static void toggle_crt(void)
-{
-	crt = !crt;
-}
-
 int present_hotkey(const SDL_KeyboardEvent *key)
 {
-	return present_common_hotkey(window, key, toggle_crt);
+	return present_common_hotkey(window, key);
 }
 
 void present_set_fullscreen(int on)
@@ -699,8 +702,8 @@ int present_get_fullscreen(void)
 
 void present_shutdown(void)
 {
-	pipe_lin = pipe_blur = pipe_crt = nil;
-	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = nil;
+	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = nil;
+	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = hd_tex = nil;
 	linear_sampler = nil;
 	probe_tex = nil;
 	queue = nil;
