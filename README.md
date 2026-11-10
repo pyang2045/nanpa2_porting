@@ -138,6 +138,32 @@ cmake -S . -B build -G Ninja   # -DNANPA2_GAME_DIR=game for the tests
 ninja -C build
 ```
 
+## Start save (skip the Prologue)
+
+The title offers Main (the story after the Prologue) only once a save exists, and the Prologue is 63
+scenes (about an hour). On a plain launch with no FLAG files anywhere (the save folder has none; the game
+folder has none or only the install's identical blank ones) the port therefore plays the Prologue itself
+before the first session: offline, with nothing shown or played, from a fixed seed, in about 3 to 4 seconds
+(a "preparing" bar shows if it takes over 2 s). The game's own scripts write the FLAG6 of the Prologue's end
+(OPEN1.MES, slot 6); that file is kept as `flag6`, and the same image as `flag0`, so the title offers
+Prologue, **Main** and Data Load, and Data Load lights diary 1 (12/22 Sunday 9:30). Nothing of the game or of a
+recorded save is in the program. Existing saves are never touched; both files are written only if both are
+absent. The hero is named 林大偉 (entered on the name grid: 林, 大, 偉, END); the rest of the Prologue is
+the exploration bot (`src/dev/explore.c`) from seed 31, so every choice it makes is the same on every run
+(`NANPA2_START_SAVE_SEED` tries another, `NANPA2_START_SAVE_LOG=1` logs the moves). Those choices set the
+Prologue's flags (which girls were talked to, and so on); the story from Main on starts from them. To play
+the Prologue yourself, choose Prologue from the title after deleting `flag0` and `flag6`, and create the
+file `startsave-off` in the save folder (or use `--no-start-save` / `NANPA2_NO_START_SAVE=1`); delete
+`startsave-off` to bring the start save back.
+
+- `nanpa2 --make-start-save` makes it headless into the save folder and exits (tests).
+- On iOS a launch with saves present first asks (「刪除存檔並重新開始（可自訂名字）？」, Continue by default,
+  taken by itself after 5 s) whether to remove them; Remove asks once more, Delete removes FLAG0..6 of the save
+  folder only and writes `startsave-off`. `NANPA2_RESET_POPUP=continue|remove-cancel|remove-delete` (with
+  `SIMCTL_CHILD_` on the simulator) answers by itself for tests. It is skipped while `startsave-off` exists.
+- Only plain interactive launches do any of this (not scripted, headless, replay, record, deterministic,
+  exploration, view or shot runs).
+
 ## Architecture
 
 ```

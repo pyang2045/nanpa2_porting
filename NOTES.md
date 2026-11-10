@@ -1679,3 +1679,27 @@ validation and F11 details of the entry above.
 - No font at all: `WARNING: no CJK font found` in the log and in the status file (`text_font_missing()`,
   watchdog key `font`). `NANPA2_TEXT=coretext[,tables]` skips the file paths / forces the rebuilt sfnt, to
   test the iOS route on macOS. `font_apple.c` is in CMake (APPLE, CoreText linked) and in `gen_xcodeproj.py`.
+
+## 2026-11-10 (start save: skip the Prologue)
+
+- A plain first launch plays the Prologue offline (96f45f7, `src/dev/startsave.c`): the dev hooks are swapped for
+  the run (deterministic clock, bot as the only input), `platform/offline.h` switches off presenting, sound and the
+  logo, ignores host input but quit, and jumps the virtual clock to the next 16 ms tick after 16 idle pumps in a row
+  (the VM pumps once per opcode, 0x4060f9; its input polls are hundreds of pumps per tick; a count-based wait is
+  untouched). The bot is explore.c's own `decide` from seed 31 plus a fixed name entry on NAME.MES (林大偉:
+  grid (100,145), (195,240), (334,160), END (512,289)). A deterministic least-tried rule did not get through the
+  classroom (OPEN.MES 0x2a42 / 0x2a5f are two menus on one click, so choices correlate), the seeded bot does
+  (S1..S63, OPEN1 at frame 319126 of virtual time).
+- Stop: the first FLAG6 written after OPEN1.MES opens (the save op at OPEN1.MES 0x2185, slot 6; the 存檔 saves of S5,
+  S7, ... S59 before it are discarded). FLAG reads/writes go to `<save>/.start-save` only (no fallback to the game
+  folder), then FLAG6 and a copy as FLAG0 are renamed into place if both are absent.
+- Result: FLAG6 alone gives the title its Main item (checked on screenshots; Main starts OPEN1, 12/22 Sunday 9:30), so
+  FLAG6 is the faithful skip. FLAG0 (same image) is what lights diary 1 in Data Load, which also starts OPEN1; nothing
+  else is needed. 40.MES: the right-click menu (到客廳去 ...) opens and 到客廳去 loads 41.MES, so the F[2010] /
+  flag 2000 trap of 2026-11-04 does not occur with a played save.
+- Timing (Intel Mac): 3.1 s with the fast-forward, 14.5 s without (after the pump no longer reads the host clock in
+  deterministic mode, which alone halved the 31 s); 3.3 s in the iPad Pro 13" simulator. Folder and ISO give the
+  same 3072 bytes; two runs are identical (ctest `startsave`).
+- iOS popup (`dialog_ios.m`, `dialog_saves_popup`): launches with saves ask whether to remove them; Continue is
+  default and taken after 5 s, Remove asks again, Delete removes FLAG0..6 and writes `startsave-off`. Checked in the
+  simulator with `SIMCTL_CHILD_NANPA2_RESET_POPUP`.

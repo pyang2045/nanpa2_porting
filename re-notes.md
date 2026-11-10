@@ -919,3 +919,8 @@ to the extracted folder. The root holds the CD's installer files and `LOGO.AVI`,
 in `data1.cab`, not parsed: the engine generates blank saves, see "Save files"). Mounting walks and sorts the
 12 394 entries once (about 5 ms warm); a read is one pread; `fsys_open` returns a seekable cookie stream
 (funopen on Apple/BSD, fopencookie on glibc/musl/bionic, a deleted-on-close temp file on Windows).
+
+### The start save (2026-11-10)
+
+FLAG6 as written by OPEN1.MES (save op 0x2185, `04 21 31 03 02 36`) is enough for the title's Main item (observed; START1 F1 =
+F[2026] is evidently set by then); the same image as FLAG0 lights diary 1 in Data Load. See NOTES 2026-11-10.
