@@ -37,9 +37,29 @@ int present_hotkey(const SDL_KeyboardEvent *key);
 void present_set_fullscreen(int on);
 int present_get_fullscreen(void);
 
-/* CRT monitor simulation: a flat Sony FD Trinitron style tube (scanlines,
- * aperture grille, damper wires, glow, dark glass), in the window and in
- * fullscreen alike, at any size. On by default. */
+/* Display modes. The CRT modes simulate a flat Sony FD Trinitron style tube
+ * (scanlines, aperture grille, damper wires, glow, dark glass), in the window
+ * and in fullscreen alike, at any size:
+ *   CRT HD   the picture scaled onto a virtual raster of present_set_crt_lines
+ *            lines at 4:3 (default 1080), the tube's beam and grille on that
+ *            raster's fine line pitch (default mode)
+ *   CRT 480  the tube showing 640x480: one scanline per game line
+ *   Sharp    no CRT; area-averaged scaling (even pixel widths at any scale,
+ *            plain pixels at integer scales)
+ *   Smooth   no CRT; Catmull-Rom bicubic scaling in linear light
+ * F12 (and a three-finger tap) cycles them in this order. */
+enum { DISPLAY_CRT_HD, DISPLAY_CRT_480, DISPLAY_SHARP, DISPLAY_SMOOTH, DISPLAY_MODES };
+void present_set_mode(int mode);
+int present_get_mode(void);
+void present_cycle_mode(void);
+const char *present_mode_name(int mode);
+int present_parse_mode(const char *s); /* hd|480|sharp|smooth, or -1 */
+/* CRT HD's virtual raster height (600..1600) and scaler (0 sharp, 1 smooth) */
+void present_set_crt_lines(int lines);
+void present_set_crt_scaler(int smooth);
+/* called with the new mode after a hotkey or gesture changed it */
+void present_on_mode_change(void (*cb)(int mode));
+/* The old on/off switch: on = CRT HD (unless a CRT mode is already set), off = Sharp. */
 void present_set_crt(int on);
 int present_get_crt(void);
 

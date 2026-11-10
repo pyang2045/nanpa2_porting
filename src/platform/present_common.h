@@ -4,6 +4,7 @@
 #include "present.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 /* ---- status counters (present_stats) ---- */
@@ -137,6 +138,99 @@ static inline int soft_capture(const char *bmp_path, int w, int h)
 	return ok;
 }
 
+/* ---- display mode state (present.h) ---- */
+
+static int disp_mode = DISPLAY_CRT_HD, disp_lines = 1080, disp_smooth;
+static void (*disp_cb)(int);
+static SDL_Window *disp_win;
+static char disp_title[160];
+static Uint32 disp_title_until;
+
+static const char *const disp_names[DISPLAY_MODES] = { "CRT HD", "CRT 480", "Sharp", "Smooth" };
+
+const char *present_mode_name(int mode)
+{
+	return mode >= 0 && mode < DISPLAY_MODES ? disp_names[mode] : "?";
+}
+
+int present_parse_mode(const char *s)
+{
+	static const char *const k[DISPLAY_MODES] = { "hd", "480", "sharp", "smooth" };
+	for (int i = 0; s && i < DISPLAY_MODES; i++)
+		if (!strcmp(s, k[i]))
+			return i;
+	return -1;
+}
+
+void present_set_mode(int mode)
+{
+	if (mode >= 0 && mode < DISPLAY_MODES)
+		disp_mode = mode;
+}
+
+int present_get_mode(void)
+{
+	return disp_mode;
+}
+
+void present_set_crt_lines(int lines)
+{
+	disp_lines = lines < 600 ? 600 : lines > 1600 ? 1600 : lines;
+}
+
+void present_set_crt_scaler(int smooth)
+{
+	disp_smooth = smooth != 0;
+}
+
+void present_on_mode_change(void (*cb)(int mode))
+{
+	disp_cb = cb;
+}
+
+void present_set_crt(int on)
+{
+	disp_mode = on ? (disp_mode <= DISPLAY_CRT_480 ? disp_mode : DISPLAY_CRT_HD) : DISPLAY_SHARP;
+}
+
+int present_get_crt(void)
+{
+	return disp_mode <= DISPLAY_CRT_480;
+}
+
+/* the presenter's init gives its window, for the mode name in the title */
+static inline void present_common_init(SDL_Window *win)
+{
+	disp_win = win;
+}
+
+/* every presented frame: put the title back after the mode name's moment */
+static inline void present_common_tick(void)
+{
+	if (disp_title_until && (Sint32)(SDL_GetTicks() - disp_title_until) >= 0) {
+		disp_title_until = 0;
+		if (disp_win)
+			SDL_SetWindowTitle(disp_win, disp_title);
+	}
+}
+
+void present_cycle_mode(void)
+{
+	disp_mode = (disp_mode + 1) % DISPLAY_MODES;
+	if (disp_win) {
+		if (!disp_title_until)
+			snprintf(disp_title, sizeof disp_title, "%s", SDL_GetWindowTitle(disp_win));
+		char t[200];
+		snprintf(t, sizeof t, "%s - %s", disp_title, disp_names[disp_mode]);
+		SDL_SetWindowTitle(disp_win, t);
+		disp_title_until = SDL_GetTicks() + 2000;
+		if (!disp_title_until)
+			disp_title_until = 1;
+	}
+	if (disp_cb)
+		disp_cb(disp_mode);
+}
+
 /* Largest SCREEN_W:SCREEN_H rectangle centred in a dw x dh drawable. */
 static inline void present_fit(int dw, int dh, int *x, int *y, int *w, int *h)
 {
@@ -198,8 +292,7 @@ static inline int present_common_get_fullscreen(SDL_Window *win)
 /* Shared hotkey handling (see present_hotkey). The key that completes a
  * chord is remembered so that its release is swallowed too, even if the
  * modifier was let go first. */
-static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent *k,
-					void (*toggle_crt)(void))
+static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent *k)
 {
 	static SDL_Keycode held;
 	SDL_Keycode sym = k->keysym.sym;
@@ -215,7 +308,7 @@ static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent
 	}
 	if (sym == SDLK_F12) {
 		if (!k->repeat)
-			toggle_crt();
+			present_cycle_mode();
 		return 1;
 	}
 	int alt_enter = (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && (mod & KMOD_ALT);

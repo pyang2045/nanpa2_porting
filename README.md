@@ -61,7 +61,7 @@ Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
 
 It presents through the same Metal CRT presenter as macOS (`NANPA2_SDL_RENDERER=ON` selects the
 SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left button held, two-finger tap =
-right click (cancel/menu), three-finger tap = CRT shader on/off (F12). Touch positions go through the
+right click (cancel/menu), three-finger tap = next display mode (F12). Touch positions go through the
 presenter's letterbox. Going to the background pauses the music and the render loop.
 
 ### Linux (not built or run yet)
@@ -141,6 +141,30 @@ there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the 
 (macOS) and the choice is remembered in `game-folder.txt` in the save folder
 (`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
 `NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
+
+### Display
+
+F12 (on iOS a three-finger tap) cycles four modes: **CRT HD** (default), **CRT 480**, **Sharp**,
+**Smooth**; the name shows in the window title for two seconds. `--display hd|480|sharp|smooth`
+(or `NANPA2_DISPLAY`) picks one; `--no-crt` is `--display sharp`. A plain launch remembers the last
+mode in `display.txt` next to `game-folder.txt` (scripted, headless, shot and replay runs neither read
+nor write it; `NANPA2_DISPLAY_PREF=1` forces it).
+
+- CRT HD: a late-90s flat Sony FD Trinitron (GDM-FW900 / F520 class) showing a ~full-HD desktop mode with
+  the 640x480 scaled up by the video card. The picture is resampled in linear light onto a virtual
+  raster of `--crt-lines N` lines at 4:3 (600..1600, default 1080 = 1440x1080;
+  `NANPA2_CRT_LINES`) with an area-averaged scaler (equal pixel widths, a one-pixel soft seam at
+  most; `--crt-scaler smooth` uses Catmull-Rom instead, `NANPA2_CRT_SCALER`). The beam, scanlines
+  and aperture grille work at the raster's line pitch, so the scanlines are about three times finer
+  than CRT 480's; they and the grille fade in as the screen gets larger (clean upscale at 1080p, fine
+  lines at 4K or on an iPad). Glow, damper wires, vignette and dark glass are the tube's.
+- CRT 480: the tube showing 640x480, one scanline per game line (the earlier CRT, unchanged).
+- Sharp: no CRT, area-averaged scaling in linear light: every pixel the same width at any scale,
+  exactly the plain pixels at integer scales.
+- Smooth: no CRT, Catmull-Rom bicubic in linear light.
+
+The SDL_Renderer presenter (non-Apple) approximates CRT HD with scanlines at the virtual raster's pitch
+and Sharp/Smooth with an integer-scaled copy scaled linearly.
 
 ### Game speed
 

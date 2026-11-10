@@ -30,17 +30,19 @@ static SDL_MetalView view;
 static CAMetalLayer *layer;
 static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
-static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt;
-static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex;
+static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat;
+static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex, hd_tex;
 static int rgb_mode; /* the last frame came from present_frame_rgb */
 static id<MTLSamplerState> linear_sampler;
 static char name[128];
-static int crt = 1;
 
 struct uniforms {
 	float out_w, out_h; /* viewport size in drawable pixels */
 	int32_t crt;
 	int32_t rgb; /* read rgb_tex instead of index + palette */
+	int32_t smooth; /* Catmull-Rom instead of area averaging */
+	int32_t vw, vh; /* the virtual raster of CRT HD */
+	int32_t pad[2];
 };
 
 /* The CRT is a late-90s flat-face Sony FD Trinitron PC monitor showing
@@ -57,7 +59,7 @@ static NSString *const shader_src = @
 	"#include <metal_stdlib>\n"
 	"using namespace metal;\n"
 	"struct V { float4 pos [[position]]; float2 uv; };\n"
-	"struct U { float2 out_size; int crt; int rgb; };\n"
+	"struct U { float2 out_size; int crt; int rgb; int smooth; int vw; int vh; int pad0; int pad1; };\n"
 	"constant float GAMMA = 2.2;\n"
 	"constant float SCAN = 1.0;\n"   /* scanline amount at >= 3.5x */
 	"constant float BEAM_X = 0.25;\n" /* beam spot sigma, screen pixels */
@@ -188,6 +190,129 @@ static NSString *const shader_src = @
 	"  col *= pow(saturate(vv.x * vv.y * 16.0), 0.06);\n"
 	"  col = GLASS + col * (1.0 - GLASS);\n"
 	"  return float4(pow(saturate(col), 1.0 / GAMMA) * edge, 1.0);\n"
+	"}\n"
+	/* ---- display modes CRT HD, Sharp, Smooth (CRT 480 is fs_crt above) ----
+	 * Area-averaged ("sharp") or Catmull-Rom weights of the source pixels
+	 * for the interval a..b (source coordinates) of one output pixel. */
+	"struct Taps { int i0; int n; float w[8]; };\n"
+	"static Taps taps(float a, float b, int smooth_) {\n"
+	"  Taps t; t.i0 = 0; t.n = 0;\n"
+	"  for (int k = 0; k < 8; k++) t.w[k] = 0.0;\n"
+	"  if (smooth_ != 0 && b - a <= 1.0001) {\n"
+	"    float p = 0.5 * (a + b) - 0.5, fl = floor(p), x = p - fl, x2 = x * x, x3 = x2 * x;\n"
+	"    t.i0 = int(fl) - 1; t.n = 4;\n"
+	"    t.w[0] = -0.5 * x3 + x2 - 0.5 * x; t.w[1] = 1.5 * x3 - 2.5 * x2 + 1.0;\n"
+	"    t.w[2] = -1.5 * x3 + 2.0 * x2 + 0.5 * x; t.w[3] = 0.5 * x3 - 0.5 * x2;\n"
+	"    return t;\n"
+	"  }\n"
+	"  t.i0 = int(floor(a + 1e-5));\n"
+	"  t.n = min(int(ceil(b - 1e-5)) - t.i0, 8);\n"
+	"  float sum = 0.0;\n"
+	"  for (int k = 0; k < t.n; k++) {\n"
+	"    float j = float(t.i0 + k);\n"
+	"    t.w[k] = max(min(b, j + 1.0) - max(a, j), 0.0); sum += t.w[k];\n"
+	"  }\n"
+	"  for (int k = 0; k < t.n; k++) t.w[k] /= sum;\n"
+	"  return t;\n"
+	"}\n"
+	"static float3 resample(texture2d<float> t, float2 a, float2 b, int smooth_) {\n"
+	"  Taps tx = taps(a.x, b.x, smooth_), ty = taps(a.y, b.y, smooth_);\n"
+	"  float3 sum = 0.0;\n"
+	"  for (int j = 0; j < ty.n; j++) {\n"
+	"    float3 r = 0.0;\n"
+	"    for (int i = 0; i < tx.n; i++) r += tx.w[i] * lin(t, int2(tx.i0 + i, ty.i0 + j));\n"
+	"    sum += ty.w[j] * r;\n"
+	"  }\n"
+	"  return max(sum, 0.0);\n"
+	"}\n"
+	/* CRT HD, first pass: the 640x480 linear picture onto the virtual raster */
+	"fragment float4 fs_up(V in [[stage_in]], texture2d<float> t [[texture(0)]], constant U &u [[buffer(0)]]) {\n"
+	"  float2 r = float2(t.get_width(), t.get_height()) / float2(u.vw, u.vh);\n"
+	"  float2 o = in.pos.xy;\n"
+	"  return float4(resample(t, o * r, (o + 1.0) * r, u.smooth), 1.0);\n"
+	"}\n"
+	/* Sharp and Smooth: the same straight onto the output; a pixel that lies
+	 * wholly within one source pixel is that pixel's exact colour */
+	"fragment float4 fs_flat(V in [[stage_in]], texture2d<uint> idx [[texture(0)]],\n"
+	"                        texture2d<float> pal [[texture(1)]], texture2d<float> lt [[texture(2)]],\n"
+	"                        texture2d<float> rgb [[texture(4)]], constant U &u [[buffer(0)]]) {\n"
+	"  float2 src = float2(idx.get_width(), idx.get_height());\n"
+	"  float2 r = src / u.out_size, o = floor(in.uv * u.out_size);\n"
+	"  float2 a = o * r, b = (o + 1.0) * r;\n"
+	"  int2 c = int2(floor(a + 1e-4));\n"
+	"  if (u.smooth == 0 && all(floor(b - 1e-4) == floor(a + 1e-4)))\n"
+	"    return screen_px(idx, pal, rgb, u.rgb, uint2(clamp(c, int2(0), int2(src) - 1)));\n"
+	"  float3 l = resample(lt, a, b, u.smooth);\n"
+	"  return float4(pow(saturate(l), 1.0 / GAMMA), 1.0);\n"
+	"}\n"
+	/* CRT HD, second pass: fs_crt's tube on the virtual raster lt (any size
+	 * against the output: more taps when an output pixel spans several
+	 * virtual pixels). Beam, scanlines and grille work at the raster's line
+	 * pitch; the damper wires and the glow are the tube's. */
+	"constant float BEAM_HD = 0.5;\n" /* beam spot sigma, virtual pixels */
+	"fragment float4 fs_hd(V in [[stage_in]], texture2d<float> lt [[texture(2)]],\n"
+	"                      texture2d<float> glow [[texture(3)]],\n"
+	"                      sampler smp [[sampler(0)]], constant U &u [[buffer(0)]]) {\n"
+	"  float2 src = float2(lt.get_width(), lt.get_height());\n"
+	"  float2 scale = u.out_size / src;\n"
+	"  float2 c = in.uv * 2.0 - 1.0;\n"
+	"  const float r = 0.012;\n"
+	"  float d = length(max(abs(c) - (1.0 - r), 0.0)) - r;\n"
+	"  float edge = saturate(-d * u.out_size.y * 0.5);\n"
+	"  float2 uv = in.uv;\n"
+	"  float2 p = uv * src - 0.5;\n"
+	"  p.y += 0.5 / scale.y * saturate(1.0 - 2.0 * abs(scale.y - 2.0));\n"
+	"  float2 b = floor(p), f = p - b;\n"
+	"  int2 i = int2(b);\n"
+	"  int N = min(scale.x, scale.y) < 0.8 ? 8 : 4;\n"
+	"  int o0 = 1 - N / 2;\n"
+	"  float h = 1.0 / scale.x;\n"
+	"  float sx = sqrt(pow(BEAM_HD * smoothstep(1.0, 2.0, scale.x), 2.0) + h * h / 12.0 + 1e-4);\n"
+	"  float kx = 0.70710678 / sx;\n"
+	"  float wx[8]; float wsx = 0.0;\n"
+	"  for (int j = 0; j < N; j++) {\n"
+	"    float dx = f.x - float(o0 + j);\n"
+	"    wx[j] = erf_((dx + 0.5) * kx) - erf_((dx - 0.5) * kx); wsx += wx[j];\n"
+	"  }\n"
+	"  float3 row[8];\n"
+	"  for (int k = 0; k < N; k++) {\n"
+	"    float3 acc = 0.0;\n"
+	"    for (int j = 0; j < N; j++) acc += wx[j] * lin(lt, i + int2(o0 + j, o0 + k));\n"
+	"    row[k] = acc / wsx;\n"
+	"  }\n"
+	"  float hy = 1.0 / scale.y;\n"
+	"  float sy = sqrt(pow(BEAM_HD * smoothstep(1.0, 2.0, scale.y), 2.0) + hy * hy / 12.0 + 1e-4);\n"
+	"  float3 flat = 0.0; float wsum = 0.0;\n"
+	"  for (int k = 0; k < N; k++) {\n"
+	"    float dy = f.y - float(o0 + k);\n"
+	"    float w = erf_((dy + 0.5) * 0.70710678 / sy) - erf_((dy - 0.5) * 0.70710678 / sy);\n"
+	"    flat += w * row[k]; wsum += w;\n"
+	"  }\n"
+	"  flat /= wsum;\n"
+	"  float3 scan = 0.0;\n"
+	"  for (int k = 0; k < N; k++) {\n"
+	"    float sigma = mix(0.28, 0.38, sqrt(dot(row[k], LUMA)));\n"
+	"    scan += row[k] * beam(f.y - float(o0 + k), sigma, hy);\n"
+	"  }\n"
+	"  float3 col = mix(flat, scan, SCAN * smoothstep(1.0, 2.0, scale.y));\n"
+	"  float ms = MASK * saturate((scale.x - 1.25) / 2.25);\n"
+	"  uint m = uint(in.pos.x) - 3u * (uint(in.pos.x) / 3u);\n"
+	"  col *= (1.0 - 1.5 * ms * (1.0 - float3(m == 0u, m == 1u, m == 2u))) / (1.0 - ms);\n"
+	"  col = mix(col, glow.sample(smp, uv).rgb, GLOW);\n"
+	/* the wires keep their place and thickness on the tube (WIRE_W game lines) */
+	"  float y = uv.y * src.y;\n"
+	"  float ww = WIRE_W * src.y / 480.0;\n"
+	"  float wire = 0.0;\n"
+	"  for (int k = 1; k <= 2; k++) {\n"
+	"    float wy = src.y * float(k) / 3.0;\n"
+	"    float lo = max(y - 0.5 * hy, wy - 0.5 * ww), hi = min(y + 0.5 * hy, wy + 0.5 * ww);\n"
+	"    wire += max(hi - lo, 0.0) / hy;\n"
+	"  }\n"
+	"  col *= 1.0 - WIRE * saturate(wire);\n"
+	"  float2 vv = uv * (1.0 - uv);\n"
+	"  col *= pow(saturate(vv.x * vv.y * 16.0), 0.06);\n"
+	"  col = GLASS + col * (1.0 - GLASS);\n"
+	"  return float4(pow(saturate(col), 1.0 / GAMMA) * edge, 1.0);\n"
 	"}\n";
 
 static id<MTLRenderPipelineState> make_pipeline(id<MTLLibrary> lib, id<MTLFunction> vs, NSString *fs,
@@ -229,6 +354,7 @@ Uint32 present_window_flags(void)
 int present_init(SDL_Window *win)
 {
 	window = win;
+	present_common_init(win);
 	if (present_headless()) {
 		/* no Metal device or layer (present_common.h) */
 		soft = 1;
@@ -257,7 +383,10 @@ int present_init(SDL_Window *win)
 	pipe_lin = make_pipeline(lib, vs, @"fs_lin", MTLPixelFormatRGBA16Float);
 	pipe_blur = make_pipeline(lib, vs, @"fs_blur", MTLPixelFormatRGBA16Float);
 	pipe_crt = make_pipeline(lib, vs, @"fs_crt", layer.pixelFormat);
-	if (!pipe_lin || !pipe_blur || !pipe_crt)
+	pipe_up = make_pipeline(lib, vs, @"fs_up", MTLPixelFormatRGBA16Float);
+	pipe_hd = make_pipeline(lib, vs, @"fs_hd", layer.pixelFormat);
+	pipe_flat = make_pipeline(lib, vs, @"fs_flat", layer.pixelFormat);
+	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat)
 		return 0;
 
 	index_tex = make_texture(MTLPixelFormatR8Uint, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
@@ -306,23 +435,36 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 {
 	int x, y, w, h;
 	present_fit(dw, dh, &x, &y, &w, &h);
-	struct uniforms u = { (float)w, (float)h, crt, rgb_mode };
-	if (crt) {
-		id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
-		[enc setFragmentTexture:index_tex atIndex:0];
-		[enc setFragmentTexture:pal_tex atIndex:1];
-		[enc setFragmentTexture:rgb_tex atIndex:4];
-		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
-		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-		[enc endEncoding];
+	int mode = disp_mode;
+	int vh = disp_lines, vw = (disp_lines * 4 + 1) / 3;
+	struct uniforms u = { (float)w, (float)h, mode <= DISPLAY_CRT_480, rgb_mode, mode == DISPLAY_SMOOTH || (mode == DISPLAY_CRT_HD && disp_smooth), vw, vh, { 0, 0 } };
+	id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
+	[enc setFragmentTexture:index_tex atIndex:0];
+	[enc setFragmentTexture:pal_tex atIndex:1];
+	[enc setFragmentTexture:rgb_tex atIndex:4];
+	[enc setFragmentBytes:&u length:sizeof u atIndex:0];
+	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[enc endEncoding];
+	if (mode <= DISPLAY_CRT_480) {
 		blur_pass(cb, lin_tex, blur_tex, 1, 0);
 		blur_pass(cb, blur_tex, glow_tex, 0, 1);
 	}
-	id<MTLRenderCommandEncoder> enc = begin_pass(cb, target, pipe_crt);
+	if (mode == DISPLAY_CRT_HD) {
+		/* the picture onto the virtual raster */
+		if (!hd_tex || (int)hd_tex.width != vw || (int)hd_tex.height != vh)
+			hd_tex = make_texture(MTLPixelFormatRGBA16Float, vw, vh,
+					      MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget);
+		enc = begin_pass(cb, hd_tex, pipe_up);
+		[enc setFragmentTexture:lin_tex atIndex:0];
+		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
+		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+		[enc endEncoding];
+	}
+	enc = begin_pass(cb, target, mode == DISPLAY_CRT_HD ? pipe_hd : mode == DISPLAY_CRT_480 ? pipe_crt : pipe_flat);
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
 	[enc setFragmentTexture:index_tex atIndex:0];
 	[enc setFragmentTexture:pal_tex atIndex:1];
-	[enc setFragmentTexture:lin_tex atIndex:2];
+	[enc setFragmentTexture:mode == DISPLAY_CRT_HD ? hd_tex : lin_tex atIndex:2];
 	[enc setFragmentTexture:glow_tex atIndex:3];
 	[enc setFragmentTexture:rgb_tex atIndex:4];
 	[enc setFragmentSamplerState:linear_sampler atIndex:0];
@@ -358,11 +500,11 @@ static void probe(void)
 		if (!probe_tex)
 			return;
 	}
-	int saved_crt = crt;
-	crt = 0;
+	int saved_mode = disp_mode;
+	disp_mode = DISPLAY_SHARP;
 	id<MTLCommandBuffer> cb = [queue commandBuffer];
 	encode(cb, probe_tex, SCREEN_W, SCREEN_H);
-	crt = saved_crt;
+	disp_mode = saved_mode;
 	id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
 	SYNC_FOR_CPU(bl, probe_tex);
 	[bl endEncoding];
@@ -463,6 +605,7 @@ static void show(void)
 		[cb presentDrawable:drawable];
 		[cb commit];
 		present_note_shown();
+		present_common_tick();
 	}
 }
 
@@ -527,16 +670,6 @@ int present_capture(const char *bmp_path, int w, int h)
 	}
 }
 
-void present_set_crt(int on)
-{
-	crt = on;
-}
-
-int present_get_crt(void)
-{
-	return crt;
-}
-
 const char *present_name(void)
 {
 	return name;
@@ -552,14 +685,9 @@ void present_screen_to_window(int sx, int sy, int *wx, int *wy)
 	present_unmap_point(window, sx, sy, wx, wy);
 }
 
-static void toggle_crt(void)
-{
-	crt = !crt;
-}
-
 int present_hotkey(const SDL_KeyboardEvent *key)
 {
-	return present_common_hotkey(window, key, toggle_crt);
+	return present_common_hotkey(window, key);
 }
 
 void present_set_fullscreen(int on)
@@ -574,8 +702,8 @@ int present_get_fullscreen(void)
 
 void present_shutdown(void)
 {
-	pipe_lin = pipe_blur = pipe_crt = nil;
-	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = nil;
+	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = nil;
+	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = hd_tex = nil;
 	linear_sampler = nil;
 	probe_tex = nil;
 	queue = nil;

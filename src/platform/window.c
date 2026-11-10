@@ -254,7 +254,7 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 			if (touch.max_fingers == 2)
 				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
 			else
-				present_set_crt(!present_get_crt());
+				present_cycle_mode();
 		}
 		memset(&touch, 0, sizeof touch);
 	}
