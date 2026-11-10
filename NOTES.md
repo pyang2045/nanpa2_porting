@@ -1510,3 +1510,25 @@ builds; the Xcode generator (`--device`) gets the catalog as a resource with
 `ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon`. Checked: simulator home screen (icon present, clear, not clipped,
 app uninstalled afterwards); unsigned IPA holds Assets.car, `CFBundleIconName = AppIcon`, the icon dicts, no
 `/Users/` strings; `--device` runs through compile and stops only at signing (no team). Commit: see git log.
+
+## 2026-11-10: iOS build is a standard Xcode project
+
+`ios/nanpa2.xcodeproj` (shared scheme `nanpa2`, one app target; iPhone+iPad, iOS 13, automatic signing with an
+empty `DEVELOPMENT_TEAM`, bundle id `local.nanpa2` via `PRODUCT_BUNDLE_IDENTIFIER`) replaces the CMake iOS path
+(the `NANPA2_IOS` blocks, `cmake/Info.ios.plist.in`, the actool step). `tools/gen_xcodeproj.py` writes the
+project deterministically (IDs hashed from names) and is its source; `ios/Info.plist` is static with
+`$(PRODUCT_BUNDLE_IDENTIFIER)`, `$(MARKETING_VERSION)`, `$(CURRENT_PROJECT_VERSION)`; the icon catalog moved to
+`ios/Assets.xcassets` and Xcode compiles it (`ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon`). Same flags as CMake
+(c11, -Wall -Wextra, `-ffile-prefix-map`; modules off, since clang modules clash with iso.c's `struct entry`).
+SDL: SDL's own `Xcode/SDL/SDL.xcodeproj` as a subproject was tried first and abandoned: Xcode 26 compiles its
+Metal shader and fails without the separate Metal Toolchain download. Instead `tools/fetch_sdl.sh` downloads the
+release tarball (pinned SHA-256), builds static SDL2+SDL2main with CMake/Ninja for iphoneos arm64 and
+simulator arm64+x86_64, and packs the gitignored `ios/third_party/SDL2.xcframework` (one dependency entry; the
+version is a parameter). `tools/build_ios.sh` is a wrapper over `xcodebuild` (simulator, `--device`, `--ipa`).
+ctest `xcodeproj` (tests/xcodeproj.py) fails when CMake compiles a source the project does not. Commits: 88720ad
+(project, scripts), 7b3381c (merge of master and the CMake removal, drift test, docs).
+Checked: simulator build, iPad Pro 11 simulator from `Documents/NANPA2.iso`, name-entry screen, log
+`Renderer: Metal`, app uninstalled; `--ipa`: Payload/ + Assets.car, arm64, unsigned, all Info.plist keys and
+`CFBundleIconName`, no `/Users/` strings, no_game_bytes clean; `--device` without a team stops with a message,
+with a dummy team stops only at provisioning; macOS cmake+ninja+ctest 10/10 (smoke, iso skipped). Not tested: a
+real device, opening in the Xcode GUI.
