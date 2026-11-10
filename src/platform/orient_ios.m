@@ -103,6 +103,29 @@ static void flip_done(const char *why)
 	log_state(why);
 }
 
+static BOOL g_req_logged;
+
+/* One geometry request for the wanted side. Sent only once the scene reports itself unlocked (a request
+ * made while it is still locked is dropped), and again on every poll tick until the interface matches. */
+static void flip_request(int t)
+{
+	UIWindowScene *s = ui_window().windowScene;
+	UIInterfaceOrientationMask m = t == UIInterfaceOrientationLandscapeLeft
+					       ? UIInterfaceOrientationMaskLandscapeLeft
+					       : UIInterfaceOrientationMaskLandscapeRight;
+	UIWindowSceneGeometryPreferencesIOS *p =
+		[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:m];
+	[ui_window().rootViewController setNeedsUpdateOfSupportedInterfaceOrientations];
+	[s requestGeometryUpdateWithPreferences:p
+				   errorHandler:^(NSError *e) {
+					   SDL_Log("orient[flip-request-error]: %s", e.localizedDescription.UTF8String);
+				   }];
+	if (!g_req_logged) {
+		g_req_logged = YES;
+		SDL_Log("orient[flip-request]: target=%d", t);
+	}
+}
+
 static void flip_poll(unsigned gen, int left)
 {
 	if (gen != g_gen || !g_flip)
@@ -116,7 +139,11 @@ static void flip_poll(unsigned gen, int left)
 		flip_done("flip-timeout");
 		return;
 	}
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(),
+	if (!ui_window().windowScene.effectiveGeometry.isInterfaceOrientationLocked || left < 22) /* or ~0.75 s passed */
+		flip_request(w);
+	else
+		notify_lock(); /* still locked: ask again for the (now off) preference */
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 150 * NSEC_PER_MSEC), dispatch_get_main_queue(),
 		       ^{ flip_poll(gen, left - 1); });
 }
 
@@ -144,19 +171,8 @@ static void flip_check(unsigned gen)
 	g_lock = NO;
 	notify_lock();
 	log_state("flip-unlock");
-	UIViewController *vc = ui_window().rootViewController;
-	[vc setNeedsUpdateOfSupportedInterfaceOrientations];
-	UIInterfaceOrientationMask m = t == UIInterfaceOrientationLandscapeLeft
-					       ? UIInterfaceOrientationMaskLandscapeLeft
-					       : UIInterfaceOrientationMaskLandscapeRight;
-	UIWindowSceneGeometryPreferencesIOS *p =
-		[[UIWindowSceneGeometryPreferencesIOS alloc] initWithInterfaceOrientations:m];
-	[s requestGeometryUpdateWithPreferences:p
-				   errorHandler:^(NSError *e) {
-					   SDL_Log("orient: flip request failed: %s", e.localizedDescription.UTF8String);
-				   }];
-	SDL_Log("orient[flip-request]: target=%d", t);
-	flip_poll(gen, 40); /* 4 s: the system can take a while after the unlock */
+	g_req_logged = NO;
+	flip_poll(gen, 27); /* 4 s at 150 ms: the system can take a while after the unlock */
 }
 
 /* Device turned: only the two landscape sides matter (orient_map.h). */

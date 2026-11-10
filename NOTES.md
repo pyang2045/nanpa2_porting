@@ -16,6 +16,8 @@ Device log showed the 3/4 raw values are equal between UIDeviceOrientation and U
 (device LandscapeLeft 3 = interface LandscapeRight 3), now `platform/orient_map.h` with a test; the flip
 recomputes its target from the live device side, waits 4 s, and accepts a system rotation instead of
 forcing the old target back. The scene-geometry calls run only on iOS 26+.
+The geometry request is sent only once the scene reports itself unlocked (or after 0.75 s), and re-sent every
+150 ms until the interface matches (a request sent in the unlock's own turn was dropped); errors are logged.
 
 ## 2026-11-03
 
