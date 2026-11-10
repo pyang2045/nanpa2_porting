@@ -1,5 +1,16 @@
 # NOTES
 
+## 2026-11-10 (iPad: landscape lock)
+The Info.plist masks and SDL_HINT_ORIENTATIONS (b31db32) did not stop the iPad rotating to portrait.
+Apple (TN3192) deprecates UIRequiresFullScreen from iPadOS 26 and, from 27, ignores it; forum reports
+(developer.apple.com/forums/thread/811216, 801140) say iPadOS 26.x ignores the supported masks while the
+device rotation lock is off. The documented request is UIViewController.prefersInterfaceOrientationLocked
+plus setNeedsUpdateOfPrefersInterfaceOrientationLocked, with UIWindowScene requestGeometryUpdate for the
+orientation itself. `src/platform/orient_ios.m` adds the method to SDL's view controller class at runtime
+(no SDL fork), asks the scene for landscape, locks once landscape, and logs every orientation/size change
+(`orient[...]` lines in nanpa2.log). The lock is only a request; the presenter letterboxes and maps touch
+through the window rectangle, so a refused lock cannot distort. Device (iPadOS 27.2): locked=1 at launch.
+
 ## 2026-11-03
 
 - Disc identified: Taiwan Traditional Chinese 同級生２, `nanpa2.exe` linked 2000-07-10. Plain

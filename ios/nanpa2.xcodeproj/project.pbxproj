@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		0296AA5147BCED2789D13E32 /* files.c in Sources */ = {isa = PBXBuildFile; fileRef = ACAB6145FBAECFA46F7CA3CE; };
+		08FB9871AF60A9D5FBABC5B9 /* orient_ios.m in Sources */ = {isa = PBXBuildFile; fileRef = 34D409A899C51E49E10AAC9D; };
 		0C20911B5C3EF7667B2B57AB /* map_sprite.c in Sources */ = {isa = PBXBuildFile; fileRef = 1938CDFF0A5FE1E82130E7A5; };
 		14BD5A462CC2F3A589D4D35A /* map_pump.c in Sources */ = {isa = PBXBuildFile; fileRef = 62707EF0DCA2690053518A8C; };
 		18A99392C43755FECC2AFDD3 /* lzh.c in Sources */ = {isa = PBXBuildFile; fileRef = 64383374A8DF391102A73425; };
@@ -109,6 +110,7 @@
 		2B21099E078A335F38C460BF /* gmem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gmem.h; sourceTree = "<group>"; };
 		325F3E1475A3FC2AA267D120 /* clock.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = clock.h; sourceTree = "<group>"; };
 		34B7F3D6E5C124420CFF0259 /* ops_vm.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ops_vm.c; sourceTree = "<group>"; };
+		34D409A899C51E49E10AAC9D /* orient_ios.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = orient_ios.m; sourceTree = "<group>"; };
 		36B4B2B5AAC28EA46FDC1F3C /* clock.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = clock.c; sourceTree = "<group>"; };
 		380BEC2350990307DA2067C5 /* textlayer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = textlayer.h; sourceTree = "<group>"; };
 		39C94BAD3708818DECCCA9B2 /* hash.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = hash.c; sourceTree = "<group>"; };
@@ -355,6 +357,7 @@
 				E0B0F420C9569DEF0BC5CF24,
 				87E0CC0378B1917A2E9D8AD9,
 				14DD9EE300F1002EF88C9735,
+				34D409A899C51E49E10AAC9D,
 				1C25641C1DBE9D18171C4387,
 				EEE0A9F7721E743AF164059E,
 				B726E14C06A5068BC1C8D676,
@@ -517,6 +520,7 @@
 				354FDB23ECE4E5DEE66D928D,
 				ED66004B506CE06F23D9F6C2,
 				AD74220FFC9B643B0D0C0C7F,
+				08FB9871AF60A9D5FBABC5B9,
 				82A82024D0BFFEC82132BF7F,
 				EBEC84278AC1E3BE7C78BCD8,
 				BE3A17E817F4008AAE822ED6,

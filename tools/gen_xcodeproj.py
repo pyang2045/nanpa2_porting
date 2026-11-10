@@ -22,7 +22,7 @@ SOURCES = """
 main.c launch.c lzh.c gp4.c fsys.c iso.c trap.c hooks.c hash.c cinepak.c
 platform/files.c platform/window.c platform/clock.c platform/offline.c platform/surface.c platform/text.c platform/logo.c
 platform/textlayer.c platform/textraster.c platform/font_apple.c
-platform/sound.c platform/present_metal.m platform/dialog_sdl.c platform/dialog_ios.m platform/docs_ios.c
+platform/sound.c platform/present_metal.m platform/dialog_sdl.c platform/dialog_ios.m platform/docs_ios.c platform/orient_ios.m
 dev/dev.c dev/replay.c dev/explore.c dev/startsave.c dev/status.c
 game/ctl.c game/expr.c game/vm.c game/ops.c game/ops_sys.c game/ops_vm.c game/loop.c game/text.c
 game/anim.c game/file.c game/startup.c game/map.c game/map_draw.c game/map_move.c game/map_path.c
