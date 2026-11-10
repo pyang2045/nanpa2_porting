@@ -23,6 +23,13 @@ static void SDLCALL picked(void *ud, const char *const *list, int filter)
 	SDL_SetAtomicInt(&p->done, 1);
 }
 
+#ifndef SDL_PLATFORM_IOS
+int dialog_saves_popup(void)
+{
+	return 0; /* iOS only for now (dialog_ios.m) */
+}
+#endif
+
 int dialog_pick_folder(const char *prompt, char *out, size_t cap)
 {
 	(void)prompt; /* SDL's dialog has no message line */

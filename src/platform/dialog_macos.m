@@ -4,6 +4,11 @@
 #import <AppKit/AppKit.h>
 #include <stdio.h>
 
+int dialog_saves_popup(void)
+{
+	return 0; /* iOS only for now (dialog_ios.m) */
+}
+
 int dialog_pick_folder(const char *prompt, char *out, size_t cap)
 {
 	@autoreleasepool {

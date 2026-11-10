@@ -21,6 +21,12 @@ void files_init(const char *game_dir, const char *save_dir);
  * game file: only the FLAG files can be written) */
 FILE *files_open(const char *path, const char *mode);
 
+/* Offline mode (dev/startsave.c): FLAG files are read and written in `dir` only, with no fallback
+ * to the game folder (a missing one is the game's generated blank). files_offline_end puts the
+ * save folder back. */
+void files_offline_begin(const char *dir);
+void files_offline_end(void);
+
 /* the size of an open file in bytes, or -1 */
 long files_size(FILE *f);
 

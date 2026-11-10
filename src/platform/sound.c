@@ -27,6 +27,7 @@
  * S16 stereo) to a WAV file. Without an audio device the SDL dummy driver
  * runs the mixer in real time, so the dump and game timing are the same. */
 #include "platform/sound.h"
+#include "platform/offline.h"
 
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -302,6 +303,8 @@ int sound_init(void)
 {
 	if (dev)
 		return 1;
+	if (offline_on())
+		return 0; /* nothing is played offline */
 	log_on = getenv("NANPA2_LOG") != NULL;
 	if (SDL_InitSubSystem(SDL_INIT_AUDIO))
 		dev = open_device();

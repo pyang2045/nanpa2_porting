@@ -68,6 +68,7 @@ set(SOURCES
     src/platform/files.c
   src/platform/window.c
   src/platform/clock.c
+  src/platform/offline.c
   src/platform/surface.c
   src/platform/text.c
   src/platform/textlayer.c
@@ -78,6 +79,7 @@ set(SOURCES
   src/dev/dev.c
   src/dev/replay.c
   src/dev/explore.c
+  src/dev/startsave.c
   src/dev/status.c
   ${GAME_SOURCES}
 )
@@ -183,6 +185,12 @@ add_test(NAME iso COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/iso.py"
   $<TARGET_FILE:nanpa2> $<TARGET_FILE:iso_check> $<TARGET_FILE:decode_all>
   "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/iso-test" "${NANPA2_ISO}")
 set_tests_properties(iso PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+
+# The start save (tests/startsave.py): --make-start-save writes the same FLAG0 and FLAG6 twice, from the
+# folder and from the image; existing saves are left alone.
+add_test(NAME startsave COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/startsave.py"
+  $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/startsave-test" "${NANPA2_ISO}")
+set_tests_properties(startsave PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
 
 # The iOS Xcode project compiles the same sources as this file lists, plus the iOS-specific ones
 # (tests/xcodeproj.py; regenerate with tools/gen_xcodeproj.py).

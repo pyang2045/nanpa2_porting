@@ -8,6 +8,7 @@
 #include "hooks.h"
 #include "platform/surface.h"
 #include "platform/clock.h"
+#include "platform/offline.h"
 #include "platform/window.h"
 #include "platform/present.h"
 #include "platform/textlayer.h"
@@ -43,6 +44,15 @@ uint32_t surf_create(int w, int h, int primary)
 	s->has_ckey = 0;
 	nsurf++;
 	return s->handle;
+}
+
+void surf_reset(void)
+{
+	for (int i = 0; i < nsurf; i++)
+		free(surfs[i].mem);
+	memset(surfs, 0, sizeof surfs);
+	nsurf = 0;
+	memset(palette, 0, sizeof palette);
 }
 
 static struct surf *surf_of(uint32_t handle)
@@ -148,6 +158,8 @@ void screen_present(int force)
 	static uint32_t last;
 	static uint8_t frame[SCREEN_W * SCREEN_H];
 	static uint32_t pal[256];
+	if (offline_on())
+		return;
 	uint32_t now = SDL_GetTicks();
 	if (!force && now - last < 16)
 		return;

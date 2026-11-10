@@ -29,6 +29,8 @@
 #define SURF_PRIMARY_HANDLE 0x0104b098u
 uint32_t surf_create(int w, int h, int primary);
 
+/* Free every surface and clear the palette (offline mode, platform/offline.h). */
+void surf_reset(void);
 /* The pixels of the surface and its pitch (bytes a row); NULL for an unknown handle. */
 uint8_t *surf_lock(uint32_t surface, int *pitch);
 /* The width and height of the surface; 0 for an unknown handle. */

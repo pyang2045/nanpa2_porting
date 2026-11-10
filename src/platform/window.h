@@ -75,6 +75,8 @@ void win_message_box(const char *text, const char *title);
 /* A message from outside the game (host, scripted input, the bot): recorded by --record, dropped
  * while replaying (dev/replay.h) */
 void win_post_ext(uint32_t msg, uint32_t wparam, uint32_t lparam);
+/* offline mode (platform/offline.h): empty the queue, stop the timer, forget the mouse */
+void win_reset(void);
 /* timer ticks run so far */
 uint32_t win_timer_ticks(void);
 /* run the 16 ms ticks that are due */
