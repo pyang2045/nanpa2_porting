@@ -15,11 +15,11 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-find_package(SDL2 REQUIRED)
+find_package(SDL3 REQUIRED CONFIG)
 
 # The engine is plain C: the game logic (src/game) runs on the game state G (state.h) and calls the
 # platform API (src/platform: files, surfaces, text, window, sound; docs/refactor.md). Nothing of the exe's
-# code is used, so the build needs neither the exe nor any tool beyond a C11 compiler and SDL2, and the
+# code is used, so the build needs neither the exe nor any tool beyond a C11 compiler and SDL3, and the
 # binary holds nothing of the game.
 # Python: for the tests.
 find_package(Python3 COMPONENTS Interpreter)
@@ -132,24 +132,13 @@ if(NANPA2_IOS)
   # no build paths in __FILE__ or debug info of the shipped binary
   target_compile_options(nanpa2 PRIVATE -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
 endif()
-if(TARGET SDL2::SDL2)
-  target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
-else()
-  target_include_directories(nanpa2 PRIVATE ${SDL2_INCLUDE_DIRS})
-  target_link_libraries(nanpa2 PRIVATE ${SDL2_LIBRARIES})
-endif()
-if(TARGET SDL2::SDL2main)
-  target_link_libraries(nanpa2 PRIVATE SDL2::SDL2main)
-endif()
+target_link_libraries(nanpa2 PRIVATE SDL3::SDL3)
 # Windows (untested, tools/build_msys2.sh): a GUI program, so no console
-# window opens next to the game (set NANPA2_LOG_FILE for the log); SDL2main
-# supplies WinMain and calls main (src/main.c includes <SDL.h>). Named
+# window opens next to the game (set NANPA2_LOG_FILE for the log); SDL3's
+# SDL_main.h (src/main.c) supplies WinMain and calls main. Named
 # nanpa2-port.exe so it can never overwrite the game's own nanpa2.exe, which
 # the port reads at run time.
 if(WIN32)
-  if(NOT TARGET SDL2::SDL2main AND NOT SDL2_LIBRARIES MATCHES "SDL2main")
-    message(FATAL_ERROR "SDL2main not found: the GUI program needs it for WinMain")
-  endif()
   set_target_properties(nanpa2 PROPERTIES WIN32_EXECUTABLE ON OUTPUT_NAME nanpa2-port)
 endif()
 if(APPLE)
@@ -240,15 +229,10 @@ set(_hflags "")
 if(CMAKE_OSX_SYSROOT)
   list(APPEND _hflags -isysroot "${CMAKE_OSX_SYSROOT}")
 endif()
-foreach(_d ${SDL2_INCLUDE_DIRS})
+get_target_property(_sdl_inc SDL3::Headers INTERFACE_INCLUDE_DIRECTORIES)
+foreach(_d ${_sdl_inc})
   list(APPEND _hflags -isystem ${_d})
 endforeach()
-if(TARGET SDL2::SDL2)
-  get_target_property(_sdl_inc SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
-  foreach(_d ${_sdl_inc})
-    list(APPEND _hflags -isystem ${_d})
-  endforeach()
-endif()
 add_test(NAME headers COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/headers.py"
   "${CMAKE_SOURCE_DIR}/src" "${CMAKE_C_COMPILER}" ${_hflags})
 set_tests_properties(headers PROPERTIES TIMEOUT 120)

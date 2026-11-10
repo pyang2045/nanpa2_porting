@@ -3,7 +3,7 @@
  * goes to a file and the game folder is looked up, or asked for once. */
 #include "launch.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +16,7 @@
 
 #define PATH_CAP 1024
 
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 #define UNUSED_ON_IOS __attribute__((unused))
 #else
 #define UNUSED_ON_IOS
@@ -47,7 +47,7 @@ int launch_in_bundle(void)
 		char *base = SDL_GetBasePath(); /* bundles: .../X.app/Contents/Resources/ */
 		known = base && strstr(base, ".app/Contents/") != NULL;
 		SDL_free(base);
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 		known = 1; /* an iOS app has no console: the log goes to the save folder */
 #endif
 	}
@@ -88,12 +88,12 @@ void launch_log_init(int argc, char **argv)
 	if (freopen(path, "a", stdout))
 		setvbuf(stdout, NULL, _IOLBF, 0);
 	log_file = stderr;
-	SDL_LogSetOutputFunction(log_output, NULL);
+	SDL_SetLogOutputFunction(log_output, NULL);
 	time_t now = time(NULL);
 	char when[64];
 	strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S %z", localtime(&now));
 	fprintf(stderr, "nanpa2 started %s, SDL %d.%d.%d\n", when, SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
-		SDL_PATCHLEVEL);
+		SDL_MICRO_VERSION);
 	char *base = SDL_GetBasePath();
 	fprintf(stderr, "executable folder: %s\narguments:", base ? base : "?");
 	SDL_free(base);
@@ -266,7 +266,7 @@ UNUSED_ON_IOS static int pick(void)
 	return 0;
 }
 
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 /* iOS/iPadOS: the game folder is copied into the app's Documents (Finder file sharing or the Files
  * app), either as a folder (Documents/game) or as its contents (Documents). */
 static const char *ios_game_dir(int interactive)
@@ -314,7 +314,7 @@ const char *launch_game_dir(const char *cli, int interactive)
 			message(text);
 		return NULL;
 	}
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 	return ios_game_dir(interactive);
 #else
 	char mem[PATH_CAP];

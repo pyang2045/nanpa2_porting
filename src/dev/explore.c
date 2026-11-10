@@ -25,7 +25,7 @@
  * the seed and frame numbers locate a problem, they do not replay it. */
 #include "dev/explore.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

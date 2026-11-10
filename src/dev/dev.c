@@ -20,7 +20,7 @@
  *       fast as the host can; NANPA2_TURBO is the old name), for long scripted runs
  *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -126,14 +126,14 @@ static uint32_t clock_now(void)
 
 static void save_frame(const uint8_t *frame, const uint32_t pal[256], const char *path)
 {
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
+	SDL_Surface *s = SDL_CreateSurface(SCREEN_W, SCREEN_H, SDL_PIXELFORMAT_XRGB8888);
 	for (int y = 0; y < SCREEN_H; y++) {
 		uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
 		for (int x = 0; x < SCREEN_W; x++)
 			row[x] = pal[frame[y * SCREEN_W + x]];
 	}
 	SDL_SaveBMP(s, path);
-	SDL_FreeSurface(s);
+	SDL_DestroySurface(s);
 }
 
 void dev_frame(const uint8_t *frame, const uint32_t pal[256])
