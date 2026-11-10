@@ -1628,3 +1628,29 @@ MUSIC\38.MP3 into the dump; iPad Pro 11 simulator build runs from `Documents/NAN
 screen (the simulator screenshot shows it sideways, the portrait simulator with a landscape app). Commits:
 04227b0, c388082, 4376cf0, b8cfeb8. Not tested: Windows, Linux, `dialog_sdl.c`, a real iPad, the smoke test
 (window occluded here), real keyboard/mouse/touch through SDL3 (scripted runs bypass SDL events).
+
+## 2026-11-10: text layer, review fixes
+
+Commits 09b2057 and c64f788 (merges of master 72ba125 and a207063, the fixes on top). Supersedes the
+validation and F11 details of the entry above.
+- Validation: a cell is shown only on an exact match, except pixels inside the game pointer's 32x32 sprite
+  (the position comes from `win_mouse_pos`, the last mouse message posted to the game, with 8 px of slack):
+  those are repainted if the cell keeps 70% of its ink and half its area. Differences anywhere else (a wipe
+  band, a page rewritten by the raw copies of `screen.c`/`wipe.c` with a look-alike character) hide the
+  cell; no global box, so stale cells cannot keep other cells strict. Unit tests for both cases.
+- An empty vector glyph (no outline, allocation failure) leaves the bitmap glyph; the atlas (4096x2048)
+  resets at most once per 120 layouts and what does not fit waits (bitmap) instead of being rasterised and
+  uploaded every frame (unit test: 400 cells of 192 px, at most one reset in 20 frames). Stats are published
+  under a sequence number for the status thread; the font/face fields of the glyph key are 3 bits with a
+  static assert.
+- The rasteriser is `platform/textraster.c` (stb_truetype static there and in `text.c`); `-O2` only on it and
+  `textlayer.c` (CMake, and `COMPILER_FLAGS` in the Xcode project by `tools/gen_xcodeproj.py`); `text.c`,
+  which makes the game's ink masks, keeps the project's flags. A replay recorded on master a207063 (33
+  checkpoints with the screen hash) replays on this branch; `--text bitmap` presenter output is `cmp`-identical
+  to master in the four display modes (16 in-game frames, 16 viewer frames).
+- Toggle: Shift+F12 (F11 is macOS's Show Desktop), a four-finger tap on iOS (untested on a device). `present_init`
+  fails soft: without the text pipelines or atlas the layer is off. `textlayer.c` and its test use no SDL
+  (`clock_host_ns`); `NANPA2_SHOT_PRESENT=1` writes what it did before (`prev_NNN.bmp` only with `=2`).
+- Not verified live: the desktop was locked and the display asleep here (status `desktop locked 1 asleep 1`,
+  window occluded, `presented 0`), so the Metal frame path ran only through `present_capture`; the status file
+  showed the validation running live (`valid 5-7`, worst 0.06 ms).
