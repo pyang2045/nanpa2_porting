@@ -27,7 +27,7 @@
 		567B0D9F79E07E85056AA6BB /* wipe.c in Sources */ = {isa = PBXBuildFile; fileRef = 0E209D83FB5C79430D7620CA; };
 		5709921C1427C06DD3121AA4 /* replay.c in Sources */ = {isa = PBXBuildFile; fileRef = 9FE35BEB72BDA2669DB97327; };
 		5C4FB9C82705721F7AC8CEA3 /* hash.c in Sources */ = {isa = PBXBuildFile; fileRef = 39C94BAD3708818DECCCA9B2; };
-		5E2605AEE56F7B2372177E57 /* SDL2.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C26E7B25E350ED7F0BA2FEEB; };
+		5E2605AEE56F7B2372177E57 /* SDL3.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79F4157A2B65C751282C7397; };
 		6254979DAE9CAF3AA4DE1029 /* CoreHaptics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 80B6DBB976F643074D7C8777; settings = {ATTRIBUTES = (Weak, ); }; };
 		6B07F60994C1F02EEEDACE25 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 16076C4DEC02EB27F0F52766; };
 		7267F8F582B57B15BC99989A /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D1F9B208B9F1E028E9E2D1C; };
@@ -122,6 +122,7 @@
 		6F329F4B6EFF56C53A42F06D /* replay.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = replay.h; sourceTree = "<group>"; };
 		701B3B8D102E77259C8E1E51 /* gp4.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = gp4.c; sourceTree = "<group>"; };
 		770C5B730A8FBE3C009C5372 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		79F4157A2B65C751282C7397 /* SDL3.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = third_party/SDL3.xcframework; sourceTree = "<group>"; };
 		7A4259FCA832A6058E843D68 /* AudioToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AudioToolbox.framework; path = System/Library/Frameworks/AudioToolbox.framework; sourceTree = SDKROOT; };
 		80B6DBB976F643074D7C8777 /* CoreHaptics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreHaptics.framework; path = System/Library/Frameworks/CoreHaptics.framework; sourceTree = SDKROOT; };
 		85CDA2AABD6D2B31D8755885 /* file.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = file.h; sourceTree = "<group>"; };
@@ -150,7 +151,6 @@
 		B7F0DC6103156CD5AFC0A83B /* expr.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = expr.h; sourceTree = "<group>"; };
 		BAEE3AFDFCBF12C9CFD052FB /* vm.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = vm.h; sourceTree = "<group>"; };
 		BDA38807E0FCAE2435A8D202 /* expr.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = expr.c; sourceTree = "<group>"; };
-		C26E7B25E350ED7F0BA2FEEB /* SDL2.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = third_party/SDL2.xcframework; sourceTree = "<group>"; };
 		C55DBA37B8F59999EBD5CD67 /* cinepak.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = cinepak.c; sourceTree = "<group>"; };
 		C6E454E9EF553543EE59C882 /* ops.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ops.c; sourceTree = "<group>"; };
 		C7E8BADB4947718B1623656C /* minimp3.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = minimp3.h; sourceTree = "<group>"; };
@@ -309,7 +309,7 @@
 				FCF662C1B5984ABB012E3BC4,
 				770C5B730A8FBE3C009C5372,
 				59DAA59D477A91E75E0468AF,
-				C26E7B25E350ED7F0BA2FEEB,
+				79F4157A2B65C751282C7397,
 				B687106895D06AA330DAFED5,
 				2F3A6B1E78F896718625FF06,
 			);

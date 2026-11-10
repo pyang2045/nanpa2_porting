@@ -44,9 +44,8 @@ int launch_in_bundle(void)
 {
 	static int known = -1;
 	if (known < 0) {
-		char *base = SDL_GetBasePath(); /* bundles: .../X.app/Contents/Resources/ */
+		const char *base = SDL_GetBasePath(); /* bundles: .../X.app/Contents/Resources/; not freed */
 		known = base && strstr(base, ".app/Contents/") != NULL;
-		SDL_free(base);
 #ifdef SDL_PLATFORM_IOS
 		known = 1; /* an iOS app has no console: the log goes to the save folder */
 #endif
@@ -60,11 +59,11 @@ static FILE *log_file;
 
 static void log_output(void *ud, int category, SDL_LogPriority priority, const char *msg)
 {
-	static const char *const names[] = { "", "VERBOSE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL" };
+	static const char *const names[] = { "", "TRACE", "VERBOSE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL" };
 	(void)ud;
 	(void)category;
 	const char *p = priority > 0 && priority < (int)(sizeof names / sizeof names[0]) ? names[priority] : "";
-	fprintf(log_file, "%7.3f %s: %s\n", SDL_GetTicks() / 1000.0, p, msg);
+	fprintf(log_file, "%7.3f %s: %s\n", (double)SDL_GetTicks() / 1000.0, p, msg);
 	fflush(log_file);
 }
 
@@ -94,9 +93,8 @@ void launch_log_init(int argc, char **argv)
 	strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S %z", localtime(&now));
 	fprintf(stderr, "nanpa2 started %s, SDL %d.%d.%d\n", when, SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
 		SDL_MICRO_VERSION);
-	char *base = SDL_GetBasePath();
+	const char *base = SDL_GetBasePath();
 	fprintf(stderr, "executable folder: %s\narguments:", base ? base : "?");
-	SDL_free(base);
 	for (int i = 1; i < argc; i++)
 		fprintf(stderr, " %s", argv[i]);
 	fprintf(stderr, "\n");
@@ -204,12 +202,11 @@ static void strip_last(char *p)
  * the repository's game/), each as itself and with "game" appended. */
 UNUSED_ON_IOS static int try_near_exe(void)
 {
-	char *base = SDL_GetBasePath();
+	const char *base = SDL_GetBasePath(); /* owned by SDL */
 	if (!base)
 		return 0;
 	char dir[PATH_CAP], cand[PATH_CAP + 8];
 	snprintf(dir, sizeof dir, "%s", base);
-	SDL_free(base);
 	int levels = launch_in_bundle() ? 5 : 2;
 	for (int i = 0; i < levels && dir[0]; i++) {
 		size_t n = strlen(dir);
@@ -237,7 +234,7 @@ static void message(const char *text)
 /* Folder picker until a folder validates or the player gives up. */
 UNUSED_ON_IOS static int pick(void)
 {
-	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
+	if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) /* SDL sets up the app first */
 		return 0;
 	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）或光碟映像檔 (.iso)\n"
 			     "Choose the 同級生２ game folder (with DATA) or the CD image (.iso)";
@@ -260,7 +257,7 @@ UNUSED_ON_IOS static int pick(void)
 		};
 		const SDL_MessageBoxData box = { SDL_MESSAGEBOX_ERROR, NULL, "同級生２", text, 2, buttons, NULL };
 		int b = 0;
-		if (SDL_ShowMessageBox(&box, &b) < 0 || b != 1)
+		if (!SDL_ShowMessageBox(&box, &b) || b != 1)
 			return 0;
 	}
 	return 0;
@@ -289,7 +286,7 @@ static const char *ios_game_dir(int interactive)
 	if (launch_pref_dir() && n > 0 && (size_t)n < sizeof text)
 		snprintf(text + n, sizeof text - (size_t)n, "\n\nLog: %s/nanpa2.log", launch_pref_dir());
 	fprintf(stderr, "%s\ntried:\n%s", text, tried);
-	if (interactive && SDL_InitSubSystem(SDL_INIT_VIDEO) == 0)
+	if (interactive && SDL_InitSubSystem(SDL_INIT_VIDEO))
 		message(text);
 	return NULL;
 }

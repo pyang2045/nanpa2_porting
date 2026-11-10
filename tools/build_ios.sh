@@ -20,8 +20,8 @@
 # for sideloading tools that re-sign it with your own Apple ID (Sideloadly, AltStore/SideStore, or
 # Xcode's Devices window > + for a personal team): README "Sideloading". No Apple account needed here.
 #
-# SDL2 is not bundled: tools/fetch_sdl.sh (run here if needed) puts the official release source in
-# ios/third_party/SDL2, which the project builds as a subproject. Needs Xcode only. The app holds none
+# SDL3 is not bundled: tools/fetch_sdl.sh (run here if needed) puts the official release source in
+# ios/third_party/SDL3, which the project builds as a subproject. Needs Xcode only. The app holds none
 # of the game: copy your game folder into the app's Documents (README "iPad").
 set -eu
 
@@ -46,7 +46,7 @@ done
 for t in xcodebuild xcrun; do
 	command -v "$t" >/dev/null 2>&1 || { echo "build_ios: $t not found (install Xcode)" >&2; exit 1; }
 done
-[ -d "$here/ios/third_party/SDL2.xcframework" ] || "$here/tools/fetch_sdl.sh"
+[ -d "$here/ios/third_party/SDL3.xcframework" ] || "$here/tools/fetch_sdl.sh"
 
 if [ "$device" = 1 ]; then
 	sdk=iphoneos

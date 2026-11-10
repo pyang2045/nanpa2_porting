@@ -144,13 +144,10 @@ int present_init(SDL_Window *win)
 	}
 	window = win;
 	present_common_init(win);
-	renderer = SDL_CreateRenderer(win, -1,
-				      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC |
-					      SDL_RENDERER_TARGETTEXTURE);
-	if (!renderer)
-		renderer = SDL_CreateRenderer(win, -1, 0);
+	renderer = SDL_CreateRenderer(win, NULL);
 	if (!renderer)
 		return 0;
+	SDL_SetRenderVSync(renderer, 1); /* best effort */
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING,
 				    SCREEN_W, SCREEN_H);
 	if (!texture)
@@ -172,7 +169,7 @@ static void draw(int ow, int oh)
 	SDL_Texture *target = SDL_GetRenderTarget(renderer);
 	int x, y, w, h;
 	present_fit(ow, oh, &x, &y, &w, &h);
-	SDL_Rect dst = { x, y, w, h };
+	SDL_FRect dst = { (float)x, (float)y, (float)w, (float)h };
 
 	int mode = disp_mode, crt = mode <= DISPLAY_CRT_480;
 	int bw = SCREEN_W, bh = SCREEN_H; /* the CRT raster: the game's, or CRT HD's virtual one */
@@ -247,7 +244,7 @@ static void draw(int ow, int oh)
 	if (ms > 0.01f) {
 		make_grille(ow, ms);
 		if (grille) {
-			SDL_Rect src = { x, 0, w, 1 };
+			SDL_FRect src = { (float)x, 0, (float)w, 1 };
 			SDL_RenderTexture(renderer, grille, &src, &dst);
 		}
 	}
@@ -256,7 +253,7 @@ static void draw(int ow, int oh)
 	Uint8 wire = (Uint8)((1.0f - 0.22f * cover) * 255.0f + 0.5f);
 	SDL_SetRenderDrawColor(renderer, wire, wire, wire, 255);
 	for (int i = 1; i <= 2; i++) {
-		SDL_Rect r = { x, y + h * i / 3, w, 1 };
+		SDL_FRect r = { (float)x, (float)(y + h * i / 3), (float)w, 1 };
 		SDL_RenderFillRect(renderer, &r);
 	}
 	if (vignette)
@@ -287,7 +284,7 @@ void present_frame_rgb(const uint32_t *xrgb)
 	SDL_UpdateTexture(texture, NULL, xrgb, SCREEN_W * 4);
 	present_note_in(present_luma_rgb(xrgb));
 	int ow, oh;
-	if (SDL_GetCurrentRenderOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0) {
+	if (!SDL_GetCurrentRenderOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0) {
 		pstats.skip_size++;
 		return;
 	}
@@ -314,15 +311,19 @@ int present_capture(const char *bmp_path, int w, int h)
 	if (soft)
 		return soft_capture(bmp_path, w, h);
 	if (w <= 0 || h <= 0)
-		if (SDL_GetCurrentRenderOutputSize(renderer, &w, &h))
+		if (!SDL_GetCurrentRenderOutputSize(renderer, &w, &h))
 			return 0;
 	SDL_Texture *t = make_target(w, h, SDL_SCALEMODE_NEAREST);
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+	SDL_Surface *s = NULL;
 	int ok = 0;
-	if (t && s && !SDL_SetRenderTarget(renderer, t)) {
+	if (t && SDL_SetRenderTarget(renderer, t)) {
 		draw(w, h);
-		ok = !SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) &&
-		     !SDL_SaveBMP(s, bmp_path);
+		SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+		if (raw) {
+			s = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+			SDL_DestroySurface(raw);
+		}
+		ok = s && SDL_SaveBMP(s, bmp_path);
 		SDL_SetRenderTarget(renderer, NULL);
 	}
 	SDL_DestroySurface(s);
@@ -333,9 +334,9 @@ int present_capture(const char *bmp_path, int w, int h)
 
 const char *present_name(void)
 {
-	SDL_RendererInfo info;
-	if (renderer && !SDL_GetRendererInfo(renderer, &info))
-		SDL_snprintf(name, sizeof name, "SDL_Renderer (%s)", info.name);
+	const char *rn = renderer ? SDL_GetRendererName(renderer) : NULL;
+	if (rn)
+		SDL_snprintf(name, sizeof name, "SDL_Renderer (%s)", rn);
 	return name;
 }
 

@@ -35,9 +35,9 @@ HEADERS = sorted(
 )
 TP_HEADERS = sorted(f for f in os.listdir(os.path.join(ROOT, "third_party")) if f.endswith(".h"))
 
-SDL_XCF = "third_party/SDL2.xcframework"  # built by tools/fetch_sdl.sh, gitignored
+SDL_XCF = "third_party/SDL3.xcframework"  # built by tools/fetch_sdl.sh, gitignored
 
-# (name, weak): what SDL's iOS build needs (sdl2-config --static-libs) plus ours.
+# (name, weak): what SDL's iOS build needs (sdl3-config --static-libs) plus ours.
 FRAMEWORKS = [("AudioToolbox", 0), ("AVFoundation", 0), ("CoreAudio", 0), ("CoreBluetooth", 0),
               ("CoreFoundation", 0), ("CoreGraphics", 0), ("CoreHaptics", 1), ("CoreMotion", 0),
               ("CoreVideo", 0), ("Foundation", 0), ("GameController", 1), ("Metal", 0),
@@ -126,8 +126,8 @@ plist_ref = add("ref:Info.plist", "Info.plist", {
 assets_ref = add("ref:Assets.xcassets", "Assets.xcassets", {
     "isa": "PBXFileReference", "lastKnownFileType": "folder.assetcatalog", "path": "Assets.xcassets",
     "sourceTree": "<group>"}, True)
-# SDL2.xcframework (static libSDL2 + SDL2main for device and simulator): tools/fetch_sdl.sh builds it
-sdl_xcf = add("ref:SDL2.xcframework", "SDL2.xcframework", {
+# SDL3.xcframework (static libSDL3 + SDL3main for device and simulator): tools/fetch_sdl.sh builds it
+sdl_xcf = add("ref:SDL3.xcframework", "SDL3.xcframework", {
     "isa": "PBXFileReference", "lastKnownFileType": "wrapper.xcframework", "path": SDL_XCF,
     "sourceTree": "<group>"}, True)
 
@@ -166,7 +166,7 @@ for n, weak, i in fw_refs:
         d["settings"] = "@WEAK@"
     fw_build.append(bf("fw:" + n, n + ".framework in Frameworks", d))
 iconv_bf = bf("fw:iconv", "libiconv.tbd in Frameworks", {"fileRef": iconv_ref})
-sdl_bf = bf("fw:sdl", "SDL2.xcframework in Frameworks", {"fileRef": sdl_xcf})
+sdl_bf = bf("fw:sdl", "SDL3.xcframework in Frameworks", {"fileRef": sdl_xcf})
 assets_bf = bf("res:assets", "Assets.xcassets in Resources", {"fileRef": assets_ref})
 
 sources_phase = add("phase:sources", "Sources", {
