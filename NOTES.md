@@ -1454,7 +1454,8 @@ Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, RE
 ## 2026-11-10: high-resolution text layer
 
 Commits 784c29d (tracking, validation, glyph atlas, unit test), 57fbc1c (Metal presenter, `--text`/F11,
-preference, status, README). Platform and presenter only; the one touch in `src/game/text.c` is a call
+preference, status, README), 65d5815 (Sharp/Smooth viewport fix on letterboxed outputs, strict validation
+with a pointer-sized overlay exception, iOS guard). Platform and presenter only; the one touch in `src/game/text.c` is a call
 after the cell copy of 0x401900 that tells the platform where the cell went (`text_cell_placed`).
 - Problem: 0x401900 copies an opaque N x N cell of 1-bit glyph (fg where the scratch pixel is set, bg
   elsewhere) into the 640x480 screen; at 1280x960 and up the 1-pixel strokes smear. Design:
