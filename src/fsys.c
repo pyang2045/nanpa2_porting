@@ -1,8 +1,10 @@
 #include "fsys.h"
+#include "iso.h"
 #include "lzh.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #ifndef _WIN32
 #include <dirent.h>
 #include <strings.h>
@@ -16,6 +18,26 @@ void fsys_set_root(const char *dir)
 	size_t n = strlen(root);
 	while (n > 1 && (root[n - 1] == '/' || root[n - 1] == '\\'))
 		root[--n] = 0;
+	/* a regular file is the CD image (iso.h); a folder is the extracted CD */
+	struct stat st;
+	if (!stat(root, &st) && S_ISREG(st.st_mode)) {
+		if (!iso_mount(root))
+			iso_unmount();
+	} else
+		iso_unmount();
+}
+
+int fsys_is_iso(void)
+{
+	return iso_mounted();
+}
+
+int fsys_list_iso(const char *dir, void (*cb)(const char *name, void *arg), void *arg)
+{
+	if (!iso_mounted())
+		return 0;
+	iso_list(dir, cb, arg);
+	return 1;
 }
 
 const char *fsys_root(void)
@@ -78,11 +100,17 @@ static int resolve(const char *rel, char *out, size_t cap)
 
 int fsys_path(const char *rel, char *out, size_t cap)
 {
+	if (iso_mounted()) {
+		snprintf(out, cap, "%s:%s", iso_image_path(), rel);
+		return iso_stat(rel, NULL, NULL);
+	}
 	return resolve(rel, out, cap);
 }
 
 FILE *fsys_open(const char *rel)
 {
+	if (iso_mounted())
+		return iso_fopen(rel);
 	char path[1024];
 	resolve(rel, path, sizeof path);
 	return fopen(path, "rb");
@@ -90,6 +118,8 @@ FILE *fsys_open(const char *rel)
 
 unsigned char *fsys_read(const char *rel, size_t *len)
 {
+	if (iso_mounted())
+		return iso_read(rel, len);
 	FILE *f = fsys_open(rel);
 	if (!f)
 		return NULL;

@@ -93,8 +93,18 @@ static void add_name(const char *name)
 	names[name_count++] = strdup(name);
 }
 
+static void add_name_cb(const char *name, void *arg)
+{
+	(void)arg;
+	add_name(name);
+}
+
 static void list_gp4(void)
 {
+	if (fsys_list_iso("DATA", add_name_cb, NULL)) { /* the root is a .iso */
+		qsort(names, name_count, sizeof *names, cmp_name);
+		return;
+	}
 #ifdef _WIN32
 	char path[1100];
 	snprintf(path, sizeof path, "%s\\DATA\\*.GP4", fsys_root());

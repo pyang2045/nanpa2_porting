@@ -890,3 +890,19 @@ plain C:
   0x456, the base palette 0x494, the four segment bases 0x4c4 (the only addresses in it; rewritten by the VM
   set-up after every load), the last picture rectangle 0x512, the work buffer 0x51e. The words 0x445a78-0x445cdc
   after it and the native top ESP at 0x445cdc are not saved.
+
+
+## ISO image (src/iso.c, behind fsys)
+
+The CD image is plain ISO 9660 with cooked 2048-byte sectors and a Joliet supplementary descriptor
+(sector 17; escape `%/@`, `%/C` or `%/E`), which is used when present (UCS-2 big-endian names, mixed case,
+the Chinese-named .htm). Volume descriptors start at sector 16 ("CD001"); the root directory record sits at
+offset 156 of the descriptor (extent LE at +2, length LE at +10). A directory is a run of records
+(length byte, extended-attribute length at +1, extent +2, size +10, flags +25, name length +32, name +33),
+none crossing a sector, a zero length byte skipping to the next sector; flag 0x02 is a directory, 0x80
+(multi-extent) does not occur in this image. Every file is one contiguous extent; names end in `;1` (ISO
+tree) and are matched case-insensitively. All 12 357 files under DATA, MUSIC and SPEECH read byte-identical
+to the extracted folder. The root holds the CD's installer files and `LOGO.AVI`, but no FLAG files (they are
+in `data1.cab`, not parsed: the engine generates blank saves, see "Save files"). Mounting walks and sorts the
+12 394 entries once (about 5 ms warm); a read is one pread; `fsys_open` returns a seekable cookie stream
+(funopen on Apple/BSD, fopencookie on glibc/musl/bionic, a deleted-on-close temp file on Windows).
