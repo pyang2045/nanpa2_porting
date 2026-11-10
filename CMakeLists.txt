@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 project(nanpa2 C)
 
+# iOS / iPadOS (tools/build_ios.sh): CMAKE_SYSTEM_NAME=iOS. APPLE is true there too, so the macOS-only parts
+# (AppKit, the folder picker, bundle_macos.sh) test NANPA2_MACOS.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+  set(NANPA2_IOS ON)
+elseif(APPLE)
+  set(NANPA2_MACOS ON)
+endif()
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -82,13 +90,29 @@ if(APPLE AND NOT NANPA2_SDL_RENDERER)
 else()
   list(APPEND SOURCES src/platform/present_sdl.c)
 endif()
-if(APPLE)
+if(NANPA2_MACOS)
   list(APPEND SOURCES src/platform/desktop_macos.c src/platform/dialog_macos.m)
 else()
   list(APPEND SOURCES src/platform/dialog_none.c)
 endif()
+if(NANPA2_IOS)
+  list(APPEND SOURCES src/platform/docs_ios.m)
+endif()
 
-add_executable(nanpa2 ${SOURCES})
+if(NANPA2_IOS)
+  # the .app: Info.plist from cmake/Info.ios.plist.in (landscape, full screen, file sharing)
+  set(NANPA2_APP_NAME "同級生２")
+  set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
+  set(NANPA2_IOS_MIN "13.0" CACHE STRING "Minimum iOS version")
+  configure_file(cmake/Info.ios.plist.in "${CMAKE_BINARY_DIR}/Info.ios.plist" @ONLY)
+  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES})
+  set_target_properties(nanpa2 PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.ios.plist"
+    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${NANPA2_APP_ID}")
+else()
+  add_executable(nanpa2 ${SOURCES})
+endif()
 target_include_directories(nanpa2 PRIVATE src third_party)
 if(TARGET SDL2::SDL2)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
@@ -112,7 +136,12 @@ if(WIN32)
 endif()
 if(APPLE)
   target_compile_options(nanpa2 PRIVATE $<$<COMPILE_LANGUAGE:OBJC>:-fobjc-arc>)
-  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework AppKit" "-framework CoreGraphics" "-framework CoreFoundation" iconv)
+  target_link_libraries(nanpa2 PRIVATE "-framework Metal" "-framework QuartzCore" "-framework Foundation" "-framework CoreGraphics" "-framework CoreFoundation" iconv)
+endif()
+if(NANPA2_MACOS)
+  target_link_libraries(nanpa2 PRIVATE "-framework AppKit")
+elseif(NANPA2_IOS)
+  target_link_libraries(nanpa2 PRIVATE "-framework UIKit")
 endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(nanpa2 PRIVATE m) # stb_truetype, minimp3
@@ -124,7 +153,7 @@ endif()
 # It holds no game data (the game folder is found or asked for at run time,
 # see src/launch.c). It holds nothing of the game either (test no_game_bytes).
 #   ninja -C build nanpa2_app        or configure with -DNANPA2_APP_BUNDLE=ON
-if(APPLE)
+if(NANPA2_MACOS)
   option(NANPA2_APP_BUNDLE "Build build/同級生２.app with the default target" OFF)
   set(NANPA2_APP_NAME "同級生２")
   set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
@@ -141,8 +170,10 @@ if(APPLE)
     VERBATIM)
 endif()
 
-add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
-target_include_directories(decode_all PRIVATE src)
+if(NOT NANPA2_IOS)
+  add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
+  target_include_directories(decode_all PRIVATE src)
+endif()
 
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
@@ -201,7 +232,7 @@ set_tests_properties(wavcheck PROPERTIES TIMEOUT 30)
   # run of the exe's sections is looked for (tests/no_game_bytes.py). Needs
   # the exe in the game folder to compare with; skipped without it.
   set(_scan $<TARGET_FILE:nanpa2>)
-  if(APPLE)
+  if(NANPA2_MACOS)
     list(APPEND _scan "${NANPA2_APP_DIR}")
   endif()
   add_test(NAME no_game_bytes COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/no_game_bytes.py"

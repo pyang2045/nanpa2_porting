@@ -29,7 +29,11 @@ static int crt = 1;
 
 Uint32 present_window_flags(void)
 {
+#ifdef __IPHONEOS__
+	return SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS;
+#else
 	return 0;
+#endif
 }
 
 static char name[64];

@@ -1411,3 +1411,23 @@ the state) and `rclick` events in `NANPA2_INPUT` (now also log `RP`, keyed by th
 - No pacing constants, waits or throttle changed; goldens unchanged (`li.*`, `raw.clock`). A windowed run
   could not be measured here (headless only); the Metal presenter's `nextDrawable` wait is in the status
   file (`worst_wait_ms`) for a real instance.
+
+## 2026-11-10 (iOS / iPadOS build)
+
+- `tools/build_ios.sh` (0f76dfc): downloads SDL2 2.32.10 into the gitignored `build-ios/`, builds it
+  statically for the iOS simulator (host architecture) or device, then the app (CMake `NANPA2_IOS`, plist
+  `cmake/Info.ios.plist.in`: landscape, full screen, `UIFileSharingEnabled`, `LSSupportsOpeningDocumentsInPlace`).
+  `--device` uses the Xcode generator and `DEVELOPMENT_TEAM`; untested here (no signing).
+- Game data (Option A): `launch_game_dir` on iOS checks `<Documents>/game` then `<Documents>`
+  (`platform/docs.h`, `docs_ios.m`); otherwise a bilingual message box. Saves, `game-folder.txt` and
+  `nanpa2.log` stay in the pref folder.
+- Presenter: `present_metal.m` is shared; AppKit occlusion/NSApp parts are `TARGET_OS_OSX`, iOS uses
+  UIApplication state and shared-storage textures (no `MTLStorageModeManaged`). `NANPA2_MACOS` keeps
+  AppKit, the folder picker, `desktop_macos.c` and `bundle_macos.sh` macOS-only. macOS `--crt-shot` output
+  is byte-identical before and after; ctest 8/8.
+- Touch (`window.c`): SDL's touch-mouse events are off; tap = left click, hold/drag = left held, two-finger
+  tap = right click, three-finger tap = CRT toggle; positions via the presenter letterbox. Background:
+  music paused, pump idles (SDL_APP_WILLENTERBACKGROUND watch).
+- Simulator (iPad Pro 11" M4, iOS 17.4 runtime on an Intel Mac): `Renderer: Metal | Apple iOS simulator GPU`,
+  game starts from `Documents/game` and reaches the name-entry screen, CRT on and `--no-crt`; the missing-data
+  message shows. Touch gestures could not be injected (simctl has no touch), so they are untested.

@@ -6,9 +6,24 @@
 #include "present_common.h"
 
 #include <SDL_metal.h>
+#import <TargetConditionals.h>
+#if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
+#else
+#import <UIKit/UIKit.h>
+#endif
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
+
+/* CPU read-back textures (probe, present_capture): macOS needs a managed texture and a blit
+ * synchronize; on iOS (unified memory) a shared texture is already visible to the CPU. */
+#if TARGET_OS_OSX
+#define READBACK_STORAGE MTLStorageModeManaged
+#define SYNC_FOR_CPU(blit, tex) [(blit) synchronizeResource:(tex)]
+#else
+#define READBACK_STORAGE MTLStorageModeShared
+#define SYNC_FOR_CPU(blit, tex) ((void)0)
+#endif
 
 static SDL_Window *window;
 static SDL_MetalView view;
@@ -321,13 +336,19 @@ static id<MTLTexture> make_texture(MTLPixelFormat fmt, int w, int h, MTLTextureU
 										     height:(NSUInteger)h
 										  mipmapped:NO];
 	td.usage = usage;
-	td.storageMode = usage & MTLTextureUsageRenderTarget ? MTLStorageModePrivate : MTLStorageModeManaged;
+	td.storageMode = usage & MTLTextureUsageRenderTarget ? MTLStorageModePrivate : READBACK_STORAGE;
 	return [device newTextureWithDescriptor:td];
 }
 
 Uint32 present_window_flags(void)
 {
+#if TARGET_OS_OSX
 	return present_headless() ? 0 : SDL_WINDOW_METAL;
+#else
+	/* iOS: a full-screen Metal window; the view's layer is sized from its bounds x the display scale */
+	return present_headless() ? 0 : SDL_WINDOW_METAL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS |
+						 SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
 }
 
 int present_init(SDL_Window *win)
@@ -457,7 +478,7 @@ static void probe(void)
 									  height:SCREEN_H
 								       mipmapped:NO];
 		td.usage = MTLTextureUsageRenderTarget;
-		td.storageMode = MTLStorageModeManaged;
+		td.storageMode = READBACK_STORAGE;
 		probe_tex = [device newTextureWithDescriptor:td];
 		if (!probe_tex)
 			return;
@@ -468,7 +489,7 @@ static void probe(void)
 	encode(cb, probe_tex, SCREEN_W, SCREEN_H);
 	crt = saved_crt;
 	id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
-	[bl synchronizeResource:probe_tex];
+	SYNC_FOR_CPU(bl, probe_tex);
 	[bl endEncoding];
 	[cb commit];
 	[cb waitUntilCompleted];
@@ -538,8 +559,14 @@ static void show(void)
 		/* nextDrawable blocks up to its 1 s timeout while the window is
 		 * covered, which would stall the game; skip until it is visible.
 		 * The textures hold the frame, so the next call shows it. */
+#if TARGET_OS_OSX
 		NSWindow *nsw = ((__bridge NSView *)view).window;
 		pstats.occluded = nsw && !(nsw.occlusionState & NSWindowOcclusionStateVisible);
+#else
+		/* iOS: no window occlusion; the background is handled in window.c (no pump work, no
+		 * presenting) and the app state is checked here */
+		pstats.occluded = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
+#endif
 		if (pstats.occluded) {
 			pstats.skip_occluded++;
 			probe();
@@ -567,6 +594,7 @@ static void show(void)
 void present_stats(struct present_stats *out)
 {
 	@autoreleasepool {
+#if TARGET_OS_OSX
 		NSWindow *nsw = ((__bridge NSView *)view).window;
 		if (nsw)
 			pstats.occluded = !(nsw.occlusionState & NSWindowOcclusionStateVisible);
@@ -575,6 +603,10 @@ void present_stats(struct present_stats *out)
 			n += w.visible ? 1 : 0;
 		pstats.os_windows = n;
 		pstats.app_hidden = NSApp.hidden ? 1 : 0;
+#else
+		pstats.os_windows = 1;
+		pstats.app_hidden = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
+#endif
 		*out = pstats;
 	}
 }
@@ -592,14 +624,14 @@ int present_capture(const char *bmp_path, int w, int h)
 									  height:(NSUInteger)h
 								       mipmapped:NO];
 		td.usage = MTLTextureUsageRenderTarget;
-		td.storageMode = MTLStorageModeManaged;
+		td.storageMode = READBACK_STORAGE;
 		id<MTLTexture> t = [device newTextureWithDescriptor:td];
 		if (!t)
 			return 0;
 		id<MTLCommandBuffer> cb = [queue commandBuffer];
 		encode(cb, t, w, h);
 		id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
-		[bl synchronizeResource:t];
+		SYNC_FOR_CPU(bl, t);
 		[bl endEncoding];
 		[cb commit];
 		[cb waitUntilCompleted];
