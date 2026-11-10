@@ -17,11 +17,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJ = os.path.join(ROOT, "ios", "nanpa2.xcodeproj")
 
 # Paths are relative to src/. Keep in step with CMakeLists.txt (tests/xcodeproj.py fails when they drift):
-# the portable sources, then the ones the iOS build picks (present_metal.m, dialog_none.c, docs_ios.m).
+# the portable sources, then the ones the iOS build picks (present_metal.m, dialog_sdl.c, docs_ios.c).
 SOURCES = """
 main.c launch.c lzh.c gp4.c fsys.c iso.c trap.c hooks.c hash.c cinepak.c
 platform/files.c platform/window.c platform/clock.c platform/surface.c platform/text.c platform/logo.c
-platform/sound.c platform/present_metal.m platform/dialog_none.c platform/docs_ios.m
+platform/sound.c platform/present_metal.m platform/dialog_sdl.c platform/docs_ios.c
 dev/dev.c dev/replay.c dev/explore.c dev/status.c
 game/ctl.c game/expr.c game/vm.c game/ops.c game/ops_sys.c game/ops_vm.c game/loop.c game/text.c
 game/anim.c game/file.c game/startup.c game/map.c game/map_draw.c game/map_move.c game/map_path.c

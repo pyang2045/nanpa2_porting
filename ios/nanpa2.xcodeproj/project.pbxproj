@@ -16,7 +16,6 @@
 		2D9ED176F8CD1F91B19656A3 /* startup.c in Sources */ = {isa = PBXBuildFile; fileRef = D43AD2D896E359B2C69E3ED9; };
 		2E6CCB27AECCE1D8498ECABE /* file.c in Sources */ = {isa = PBXBuildFile; fileRef = D0EF3986C3E39967B8426F28; };
 		31728D4E5D53D79F8645BE6A /* screen.c in Sources */ = {isa = PBXBuildFile; fileRef = A2D1853DBF70C6C9F9CB6DB8; };
-		31A31733C1D8D663C6E157E1 /* docs_ios.m in Sources */ = {isa = PBXBuildFile; fileRef = EE573ECB60F8412BD6451BE8; };
 		31F37C4D2224263F1EF80792 /* ops.c in Sources */ = {isa = PBXBuildFile; fileRef = C6E454E9EF553543EE59C882; };
 		348C5D184634F903C73F15EA /* hooks.c in Sources */ = {isa = PBXBuildFile; fileRef = CE0A440C21E3D7111AB68AC8; };
 		3A959B5453AC5EC1211B3933 /* OpenGLES.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 68A0358A21DC380A232A9DCF; };
@@ -29,6 +28,7 @@
 		5C4FB9C82705721F7AC8CEA3 /* hash.c in Sources */ = {isa = PBXBuildFile; fileRef = 39C94BAD3708818DECCCA9B2; };
 		5E2605AEE56F7B2372177E57 /* SDL3.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 79F4157A2B65C751282C7397; };
 		6254979DAE9CAF3AA4DE1029 /* CoreHaptics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 80B6DBB976F643074D7C8777; settings = {ATTRIBUTES = (Weak, ); }; };
+		676346156CCD906845A10EE0 /* docs_ios.c in Sources */ = {isa = PBXBuildFile; fileRef = 266BA5DE85A79AACA0DC3EAB; };
 		6B07F60994C1F02EEEDACE25 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 16076C4DEC02EB27F0F52766; };
 		7267F8F582B57B15BC99989A /* CoreAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D1F9B208B9F1E028E9E2D1C; };
 		80B930A90F378E902A7B3283 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CDC726E5958CFE9BA43AA63D; };
@@ -43,6 +43,7 @@
 		9397E2AC9D8FA0AFAF00CF80 /* CoreFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1AF0DD96190EEB610A967498; };
 		984FE160A4B37221292688AE /* map_draw.c in Sources */ = {isa = PBXBuildFile; fileRef = F5B62DD980598F82D8A00C66; };
 		9982A6DD5D77F43F87C1B5C0 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F2F21D4C1E837C94F7D4162E; };
+		9FEEEA8FCF5FE585E2CA113A /* dialog_sdl.c in Sources */ = {isa = PBXBuildFile; fileRef = FA4FFE21244877DA81C63933; };
 		A5E76539C8ADE49D2F8D37A8 /* gp4.c in Sources */ = {isa = PBXBuildFile; fileRef = 701B3B8D102E77259C8E1E51; };
 		A8ACEE86E90050585B80D199 /* fsys.c in Sources */ = {isa = PBXBuildFile; fileRef = A4594A1F47AA73FBE9BBA29E; };
 		BB9B44B247DB36C12DE6ECE5 /* status.c in Sources */ = {isa = PBXBuildFile; fileRef = 3F039564C279732EDE07FC5E; };
@@ -66,7 +67,6 @@
 		ED66004B506CE06F23D9F6C2 /* logo.c in Sources */ = {isa = PBXBuildFile; fileRef = 5A7BA20FAC34094CC9980151; };
 		F0B926401CB56064D47B9814 /* map_move.c in Sources */ = {isa = PBXBuildFile; fileRef = 97611D8A543307AB3C6D24D0; };
 		F256C2AB6A874884E12F6E01 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F295A3D5A73BD867EB5B24FE; };
-		F582778DA2A44860233ACB96 /* dialog_none.c in Sources */ = {isa = PBXBuildFile; fileRef = A870726EA2D2B6E689C0C5C1; };
 		F8EECB832FD96CE86BCD377F /* vm.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D4AA122B437CDED73049EAF; };
 		FAA1F243C6AC2347F0C25F34 /* loop.c in Sources */ = {isa = PBXBuildFile; fileRef = 230028D9473E494C51CA2B20; };
 		FF467815F1A447E2601D2BED /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 59DAA59D477A91E75E0468AF; };
@@ -93,6 +93,7 @@
 		21656C82276F7169A891CE0F /* anim.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = anim.c; sourceTree = "<group>"; };
 		230028D9473E494C51CA2B20 /* loop.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = loop.c; sourceTree = "<group>"; };
 		24D534C461B36ECAB760BBFB /* timer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = timer.c; sourceTree = "<group>"; };
+		266BA5DE85A79AACA0DC3EAB /* docs_ios.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = docs_ios.c; sourceTree = "<group>"; };
 		267680D0663BBA14ACF67B43 /* nanpa2.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = nanpa2.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2AA1F6CA414F5142BED21266 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		2B21099E078A335F38C460BF /* gmem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gmem.h; sourceTree = "<group>"; };
@@ -139,7 +140,6 @@
 		A2D1853DBF70C6C9F9CB6DB8 /* screen.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = screen.c; sourceTree = "<group>"; };
 		A443E3F442D93F1BB625DB5D /* text.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = text.h; sourceTree = "<group>"; };
 		A4594A1F47AA73FBE9BBA29E /* fsys.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fsys.c; sourceTree = "<group>"; };
-		A870726EA2D2B6E689C0C5C1 /* dialog_none.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = dialog_none.c; sourceTree = "<group>"; };
 		A8BCD1A0FACF107C666179EB /* map_path.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = map_path.c; sourceTree = "<group>"; };
 		A8D3459773E09BC140E7EEEB /* files.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = files.h; sourceTree = "<group>"; };
 		AA7C3467215B6A4158FADDB5 /* hooks.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hooks.h; sourceTree = "<group>"; };
@@ -171,12 +171,12 @@
 		EC9419E5A7EF9F86C952B71E /* map.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = map.h; sourceTree = "<group>"; };
 		ECD43AE65A1818807C939012 /* ops_sys.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ops_sys.c; sourceTree = "<group>"; };
 		EDD4E72280B9E6104A839F15 /* window.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = window.h; sourceTree = "<group>"; };
-		EE573ECB60F8412BD6451BE8 /* docs_ios.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = docs_ios.m; sourceTree = "<group>"; };
 		EEE0A9F7721E743AF164059E /* present_common.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = present_common.h; sourceTree = "<group>"; };
 		F295A3D5A73BD867EB5B24FE /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
 		F2F21D4C1E837C94F7D4162E /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		F5861D081C1256A5DD660D90 /* state_view.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = state_view.c; sourceTree = "<group>"; };
 		F5B62DD980598F82D8A00C66 /* map_draw.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = map_draw.c; sourceTree = "<group>"; };
+		FA4FFE21244877DA81C63933 /* dialog_sdl.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = dialog_sdl.c; sourceTree = "<group>"; };
 		FFD8E3D0973A05F25F821E10 /* sound.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = sound.h; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -322,9 +322,9 @@
 				325F3E1475A3FC2AA267D120,
 				11F18E971527B244BC072721,
 				087A7B2E81B24EA08C80B9B4,
-				A870726EA2D2B6E689C0C5C1,
+				FA4FFE21244877DA81C63933,
 				3B161BB320277B5CA918E02F,
-				EE573ECB60F8412BD6451BE8,
+				266BA5DE85A79AACA0DC3EAB,
 				ACAB6145FBAECFA46F7CA3CE,
 				A8D3459773E09BC140E7EEEB,
 				5A7BA20FAC34094CC9980151,
@@ -479,8 +479,8 @@
 				18A99392C43755FECC2AFDD3,
 				4ADF065A2CAC30886F934261,
 				E5F6B5F9D812AB0717CE95FB,
-				F582778DA2A44860233ACB96,
-				31A31733C1D8D663C6E157E1,
+				9FEEEA8FCF5FE585E2CA113A,
+				676346156CCD906845A10EE0,
 				0296AA5147BCED2789D13E32,
 				ED66004B506CE06F23D9F6C2,
 				82A82024D0BFFEC82132BF7F,

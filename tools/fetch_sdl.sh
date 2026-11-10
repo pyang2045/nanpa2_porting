@@ -50,7 +50,7 @@ for sdk in iphoneos iphonesimulator; do
 	cmake -S "$tmp/src" -B "$b" -G Ninja -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sysroot" \
 		-DCMAKE_OSX_ARCHITECTURES="$archs" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_C_FLAGS="-ffile-prefix-map=$tmp=sdl" -DCMAKE_OBJC_FLAGS="-ffile-prefix-map=$tmp=sdl" \
-		-DCMAKE_INSTALL_PREFIX="$i" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF >/dev/null
+		-DCMAKE_INSTALL_PREFIX="$i" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_CAMERA=OFF >/dev/null
 	cmake --build "$b" >/dev/null
 	cmake --install "$b" >/dev/null
 	args="$args -library $i/lib/libSDL3.a -headers $i/include" # include/SDL3/*.h: #include <SDL3/SDL.h>

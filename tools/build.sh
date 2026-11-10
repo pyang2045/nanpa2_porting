@@ -13,8 +13,8 @@
 #   --app            macOS only: also build the app bundle (target nanpa2_app,
 #                    BUILD_DIR/同級生２.app)
 #
-# The engine is plain C on SDL2: it needs a C11 compiler, CMake, Ninja and
-# SDL2 (and Python 3 for the tests), nothing else. It runs on 64-bit
+# The engine is plain C on SDL3: it needs a C11 compiler, CMake, Ninja and
+# SDL3 (and Python 3 for the tests), nothing else. It runs on 64-bit
 # little-endian hosts (state.h refuses to build otherwise). The binary and the
 # .app hold nothing of the game (ctest no_game_bytes): the player supplies the
 # game folder (no nanpa2.exe needed). Missing tools are named with the install command for this system;
@@ -60,11 +60,11 @@ fi
 # --- dependencies: check, and name the packages when something is missing
 hint() {
 	if [ "$os" = Darwin ]; then
-		echo "  brew install sdl2 cmake ninja python   (and xcode-select --install for the compiler)"
+		echo "  brew install sdl3 cmake ninja python   (and xcode-select --install for the compiler)"
 	else
-		echo "  Debian/Ubuntu: sudo apt install build-essential cmake ninja-build pkg-config libsdl2-dev python3"
-		echo "  Fedora:        sudo dnf install gcc cmake ninja-build pkgconf-pkg-config SDL2-devel python3"
-		echo "  Arch:          sudo pacman -S --needed base-devel cmake ninja sdl2 python"
+		echo "  Debian/Ubuntu: sudo apt install build-essential cmake ninja-build pkg-config libsdl3-dev python3 (Debian 13 / Ubuntu 25.04 or later; else build SDL3 from source, README Linux)"
+		echo "  Fedora:        sudo dnf install gcc cmake ninja-build pkgconf-pkg-config SDL3-devel python3"
+		echo "  Arch:          sudo pacman -S --needed base-devel cmake ninja sdl3 python"
 	fi
 }
 missing=
@@ -77,14 +77,14 @@ if [ -n "$missing" ]; then
 	exit 1
 fi
 sdl=0
-if pkg-config --exists sdl2 2>/dev/null || sdl2-config --version >/dev/null 2>&1; then
+if pkg-config --exists sdl3 2>/dev/null; then
 	sdl=1
-elif [ "$os" = Darwin ] && command -v brew >/dev/null 2>&1 && brew list --versions sdl2 >/dev/null 2>&1; then
+elif [ "$os" = Darwin ] && command -v brew >/dev/null 2>&1 && brew list --versions sdl3 >/dev/null 2>&1; then
 	sdl=1
 fi
 if [ "$sdl" = 0 ]; then
-	# CMake may still find it (SDL2_DIR, CMAKE_PREFIX_PATH); its error follows if not
-	echo "build.sh: SDL2 development files not found by pkg-config or sdl2-config. Install with:" >&2
+	# CMake may still find it (SDL3_DIR, CMAKE_PREFIX_PATH); its error follows if not
+	echo "build.sh: SDL3 development files not found by pkg-config. Install with:" >&2
 	hint >&2
 fi
 
