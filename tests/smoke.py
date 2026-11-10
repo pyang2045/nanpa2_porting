@@ -50,6 +50,7 @@ def status_path(pid):
 
 def clean_env(extra=None):
     env = {k: v for k, v in os.environ.items() if not k.startswith("NANPA2_")}
+    env["NANPA2_NO_START_SAVE"] = "1"  # a plain launch would play the Prologue offline first (dev/startsave.h)
     env.update(extra or {})
     return env
 

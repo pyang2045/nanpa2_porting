@@ -38,6 +38,9 @@
 #define SCRIPT 0x435e78u
 
 static int on, verbose;
+static int policy;                    /* the start-save policy (explore_policy_begin) */
+static uint32_t pol_name_open;
+static int pol_name_step;
 static uint64_t rng;
 static uint32_t end_frame, start_frame, stall_frames = 40000;
 
@@ -165,10 +168,14 @@ void explore_file(const char *name)
 	menu_active = 0;
 	cur_file = file_index(low);
 	snprintf(mes, sizeof mes, "%s", low);
+	if (policy && !strcmp(low, "name.mes")) {
+		pol_name_open = FRAME();
+		pol_name_step = 0;
+	}
 	/* flags 2010 (diary-save marker) and 2000 (40.MES right-click gate):
 	 * nibbles at 0x444e98, odd flags in the high nibble */
 	uint8_t f2010 = rd8(0x444e98 + 1005) & 15, f2000 = rd8(0x444e98 + 1000) & 15;
-	if (nfiles > had)
+	if (nfiles > had && (!policy || verbose))
 		fprintf(stderr, "explore: reached %s frame %u f2010 %u f2000 %u\n", low, FRAME(), f2010, f2000);
 }
 
@@ -465,6 +472,55 @@ static void decide(uint32_t f)
 	next_decide = f + 30 + rnd(40);
 }
 
+/* ---- the start-save policy (dev/startsave.c): the same watching and the same choices as the bot
+ * (decide), from a fixed seed, so that two runs make the same moves; only the name entry (NAME.MES)
+ * is fixed: three cells of the grid and END, one click each, whatever the generator says. */
+
+void explore_policy_begin(uint32_t seed)
+{
+	on = policy = 1;
+	end_frame = start_frame = 0;
+	verbose = getenv("NANPA2_START_SAVE_LOG") != NULL;
+	nitems = nhits = nq = nfiles = 0;
+	cur_file = -1;
+	hits_file = -1;
+	menu_active = 0;
+	next_decide = last_fetch_frame = town_frame = hit_frame = novel_frame = stall_reported = 0;
+	pol_name_open = 0;
+	pol_name_step = -1;
+	memset(keys, 0, sizeof keys);
+	mes[0] = 0;
+	rng = (uint64_t)seed * 2654435761u + 1;
+}
+
+void explore_policy_end(void)
+{
+	for (int i = 0; i < nfiles; i++)
+		free(files[i].seen);
+	nfiles = 0;
+	on = policy = 0;
+}
+
+static void decide_policy(uint32_t f)
+{
+	if (pol_name_step >= 0 && !strcmp(mes, "name.mes")) {
+		/* screen coordinates of three grid cells and of END; the name is in README */
+		static const struct item cells[] = { { 100, 145 }, { 195, 240 }, { 334, 160 }, { 512, 289 } };
+		if (f - pol_name_open < 90) { /* let the grid draw */
+			next_decide = pol_name_open + 90;
+		} else if (pol_name_step < 4) {
+			click(f + 2, cells[pol_name_step].x, cells[pol_name_step].y);
+			pol_name_step++;
+			next_decide = f + 40;
+		} else { /* the entry did not take: once more after a while */
+			pol_name_step = 0;
+			next_decide = f + 300;
+		}
+		return;
+	}
+	decide(f);
+}
+
 void explore_tick(void)
 {
 	if (!on)
@@ -513,12 +569,15 @@ void explore_tick(void)
 		}
 		return;
 	}
-	if (novel_frame && f - novel_frame > stall_frames && stall_reported != novel_frame) {
+	if (!policy && novel_frame && f - novel_frame > stall_frames && stall_reported != novel_frame) {
 		stall_reported = novel_frame;
 		fprintf(stderr, "explore: stall frame %u mes %s: no new script offset since frame %u (last fetch %04x op %02x)\n",
 			f, mes, novel_frame, last_off, rd8(SCRIPT + last_off));
 	}
 	if (nq || (int32_t)(f - next_decide) < 0 || f < start_frame)
 		return;
-	decide(f);
+	if (policy)
+		decide_policy(f);
+	else
+		decide(f);
 }

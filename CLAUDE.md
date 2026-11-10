@@ -70,6 +70,13 @@ The save files (`FLAGn`, 0xc00 bytes) are `G.save` in the original's byte layout
 through `state_save_export/import` (`state_view.c`); `docs/refactor.md` lists the fields. The engine assumes a
 64-bit little-endian host.
 
+Start save (`src/dev/startsave.h`, README "Start save"): a plain interactive launch (the `use_pref` condition of
+`display_setup`, and no EXPLORE/SAVETEST) with no FLAG files in the save folder and the game folder's FLAGs absent or
+all identical plays the Prologue offline (`platform/offline.h`) and writes `flag6` + `flag0`; `--make-start-save`
+does it headless and exits; `--no-start-save` / `NANPA2_NO_START_SAVE=1` opt out (`tests/smoke.py` `clean_env` sets
+it); `startsave-off` in the save folder turns it off; `NANPA2_START_SAVE_SEED/_FRAMES/_LOG/_SHOTS=dir,every/_NOFF`
+are dev knobs. iOS: `dialog_saves_popup` (`NANPA2_RESET_POPUP`).
+
 Dev hooks: `--text bitmap` / `NANPA2_TEXT_LAYER=bitmap` (developer/test only: the game's own glyphs without the hi-res text layer; the byte-identity tests use it; hi-res is always on otherwise and not a user option; `NANPA2_LOG_TEXT=1` logs the text scale), `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`

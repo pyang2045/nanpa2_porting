@@ -13,6 +13,10 @@
  *   --display hd|480|sharp|smooth                       CRT HD (default), CRT 480, Sharp, Smooth
  *                                                       (F12 cycles them; remembered in display.txt
  *                                                       of the save folder for plain launches)
+ *   --make-start-save                                   play the Prologue offline and write FLAG0 and FLAG6
+ *                                                       of the save folder (a game that starts after
+ *                                                       it), then exit; dev/startsave.h
+ *   --no-start-save (NANPA2_NO_START_SAVE)              a plain launch does not do that by itself
  *   --no-crt                                            = --display sharp
  *   --text hires|bitmap                                 vector text at the display's resolution over the
  *                                                       picture (default), or the game's own bitmap
@@ -63,6 +67,8 @@
 #include "game/startup.h"
 #include "game/state.h"
 #include "dev/replay.h"
+#include "dev/startsave.h"
+#include "platform/dialog.h"
 #include "dev/status.h"
 #include "launch.h"
 
@@ -214,6 +220,10 @@ static int game_speed_set;
 
 static SDL_Window *game_window;
 
+/* the start save (dev/startsave.h): generated before the first session of a plain launch, or by
+ * --make-start-save alone; --no-start-save or NANPA2_NO_START_SAVE opt out */
+static int make_start_save, no_start_save, plain_launch;
+
 static int run_game(const char *game, const char *font)
 {
 	state_init();
@@ -222,6 +232,26 @@ static int run_game(const char *game, const char *font)
 	char *save = save_env ? NULL : SDL_GetPrefPath("nanpa2", "nanpa2");
 	files_init(game, save_env ? save_env : save ? save : ".");
 	text_init(font);
+	{
+		const char *dir = save_env ? save_env : save ? save : ".";
+		int auto_gen = plain_launch && !no_start_save && !getenv("NANPA2_NO_START_SAVE") &&
+			       !getenv("NANPA2_EXPLORE") && !getenv("NANPA2_SAVETEST");
+		/* iOS: saves are there (the generated one or the player's own): offer to start over */
+		if (auto_gen && startsave_saves_offered(dir) && dialog_saves_popup())
+			startsave_decline(dir);
+		if (make_start_save || (auto_gen && startsave_wanted(dir, 1))) {
+			if (make_start_save && !startsave_wanted(dir, 0)) {
+				fprintf(stderr, "start-save: the save folder already has FLAG files, nothing done\n");
+				SDL_free(save);
+				return 0;
+			}
+			int r = startsave_make(dir, !make_start_save);
+			if (make_start_save || r < 0) {
+				SDL_free(save);
+				return r > 0 ? 0 : r < 0 ? 0 : 1;
+			}
+		}
+	}
 	dev_init();
 	replay_init(save_env ? save_env : save ? save : ".");
 	status_init(game_window, game_speed);
@@ -371,6 +401,11 @@ int main(int argc, char **argv)
 			SDL_setenv_unsafe("NANPA2_REPLAY", argv[++i], 1);
 		else if (!strcmp(argv[i], "--deterministic"))
 			SDL_setenv_unsafe("NANPA2_DETERMINISTIC", "1", 1);
+		else if (!strcmp(argv[i], "--make-start-save")) {
+			make_start_save = 1;
+			SDL_setenv_unsafe("NANPA2_HEADLESS", "1", 1);
+		} else if (!strcmp(argv[i], "--no-start-save"))
+			no_start_save = 1;
 		else if (!strcmp(argv[i], "--pause-inactive"))
 			SDL_setenv_unsafe("NANPA2_PAUSE_INACTIVE", "1", 1);
 	}
@@ -460,6 +495,8 @@ int main(int argc, char **argv)
 	 * window can open behind the terminal; bring it to the front. */
 	if (!headless)
 		SDL_RaiseWindow(win);
+	plain_launch = !headless &&  !getenv("NANPA2_INPUT") && !shot && !crt_shot && !viewer &&
+		       !getenv("NANPA2_REPLAY") && !getenv("NANPA2_RECORD") && !getenv("NANPA2_DETERMINISTIC");
 	display_setup(display, text, !headless && !getenv("NANPA2_INPUT") && !shot && !crt_shot &&
 				      !getenv("NANPA2_REPLAY") && !getenv("NANPA2_RECORD") &&
 				      !getenv("NANPA2_DETERMINISTIC"));

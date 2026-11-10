@@ -23,6 +23,7 @@
  * 0x402620. The native ShowCursor(0) / SetWindowPos have no lasting effect
  * here (the cursor is drawn by the game from MOUSE.DAT). */
 #include "platform/logo.h"
+#include "platform/offline.h"
 
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -175,6 +176,8 @@ static int wanted(void)
 void logo_play(void)
 {
 	struct avi a;
+	if (offline_on())
+		return;
 	if (!wanted() || !avi_open(&a))
 		return;
 	if (!cvid_init(&dec, a.w, a.h)) {

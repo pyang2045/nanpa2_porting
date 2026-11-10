@@ -336,6 +336,11 @@ int text_init(const char *font_path)
 	return 1;
 }
 
+void text_fonts_reset(void)
+{
+	nfonts = 0;
+}
+
 uint32_t text_font_create(int height, int weight)
 {
 	if (nfonts >= MAX_FONTS)

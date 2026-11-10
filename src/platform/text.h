@@ -24,6 +24,9 @@ int text_font_missing(void);
 /* A font of em height `height` (negative: character height as in GDI) and weight; a handle */
 uint32_t text_font_create(int height, int weight);
 
+/* Forget the font handles handed out (offline mode, platform/offline.h). */
+void text_fonts_reset(void);
+
 /* Draw the Big5 (2 bytes) or ASCII (1 byte) character in str, len bytes, at (x, y) of the surface
  * in the font: colours are nonzero or zero, opaque fills the character's cell with the
  * background first. */

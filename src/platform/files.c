@@ -8,12 +8,26 @@
 #include "fsys.h"
 #include "hooks.h"
 
-static char save_root[1024];
+static char save_root[1024], save_keep[1024];
+static int offline;
 
 void files_init(const char *game_dir, const char *save_dir)
 {
 	fsys_set_root(game_dir);
 	snprintf(save_root, sizeof save_root, "%s", save_dir);
+}
+
+void files_offline_begin(const char *dir)
+{
+	snprintf(save_keep, sizeof save_keep, "%s", save_root);
+	snprintf(save_root, sizeof save_root, "%s", dir);
+	offline = 1;
+}
+
+void files_offline_end(void)
+{
+	snprintf(save_root, sizeof save_root, "%s", save_keep);
+	offline = 0;
 }
 
 static int is_save_name(const char *p)
@@ -42,6 +56,8 @@ static FILE *open_native(const char *path, const char *mode)
 		FILE *f = fopen(full, writing ? "wb" : "rb");
 		if (f || writing)
 			return f;
+		if (offline)
+			return NULL;
 		return fsys_open(p); /* the FLAG files of a copied install; none: the game generates a blank */
 	}
 	if (writing)

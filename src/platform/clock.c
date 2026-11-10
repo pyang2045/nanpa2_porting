@@ -21,6 +21,19 @@ void clock_init(double s)
 	base_ticks = SDL_GetPerformanceCounter();
 }
 
+void clock_reset(void)
+{
+	vclock = 0;
+	base_us = 0;
+	base_ticks = SDL_GetPerformanceCounter();
+}
+
+void clock_skip_to_ms(uint64_t ms)
+{
+	if (vclock < ms * 1000)
+		vclock = ms * 1000;
+}
+
 double clock_speed(void)
 {
 	return speed;

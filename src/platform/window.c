@@ -13,6 +13,7 @@
 #include "hooks.h"
 #include "platform/present.h"
 #include "platform/sound.h"
+#include "platform/offline.h"
 #include "game/startup.h"
 
 #define HWND_MAIN 0x00001000u
@@ -462,6 +463,20 @@ void win_run_timer(void)
 	}
 }
 
+void win_reset(void)
+{
+	q_head = q_count = 0;
+	timer_on = 0;
+	timer_next = 0;
+	timer_ticks = 0;
+	mouse_known = 0;
+	cursor_count = 0;
+	cursor_shown = -1;
+	memset(&handlers, 0, sizeof handlers);
+}
+
+static uint32_t idle_run; /* consecutive pumps that found no tick due (offline mode) */
+
 /* native 0x401bf0: one PeekMessage/DispatchMessage round; 0 on WM_QUIT */
 int win_pump(void)
 {
@@ -477,14 +492,23 @@ int win_pump(void)
 	clock_add(PACE_PUMP_US);
 	hook_beat();
 	clock_throttle();
+	uint32_t ticks_before = timer_ticks;
 	win_run_timer();
+	/* offline: a pump that found no tick due only waits for the next one, so the virtual clock
+	 * goes there at once (the same game, minus the host spinning); a quit request is the only
+	 * host input (collect_events) */
+	if (timer_ticks != ticks_before)
+		idle_run = 0;
+	else if (offline_fast_forward() && timer_on && ++idle_run >= OFFLINE_IDLE_PUMPS)
+		clock_skip_to_ms(timer_next);
 	hook_pump();
 	screen_present(0);
 	/* the host event queue at most once a millisecond (deterministic mode:
 	 * collect_events counts pumps instead) */
 	static uint32_t last_collect;
-	uint32_t now = SDL_GetTicks();
-	if (hook_det() || now != last_collect) {
+	int det = hook_det();
+	uint32_t now = det ? 0 : SDL_GetTicks();
+	if (det || now != last_collect) {
 		last_collect = now;
 		collect_events();
 	}

@@ -43,6 +43,10 @@ uint64_t clock_host_ns(void);
 
 void clock_lat(const char *what); /* NANPA2_LATLOG: "L <us> <what>" to stderr */
 
+/* offline mode (platform/offline.h): back to time 0; jump the virtual time forward to a game ms */
+void clock_reset(void);
+void clock_skip_to_ms(uint64_t ms);
+
 /* sleep if the virtual time is ahead of real time x speed */
 void clock_throttle(void);
 
