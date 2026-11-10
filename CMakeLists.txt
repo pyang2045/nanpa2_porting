@@ -63,6 +63,7 @@ set(SOURCES
   src/lzh.c
   src/gp4.c
   src/fsys.c
+  src/iso.c
   src/trap.c
   src/hooks.c
   src/hash.c
@@ -171,8 +172,10 @@ if(NANPA2_MACOS)
 endif()
 
 if(NOT NANPA2_IOS)
-  add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
+  add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c src/iso.c)
   target_include_directories(decode_all PRIVATE src)
+  add_executable(iso_check tests/iso_check.c src/iso.c)
+  target_include_directories(iso_check PRIVATE src)
 endif()
 
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
@@ -185,6 +188,17 @@ enable_testing()
 add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+# ISO image (tests/iso.py): every DATA/MUSIC/SPEECH file reads the same bytes from the CD image
+# as from the folder, decode_all agrees, and a recording made on the folder replays on the image.
+# The image: -DNANPA2_ISO=/path/NANPA2.iso or the environment variable NANPA2_ISO; skipped without.
+set(NANPA2_ISO "" CACHE FILEPATH "CD image (.iso) for the ISO test")
+if(NOT NANPA2_IOS)
+  add_test(NAME iso COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/iso.py"
+    $<TARGET_FILE:nanpa2> $<TARGET_FILE:iso_check> $<TARGET_FILE:decode_all>
+    "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/iso-test" "${NANPA2_ISO}")
+  set_tests_properties(iso PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+endif()
 
 # Self-test (a few seconds, headless): a save round trip through the lifted
 # save/load code.

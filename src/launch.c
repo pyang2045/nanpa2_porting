@@ -4,6 +4,7 @@
 #include "launch.h"
 
 #include <SDL.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,6 +134,25 @@ static int try_dir(const char *dir, const char *source)
 	return 1;
 }
 
+/* Any *.iso in dir (extension in any case) that holds the game: the CD image. */
+static int try_isos_in(const char *dir, const char *source)
+{
+	DIR *d = opendir(dir);
+	if (!d)
+		return 0;
+	struct dirent *e;
+	int ok = 0;
+	while (!ok && (e = readdir(d))) {
+		size_t n = strlen(e->d_name);
+		char path[PATH_CAP + 300];
+		if (n > 4 && !SDL_strcasecmp(e->d_name + n - 4, ".iso") && e->d_name[0] != '.' &&
+		    snprintf(path, sizeof path, "%s/%s", dir, e->d_name) < (int)sizeof path)
+			ok = try_dir(path, source);
+	}
+	closedir(d);
+	return ok;
+}
+
 static void remembered_path(char *out, size_t cap)
 {
 	snprintf(out, cap, "%s/game-folder.txt", launch_pref_dir() ? launch_pref_dir() : ".");
@@ -201,6 +221,9 @@ UNUSED_ON_IOS static int try_near_exe(void)
 		snprintf(cand, sizeof cand, "%s/game", dir);
 		if (try_dir(cand, "next to the executable"))
 			return 1;
+		if (((!launch_in_bundle() || i >= 3) && try_isos_in(dir, "next to the executable")) ||
+		    try_isos_in(cand, "next to the executable"))
+			return 1;
 		strip_last(dir);
 	}
 	return 0;
@@ -216,8 +239,8 @@ UNUSED_ON_IOS static int pick(void)
 {
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
 		return 0;
-	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）\n"
-			     "Choose the 同級生２ game folder (with DATA)";
+	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）或光碟映像檔 (.iso)\n"
+			     "Choose the 同級生２ game folder (with DATA) or the CD image (.iso)";
 	char dir[PATH_CAP];
 	while (dialog_pick_folder(prompt, dir, sizeof dir)) {
 		const char *why = check(dir);
@@ -252,7 +275,7 @@ static const char *ios_game_dir(int interactive)
 	char cand[PATH_CAP + 8];
 	if (docs) {
 		snprintf(cand, sizeof cand, "%s/game", docs);
-		if (try_dir(cand, "Documents") || try_dir(docs, "Documents"))
+		if (try_dir(cand, "Documents") || try_dir(docs, "Documents") || try_isos_in(docs, "Documents"))
 			return found;
 	}
 	char text[PATH_CAP + 900];
