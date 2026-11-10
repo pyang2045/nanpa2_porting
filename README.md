@@ -72,7 +72,7 @@ Needs Xcode, CMake and Ninja. The script downloads the official SDL2 release sou
 Apple team ID (a free personal team works; set `NANPA2_APP_ID` to a bundle identifier of your own), then
 install `build-ios/device/Release-iphoneos/nanpa2.app` from Xcode or `xcrun devicectl device install app`.
 The app (display name 同級生２, landscape, full screen) holds none of the game. Copy your game folder (the CD
-contents plus FLAG0..FLAG6, with DATA inside) into the app's Documents, either as a folder named `game` or
+contents, with DATA inside; FLAG0..FLAG6 of an installed game are optional) into the app's Documents, either as a folder named `game` or
 its contents directly: with Finder (iPad connected by USB, Files tab, drag onto the app) or in the Files app
 (On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. In the
 simulator: `xcrun simctl get_app_container booted local.nanpa2 data`, then copy into `Documents/game`.
@@ -133,8 +133,8 @@ architecture summary and how the save files stay byte-compatible.
 
 ## Game data
 
-Copy the CD contents into `game/` and extract `FLAG0`..`FLAG6` from `data1.cab` there
-(`unshield x data1.cab`). See `game/README.md`.
+Copy the CD contents into `game/`. The save files `FLAG0`..`FLAG6` are optional (the engine generates a
+blank save when a slot has none; the ones from an installed game are used if present). See `game/README.md`.
 
 Neither `nanpa2.exe` nor any file made from it is needed: the engine reimplements the game code in C and
 defines the start values of its game state in code (`src/game/state.c`). (Earlier versions cut a

@@ -205,7 +205,12 @@ static void flag_load(void)
 	uint8_t img[STATE_SAVE_SIZE];
 	state_save_export(img);
 	size_t got = game_file_read((const char *)g_ptr(FLAG_NAME, 1), img, sizeof img);
-	state_save_import(img, got ? sizeof img : 0);
+	if (!got) {
+		/* no such save in the save folder or the game folder: a new game's start state */
+		state_save_blank(img);
+		got = sizeof img;
+	}
+	state_save_import(img, got);
 	uint32_t f = (SV(vflags) & 0x9f) | keep;
 	SV_SET(vflags, f);
 	vm_init();

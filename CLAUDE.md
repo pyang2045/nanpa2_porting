@@ -13,8 +13,8 @@ addresses.
 
 ## Hard rules
 
-- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe` and
-  `FLAG0..6` from `data1.cab`), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
+- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe`;
+  `FLAG0..6` from a copied install are optional: the engine generates blank saves), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
   gitignored. Never commit or upload them, and never copy tables or text out of them into the
   source beyond small format constants (code tables, offsets) needed to read the data.
 - Never run any `.exe`. Static analysis of `nanpa2.exe` (Ghidra headless, objdump) only.

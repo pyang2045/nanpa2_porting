@@ -16,7 +16,7 @@ int launch_in_bundle(void);
  * nanpa2.previous.log), or always to NANPA2_LOG_FILE if set. Call first. */
 void launch_log_init(int argc, char **argv);
 
-/* The game folder (the CD contents, with FLAG0..FLAG6), first
+/* The game folder (the CD contents; FLAG0..FLAG6 are optional), first
  * that validates of: cli (--game), NANPA2_GAME_DIR, the path remembered in
  * <pref>/game-folder.txt, next to the executable or the .app (and in a
  * "game" folder there, up a few levels), ./game; then, if interactive, a
