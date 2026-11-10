@@ -1431,3 +1431,22 @@ the state) and `rclick` events in `NANPA2_INPUT` (now also log `RP`, keyed by th
 - Simulator (iPad Pro 11" M4, iOS 17.4 runtime on an Intel Mac): `Renderer: Metal | Apple iOS simulator GPU`,
   game starts from `Documents/game` and reaches the name-entry screen, CRT on and `--no-crt`; the missing-data
   message shows. Touch gestures could not be injected (simctl has no touch), so they are untested.
+
+## 2026-11-10: display modes (CRT HD, CRT 480, Sharp, Smooth)
+
+Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, README). Presenter only
+(`src/platform/present*.{h,m,c}`, `window.c` gesture, `main.c` options).
+- `present_metal.m`: new passes `fs_up` (640x480 linear picture onto the virtual raster, area-averaged
+  or Catmull-Rom, half float) and `fs_hd` (the `fs_crt` tube model on that raster: beam sigma, scanline
+  fade and grille by output pixels per virtual line, 8 taps when an output pixel spans more than one
+  virtual pixel, wires and glow kept in tube geometry), and `fs_flat` for Sharp/Smooth (an output pixel
+  wholly inside one game pixel returns that pixel's exact colour, so integer scales equal nearest).
+  `fs_crt` (CRT 480) is untouched.
+- `present_cycle_mode()` (F12 and the three-finger tap) cycles hd, 480, sharp, smooth; `--display`,
+  `--crt-lines` (600..1600, default 1080), `--crt-scaler sharp|smooth`, env `NANPA2_DISPLAY`,
+  `NANPA2_CRT_LINES`, `NANPA2_CRT_SCALER`; `--no-crt` = Sharp. Last mode in `<save folder>/display.txt`
+  for plain launches only (not headless, scripted, shot, replay; `NANPA2_DISPLAY_PREF=1` forces).
+- Checks: CRT 480 `--crt-shot` at 1920x1080, 3840x2160, 2732x2048, 1280x960, 800x600 is `cmp`-identical to
+  master; Sharp equals nearest at 2x and 3x (`cmp`) and matches a numpy area-average reference to
+  within 1 level at 2.25x, 4.27x and 3840x2160; ctest passes for the Metal and the
+  `-DNANPA2_SDL_RENDERER=ON` build; `tools/build_ios.sh` (simulator) compiles.
