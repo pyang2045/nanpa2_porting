@@ -1679,3 +1679,14 @@ validation and F11 details of the entry above.
 - No font at all: `WARNING: no CJK font found` in the log and in the status file (`text_font_missing()`,
   watchdog key `font`). `NANPA2_TEXT=coretext[,tables]` skips the file paths / forces the rebuilt sfnt, to
   test the iOS route on macOS. `font_apple.c` is in CMake (APPLE, CoreText linked) and in `gen_xcodeproj.py`.
+
+## 2026-11-10: iPad stays landscape (SDL_HINT_ORIENTATIONS)
+
+- Cause: SDL 3.4.18 `UIKit_GetSupportedOrientations` (`SDL_uikitwindow.m`) ignores the Info.plist orientation list
+  unless it is the fallback: with no `SDL_HINT_ORIENTATIONS` and `SDL_WINDOW_RESIZABLE` (main.c creates the window
+  resizable) it returns `UIInterfaceOrientationMaskAll`. Plist (`UIRequiresFullScreen`, landscape-only arrays) is
+  only the validity check, so the view controller allowed portrait.
+- Fix: `src/main.c` sets the hint `"LandscapeLeft LandscapeRight"` under `SDL_PLATFORM_IOS` before `SDL_CreateWindow`.
+  Plist keys kept. Window flags unchanged (iOS window is already fullscreen/borderless; the presenter follows resize).
+- Check: simulator build and launch fine; the simulator could not be rotated from scripts (no accessibility access),
+  so the rotation itself is unverified there; needs a real-iPad test.
