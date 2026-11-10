@@ -30,7 +30,6 @@ static double ms_since(uint64_t t0_ns)
 /* ---- mode ---- */
 
 static int mode = TEXT_HIRES;
-static void (*change_cb)(int);
 
 void tl_set_mode(int m)
 {
@@ -41,13 +40,6 @@ void tl_set_mode(int m)
 int tl_get_mode(void)
 {
 	return mode;
-}
-
-void tl_toggle(void)
-{
-	mode = mode == TEXT_HIRES ? TEXT_BITMAP : TEXT_HIRES;
-	if (change_cb)
-		change_cb(mode);
 }
 
 const char *tl_mode_name(int m)
@@ -62,11 +54,6 @@ int tl_parse_mode(const char *s)
 	if (s && !strcmp(s, "bitmap"))
 		return TEXT_BITMAP;
 	return -1;
-}
-
-void tl_on_change(void (*cb)(int))
-{
-	change_cb = cb;
 }
 
 /* ---- tracking ---- */

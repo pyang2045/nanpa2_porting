@@ -165,7 +165,7 @@ static int pause_inactive(void)
 #ifdef SDL_PLATFORM_IOS
 /* ---- touch (iOS/iPadOS) ----
  * SDL's own touch-to-mouse events are off (win_open): a one-finger tap is a left click, a two-finger
- * tap a right click (the game's cancel/menu button), a four-finger tap the text layer (Shift+F12), a three-finger tap cycles the display modes (F12 on
+ * tap a right click (the game's cancel/menu button), a tap of three or more fingers cycles the display modes (F12 on
  * a keyboard); holding or dragging one finger keeps the left button down. The left press waits until
  * the finger lifts, moves or is held, so that more fingers can still turn the touch into a right
  * click. Finger positions are window points, mapped to the screen by the presenter's letterbox
@@ -271,10 +271,8 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 		else if (now - touch.t0 < TAP_MAX_MS) {
 			if (touch.max_fingers == 2)
 				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
-			else if (touch.max_fingers == 3)
+			else /* three or more fingers: iPadOS takes some four-finger gestures, so they count as three */
 				present_cycle_mode();
-			else
-				present_toggle_text(); /* four or more fingers */ /* not tested on a device: SDL's report of four fingers */
 		}
 		memset(&touch, 0, sizeof touch);
 	}

@@ -33,7 +33,7 @@ static SDL_MetalView view;
 static CAMetalLayer *layer;
 static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
-static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat, pipe_text_lin, pipe_text_enc;
+static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat, pipe_text_flat, pipe_text_enc, pipe_text_crt;
 static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex, hd_tex, atlas_tex;
 static int text_ok; /* the text layer can be drawn (its pipelines and atlas exist) */
 static int capturing; /* present_capture: no time limit on rasterising glyphs */
@@ -250,14 +250,23 @@ static NSString *const shader_src = @
 	"  float3 l = resample(lt, a, b, u.smooth);\n"
 	"  return float4(pow(saturate(l), 1.0 / GAMMA), 1.0);\n"
 	"}\n"
-	/* The text layer (platform/textlayer.h): opaque cells, each pixel mix(bg, fg, glyph coverage) in linear
-	 * light, drawn over the picture's raster; vs_text expands quad i of the buffer, fs_text reads the quad
-	 * again (flat index) for its colours and glyph rectangle. The viewport is the raster (a rectangle of
-	 * the drawable in Sharp and Smooth: the NDC are relative to it, the fragment's position is not, so the
-	 * quad's pixel is the fragment's minus the viewport's origin). `encode` is 1 on the drawable and 0 on
-	 * the half-float raster of CRT HD. */
+	/* The text layer (platform/textlayer.h): cells of quads at the output's resolution, expanded by vs_text from
+	 * the buffer; fs_text reads the quad again (flat index) for its colours and glyph rectangle. Three uses (u.mode):
+	 *   0  flat: the cell's background colour, linear, into the 640x480 linear picture of the CRT modes, which
+	 *      knocks the game's own glyph out of the picture the tube draws (the quad coordinates are output pixels
+	 *      and the viewport is the 640x480 target: the mapping is by NDC)
+	 *   1  Sharp and Smooth: opaque, mix(bg, fg, coverage) in linear light, gamma encoded, onto the drawable
+	 *   2  CRT HD and CRT 480, after the tube pass, in output pixels: the glyph is not resampled through the
+	 *      raster or scanlined; it gets the tube's light (glow, damper wires, vignette, glass, rounded edge) and
+	 *      blends with the already drawn tube picture by coverage, in linear light as far as the format allows:
+	 *      the output is premultiplied, E - (1 - cov) * bgE with alpha cov, where E is the encoded linear mix
+	 *      and bgE the encoded background, so that the picture's own scanlines and grille show on the
+	 *      background part and the glyph's strokes are solid. The face is flat, so the cell's place on the
+	 *      picture is linear (uv = position in the letterboxed viewport). A repainted pixel (gw = 0) is opaque.
+	 * The viewport is the target rectangle; the NDC are relative to it, the fragment's position is not, so
+	 * the quad's pixel is the fragment's minus the origin. */
 	"struct TQuad { float4 cell; float4 glyph; float4 atlas; float4 fg; float4 bg; };\n"
-	"struct TU { float2 origin; float2 raster; int encode; int pad0; int pad1; int pad2; };\n"
+	"struct TU { float2 origin; float2 raster; int mode; int pad0; int pad1; int pad2; };\n"
 	"struct TV { float4 pos [[position]]; uint qi [[flat]]; };\n"
 	"vertex TV vs_text(uint vid [[vertex_id]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]]) {\n"
 	"  uint qi = vid / 6, k = vid % 6;\n"
@@ -267,14 +276,40 @@ static NSString *const shader_src = @
 	"  TV o; o.pos = float4(p.x / u.raster.x * 2.0 - 1.0, 1.0 - p.y / u.raster.y * 2.0, 0.0, 1.0); o.qi = qi;\n"
 	"  return o;\n"
 	"}\n"
+	/* the tube's light on a linear colour, up to the encoding (all linear in c: mix(a, b) commutes with it) */
+	"static float3 tube_light(float3 c, float3 gl, float2 uv, float out_h) {\n"
+	"  c = mix(c, gl, GLOW);\n"
+	"  float hy = 1.0 / out_h, ww = WIRE_W / 480.0, wire = 0.0;\n"
+	"  for (int k = 1; k <= 2; k++) {\n"
+	"    float wy = float(k) / 3.0;\n"
+	"    float lo = max(uv.y - 0.5 * hy, wy - 0.5 * ww), hi = min(uv.y + 0.5 * hy, wy + 0.5 * ww);\n"
+	"    wire += max(hi - lo, 0.0) / hy;\n"
+	"  }\n"
+	"  c *= 1.0 - WIRE * saturate(wire);\n"
+	"  float2 vv = uv * (1.0 - uv);\n"
+	"  c *= pow(saturate(vv.x * vv.y * 16.0), 0.06);\n"
+	"  return GLASS + c * (1.0 - GLASS);\n"
+	"}\n"
 	"fragment float4 fs_text(TV in [[stage_in]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]],\n"
-	"                        texture2d<float> atlas [[texture(0)]]) {\n"
+	"                        texture2d<float> atlas [[texture(0)]], texture2d<float> glow [[texture(3)]],\n"
+	"                        sampler smp [[sampler(0)]]) {\n"
 	"  TQuad t = q[in.qi];\n"
+	"  if (u.mode == 0) return float4(t.bg.rgb, 1.0);\n"
 	"  float2 g = floor(in.pos.xy - u.origin) - t.glyph.xy;\n"
 	"  float cov = 0.0;\n"
 	"  if (all(g >= 0.0) && all(g < t.glyph.zw)) cov = atlas.read(uint2(t.atlas.xy + g)).r;\n"
-	"  float3 c = mix(t.bg.rgb, t.fg.rgb, cov);\n"
-	"  return float4(u.encode != 0 ? pow(saturate(c), 1.0 / GAMMA) : c, 1.0);\n"
+	"  if (u.mode == 1) return float4(pow(saturate(mix(t.bg.rgb, t.fg.rgb, cov)), 1.0 / GAMMA), 1.0);\n"
+	"  float2 uv = (in.pos.xy - u.origin) / u.raster;\n"
+	"  float2 c = uv * 2.0 - 1.0;\n"
+	"  const float r = 0.012;\n"
+	"  float d = length(max(abs(c) - (1.0 - r), 0.0)) - r;\n"
+	"  float edge = saturate(-d * u.raster.y * 0.5);\n"
+	"  float3 gl = glow.sample(smp, uv).rgb;\n"
+	"  float3 bgl = tube_light(t.bg.rgb, gl, uv, u.raster.y), fgl = tube_light(t.fg.rgb, gl, uv, u.raster.y);\n"
+	"  float3 bgE = pow(saturate(bgl), 1.0 / GAMMA) * edge;\n"
+	"  if (t.glyph.z <= 0.0) return float4(bgE, 1.0);\n"
+	"  float3 E = pow(saturate(mix(bgl, fgl, cov)), 1.0 / GAMMA) * edge;\n"
+	"  return float4(max(E - (1.0 - cov) * bgE, 0.0), cov);\n"
 	"}\n"
 	/* CRT HD, second pass: fs_crt's tube on the virtual raster lt (any size
 	 * against the output: more taps when an output pixel spans several
@@ -419,20 +454,29 @@ int present_init(SDL_Window *win)
 	pipe_flat = make_pipeline(lib, vs, @"fs_flat", layer.pixelFormat);
 	/* the text layer's pipelines and atlas: without them the layer is off and the picture still shows */
 	text_ok = 1;
-	for (int enc = 0; enc < 2; enc++) {
+	for (int kind = 0; kind < 3; kind++) { /* flat into the linear picture, opaque encoded, blended encoded */
 		MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
 		pd.vertexFunction = [lib newFunctionWithName:@"vs_text"];
 		pd.fragmentFunction = [lib newFunctionWithName:@"fs_text"];
-		pd.colorAttachments[0].pixelFormat = enc ? layer.pixelFormat : MTLPixelFormatRGBA16Float;
+		pd.colorAttachments[0].pixelFormat = kind ? layer.pixelFormat : MTLPixelFormatRGBA16Float;
+		if (kind == 2) { /* premultiplied source over the tube picture */
+			pd.colorAttachments[0].blendingEnabled = YES;
+			pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+			pd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+			pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+			pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+		}
 		id<MTLRenderPipelineState> tp = [device newRenderPipelineStateWithDescriptor:pd error:&err];
 		if (!tp) {
 			SDL_Log("Metal pipeline text: %s", err.localizedDescription.UTF8String);
 			text_ok = 0;
 		}
-		if (enc)
+		if (kind == 0)
+			pipe_text_flat = tp;
+		else if (kind == 1)
 			pipe_text_enc = tp;
 		else
-			pipe_text_lin = tp;
+			pipe_text_crt = tp;
 	}
 	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat)
 		return 0;
@@ -520,10 +564,11 @@ static void text_upload_atlas(id<MTLCommandBuffer> cb)
 	tl_atlas_clean();
 }
 
-/* Draw the text layer's cells onto target: the raster is the rectangle (x, y, w, h) of it. encode: the
- * target is the drawable (gamma encoded), else the linear half-float raster of CRT HD. */
+/* Draw the text layer's cells onto target (see fs_text for the modes): the cells' raster is the
+ * rectangle (x, y, w, h) of the output; vw x vh is the target's viewport size at (x, y) (the 640x480
+ * linear picture for mode 0: the NDC scale the quads down). */
 static void text_pass(id<MTLCommandBuffer> cb, id<MTLTexture> target, const struct tl_quad *tq, int ntq, int x, int y,
-		      int w, int h, int encode)
+		      int w, int h, int vw, int vh, int mode)
 {
 	id<MTLBuffer> buf = [device newBufferWithBytes:tq length:(NSUInteger)ntq * sizeof *tq
 						options:MTLResourceStorageModeShared];
@@ -534,16 +579,18 @@ static void text_pass(id<MTLCommandBuffer> cb, id<MTLTexture> target, const stru
 	rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
 	rp.colorAttachments[0].storeAction = MTLStoreActionStore;
 	id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-	[enc setRenderPipelineState:encode ? pipe_text_enc : pipe_text_lin];
-	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
-	struct { float origin[2], raster[2]; int32_t encode, pad[3]; } tu = {
-		{ (float)x, (float)y }, { (float)w, (float)h }, encode, { 0, 0, 0 }
+	[enc setRenderPipelineState:mode == 0 ? pipe_text_flat : mode == 1 ? pipe_text_enc : pipe_text_crt];
+	[enc setViewport:(MTLViewport){ x, y, vw, vh, 0, 1 }];
+	struct { float origin[2], raster[2]; int32_t mode, pad[3]; } tu = {
+		{ (float)x, (float)y }, { (float)w, (float)h }, mode, { 0, 0, 0 }
 	};
 	[enc setVertexBuffer:buf offset:0 atIndex:0];
 	[enc setVertexBytes:&tu length:sizeof tu atIndex:1];
 	[enc setFragmentBuffer:buf offset:0 atIndex:0];
 	[enc setFragmentBytes:&tu length:sizeof tu atIndex:1];
 	[enc setFragmentTexture:atlas_tex atIndex:0];
+	[enc setFragmentTexture:glow_tex atIndex:3];
+	[enc setFragmentSamplerState:linear_sampler atIndex:0];
 	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)ntq * 6];
 	[enc endEncoding];
 }
@@ -556,13 +603,14 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	int mode = disp_mode;
 	int vh = disp_lines, vw = (disp_lines * 4 + 1) / 3;
 	struct uniforms u = { (float)w, (float)h, mode <= DISPLAY_CRT_480, rgb_mode, mode == DISPLAY_SMOOTH || (mode == DISPLAY_CRT_HD && disp_smooth), vw, vh, { 0, 0 } };
-	/* the text layer's cells at the raster's scale: CRT HD on the virtual raster, Sharp and Smooth on the
-	 * output; CRT 480 keeps the game's own glyphs */
+	/* the text layer's cells at the output's scale in every mode (the CRT modes draw them after the tube) */
 	const struct tl_quad *tq = NULL;
 	int ntq = 0;
-	if (text_ok && !rgb_mode && mode != DISPLAY_CRT_480) {
-		int rw = mode == DISPLAY_CRT_HD ? vw : w, rh = mode == DISPLAY_CRT_HD ? vh : h;
-		ntq = tl_layout((float)rw / SCREEN_W, (float)rh / SCREEN_H, capturing ? -1 : 4000, &tq);
+	if (text_ok && !rgb_mode) {
+		ntq = tl_layout((float)w / SCREEN_W, (float)h / SCREEN_H, capturing ? -1 : 4000, &tq);
+		if (capturing && getenv("NANPA2_LOG_TEXT") && ntq)
+			fprintf(stderr, "text scale: %.3f x %.3f glyph px per game px (viewport %dx%d in a %dx%d target)\n",
+				(double)w / SCREEN_W, (double)h / SCREEN_H, w, h, dw, dh);
 		if (ntq)
 			text_upload_atlas(cb);
 	}
@@ -576,6 +624,10 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	if (mode <= DISPLAY_CRT_480) {
 		blur_pass(cb, lin_tex, blur_tex, 1, 0);
 		blur_pass(cb, blur_tex, glow_tex, 0, 1);
+		/* the game's own glyphs go out of the picture the tube draws: the cell's background in their place
+		 * (the glow keeps their light) */
+		if (ntq)
+			text_pass(cb, lin_tex, tq, ntq, 0, 0, w, h, SCREEN_W, SCREEN_H, 0);
 	}
 	if (mode == DISPLAY_CRT_HD) {
 		/* the picture onto the virtual raster */
@@ -587,8 +639,6 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 		[enc endEncoding];
-		if (ntq)
-			text_pass(cb, hd_tex, tq, ntq, 0, 0, vw, vh, 0);
 	}
 	enc = begin_pass(cb, target, mode == DISPLAY_CRT_HD ? pipe_hd : mode == DISPLAY_CRT_480 ? pipe_crt : pipe_flat);
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
@@ -601,8 +651,8 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[enc endEncoding];
-	if (ntq && (mode == DISPLAY_SHARP || mode == DISPLAY_SMOOTH))
-		text_pass(cb, target, tq, ntq, x, y, w, h, 1);
+	if (ntq)
+		text_pass(cb, target, tq, ntq, x, y, w, h, w, h, mode <= DISPLAY_CRT_480 ? 2 : 1);
 }
 
 static void show(void);
@@ -729,6 +779,20 @@ static void show(void)
 			return;
 		}
 		layer.drawableSize = CGSizeMake(dw, dh);
+		static int logged_size;
+		if (!logged_size++) {
+			int ww, wh;
+			SDL_GetWindowSize(window, &ww, &wh);
+#if TARGET_OS_OSX
+			double nat = 0;
+#else
+			double nat = (double)UIScreen.mainScreen.nativeScale;
+#endif
+			SDL_Log("Drawable: %dx%d pixels (window %dx%d points, pixel density %.2f, layer contentsScale %.2f, "
+				"native scale %.2f); text glyphs at %.3f x %.3f per game pixel",
+				dw, dh, ww, wh, (double)SDL_GetWindowPixelDensity(window), (double)layer.contentsScale, nat,
+				(double)dw / SCREEN_W, (double)dh / SCREEN_H);
+		}
 		Uint64 t = SDL_GetPerformanceCounter();
 		id<CAMetalDrawable> drawable = [layer nextDrawable];
 		pstats.last_wait_ms = (double)(SDL_GetPerformanceCounter() - t) * 1000.0 /
@@ -856,7 +920,7 @@ int present_get_fullscreen(void)
 
 void present_shutdown(void)
 {
-	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = pipe_text_lin = pipe_text_enc = nil;
+	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = pipe_text_flat = pipe_text_enc = pipe_text_crt = nil;
 	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = hd_tex = atlas_tex = nil;
 	linear_sampler = nil;
 	probe_tex = nil;

@@ -25,16 +25,14 @@
 
 #include <stdint.h>
 
+/* Hi-res is always on for players; TEXT_BITMAP is a developer/test switch (--text bitmap) */
 enum { TEXT_BITMAP, TEXT_HIRES, TEXT_MODES };
 #define TL_MAX_FONTS 8 /* font numbers (text_font_create) and faces the layer can key */
 #define TL_MAX_FACES 8
 void tl_set_mode(int mode);
 int tl_get_mode(void);
-void tl_toggle(void);
 const char *tl_mode_name(int mode);
 int tl_parse_mode(const char *s); /* hires|bitmap, or -1 */
-/* called with the new mode after a hotkey changed it */
-void tl_on_change(void (*cb)(int mode));
 
 /* ---- tracking (platform/text.c, platform/surface.c) ---- */
 
