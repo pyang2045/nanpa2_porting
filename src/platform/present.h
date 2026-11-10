@@ -30,7 +30,7 @@ int present_window_to_screen(int wx, int wy, int *sx, int *sy);
  * present_window_to_screen, for warping the mouse (SetCursorPos). */
 void present_screen_to_window(int sx, int sy, int *wx, int *wy);
 
-/* Port hotkeys: F12 cycles the display modes, Shift+F12 toggles the text layer (platform/textlayer.h), Alt+Enter (and Cmd+F on
+/* Port hotkeys: F12 cycles the display modes, Alt+Enter (and Cmd+F on
  * macOS) toggles fullscreen. Returns 1 if the key event (down, up or
  * repeat) belongs to one of them, so the caller does not pass it on. */
 int present_hotkey(const SDL_KeyboardEvent *key);
@@ -52,8 +52,6 @@ enum { DISPLAY_CRT_HD, DISPLAY_CRT_480, DISPLAY_SHARP, DISPLAY_SMOOTH, DISPLAY_M
 void present_set_mode(int mode);
 int present_get_mode(void);
 void present_cycle_mode(void);
-/* the text layer on or off (Shift+F12, a four-finger tap; platform/textlayer.h) */
-void present_toggle_text(void);
 const char *present_mode_name(int mode);
 int present_parse_mode(const char *s); /* hd|480|sharp|smooth, or -1 */
 /* CRT HD's virtual raster height (600..1600) and scaler (0 sharp, 1 smooth) */

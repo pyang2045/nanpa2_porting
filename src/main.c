@@ -16,8 +16,8 @@
  *   --no-crt                                            = --display sharp
  *   --text hires|bitmap                                 vector text at the display's resolution over the
  *                                                       picture (default), or the game's own bitmap
- *                                                       glyphs (NANPA2_TEXT_LAYER; Shift+F12 toggles, remembered
- *                                                       in display.txt; platform/textlayer.h)
+ *                                                       glyphs (developer/test switch; NANPA2_TEXT_LAYER;
+ *                                                       platform/textlayer.h)
  *   --crt-lines N                                       CRT HD's virtual raster height (600..1600,
  *                                                       default 1080; NANPA2_CRT_LINES)
  *   --crt-scaler sharp|smooth                           CRT HD's scaler (NANPA2_CRT_SCALER)
@@ -252,7 +252,8 @@ static void pref_path(char *out, size_t cap)
 	snprintf(out, cap, "%s/display.txt", launch_pref_dir() ? launch_pref_dir() : ".");
 }
 
-/* display.txt: the display mode on the first line, the text layer (hires or bitmap) on the second */
+/* display.txt: the display mode on the first line. Older files have a second line "text hires|bitmap";
+ * it is ignored (hi-res text is always on; --text bitmap is a developer switch). */
 static void pref_write(void)
 {
 	char p[1100];
@@ -260,9 +261,8 @@ static void pref_write(void)
 	FILE *f = fopen(p, "wb");
 	if (f) {
 		int m = present_get_mode();
-		fprintf(f, "%s\ntext %s\n", m == DISPLAY_CRT_HD ? "hd" : m == DISPLAY_CRT_480 ? "480" :
-						 m == DISPLAY_SHARP ? "sharp" : "smooth",
-			tl_mode_name(tl_get_mode()));
+		fprintf(f, "%s\n", m == DISPLAY_CRT_HD ? "hd" : m == DISPLAY_CRT_480 ? "480" :
+					     m == DISPLAY_SHARP ? "sharp" : "smooth");
 		fclose(f);
 	}
 }
@@ -270,12 +270,6 @@ static void pref_write(void)
 static void pref_save_mode(int mode)
 {
 	(void)mode; /* the file holds the current mode of both settings */
-	pref_write();
-}
-
-static void pref_save_text(int mode)
-{
-	(void)mode;
 	pref_write();
 }
 
@@ -287,7 +281,7 @@ static void display_setup(int display, int text, int use_pref)
 	pref_on = use_pref || getenv("NANPA2_DISPLAY_PREF");
 	if (text < 0 && getenv("NANPA2_TEXT_LAYER"))
 		text = tl_parse_mode(getenv("NANPA2_TEXT_LAYER"));
-	if ((display < 0 || text < 0) && pref_on) {
+	if (display < 0 && pref_on) {
 		char p[1100], line[32] = "";
 		pref_path(p, sizeof p);
 		FILE *f = fopen(p, "rb");
@@ -296,11 +290,6 @@ static void display_setup(int display, int text, int use_pref)
 				line[strcspn(line, "\r\n")] = 0;
 				if (display < 0)
 					display = present_parse_mode(line);
-			}
-			if (fgets(line, sizeof line, f) && !strncmp(line, "text ", 5)) {
-				line[strcspn(line, "\r\n")] = 0;
-				if (text < 0)
-					text = tl_parse_mode(line + 5);
 			}
 			fclose(f);
 		}
@@ -311,10 +300,8 @@ static void display_setup(int display, int text, int use_pref)
 		present_set_crt_lines(atoi(getenv("NANPA2_CRT_LINES")));
 	if (getenv("NANPA2_CRT_SCALER"))
 		present_set_crt_scaler(!strcmp(getenv("NANPA2_CRT_SCALER"), "smooth"));
-	if (pref_on) {
+	if (pref_on)
 		present_on_mode_change(pref_save_mode);
-		tl_on_change(pref_save_text);
-	}
 }
 
 int main(int argc, char **argv)

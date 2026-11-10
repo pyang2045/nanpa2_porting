@@ -19,8 +19,7 @@
  *
  * The high-resolution text layer (platform/textlayer.h) is not drawn here: the layer is tracked and
  * validated by the platform, but SDL_Renderer has no linear-light blending into the CRT's raster, so this
- * presenter never asks for it and shows the game's own glyphs (--text and Shift+F12 are accepted and do
- * nothing but change the remembered preference). present_metal.m is the implementation. */
+ * presenter never asks for it and shows the game's own glyphs (a documented no-op there). present_metal.m is the implementation. */
 #include "present_common.h"
 
 #define MAX_K 4

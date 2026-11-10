@@ -1690,3 +1690,31 @@ validation and F11 details of the entry above.
   Plist keys kept. Window flags unchanged (iOS window is already fullscreen/borderless; the presenter follows resize).
 - Check: simulator build and launch fine; the simulator could not be rotated from scripts (no accessibility access),
   so the rotation itself is unverified there; needs a real-iPad test.
+
+## 2026-11-10 (hi-res text always on, CRT text at output resolution)
+
+- Report from a real iPad Pro 13" M4: blurry text. Its `display.txt` held `text bitmap` (most likely an
+  accidental four-finger tap, which toggled the layer). Commit 4503e69: the layer is always on. Removed
+  Shift+F12, the four-finger tap (3 or more fingers now cycle the display modes), `tl_toggle`/`tl_on_change`,
+  and the `text` line of `display.txt` (not written; an old line is read and ignored). `--text bitmap` /
+  `NANPA2_TEXT_LAYER` stay as a developer/test switch (CLAUDE.md dev hooks).
+- CRT HD and CRT 480 now draw the text in output pixels after the tube pass (`present_metal.m`, `fs_text`
+  mode 2), no longer through the virtual raster (which capped sharpness at 1080 lines) and CRT 480 no longer
+  keeps the game's glyphs. Per frame: glow blur, then the quads' background colours are drawn into the
+  640x480 linear picture (mode 0: the game's glyph is knocked out, the glow keeps its light), the tube
+  pass runs as before, then the glyph quads blend by coverage with premultiplied output
+  `E - (1 - cov) * bgE` (E: encoded linear mix of the tube-lit fg and bg, bgE: encoded tube-lit bg), so the
+  picture's own scanlines/grille remain on the background and the strokes are solid. Tube light on the text:
+  glow, damper wires, vignette, glass, rounded edge; no scanline or grille on the strokes. Mapping is linear
+  (uv in the letterboxed viewport; the face is flat). Repainted pixels (pointer over a cell) are opaque and
+  unlit by scanlines. `tl_layout` is called with the viewport's scale in every mode (CRT HD's virtual raster
+  no longer matters for text).
+- iPad output path: `present_metal.m` logs once `Drawable: WxH pixels (window .. points, pixel density,
+  layer contentsScale, native scale); text glyphs at sx x sy per game pixel`. Simulator "iPad Pro 13-inch
+  (M4)": 2752x2064 pixels, window 1376x1032 points, density 2.00, contentsScale 2.00, nativeScale 2.00, glyph
+  scale 4.300 x 4.300: native, nothing else limits it (letterbox is the 4:3 fit, here full height).
+- Checks: ctest 11/11 with `iso` (smoke skipped); a replay recorded on master (87 checkpoints) replays on the
+  new build; `--text bitmap` captures are `cmp`-identical to master in all four modes at 1280x960 and 2752x2064
+  for every capture frame whose raw screen matched between the two runs (11 of 20; the others fell on
+  different frames, shot timing is wall-clock). CRT HD text at 2752x2064 is visibly sharper than master's.
+  iOS simulator build runs to dialogue (explore seed 3), text sharp; app uninstalled. `-DNANPA2_SDL_RENDERER=ON` builds.
