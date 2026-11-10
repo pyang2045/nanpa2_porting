@@ -182,6 +182,7 @@ if(NOT NANPA2_IOS)
   target_include_directories(decode_all PRIVATE src)
 endif()
 
+if(NOT NANPA2_IOS)
 # The text layer's tracking and validation, with a stub rasteriser (tests/textlayer_test.c, no game data).
 add_executable(textlayer_test tests/textlayer_test.c src/platform/textlayer.c)
 target_include_directories(textlayer_test PRIVATE src third_party)
@@ -197,7 +198,7 @@ endif()
 if(APPLE)
   target_link_libraries(textlayer_test PRIVATE "-framework Foundation" "-framework CoreFoundation")
 endif()
-set_source_files_properties(src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
 
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
@@ -210,8 +211,10 @@ add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
-add_test(NAME textlayer COMMAND textlayer_test)
-set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
+if(NOT NANPA2_IOS)
+  add_test(NAME textlayer COMMAND textlayer_test)
+  set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
+endif()
 
 # Self-test (a few seconds, headless): a save round trip through the lifted
 # save/load code.

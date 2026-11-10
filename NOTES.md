@@ -1462,16 +1462,19 @@ after the cell copy of 0x401900 that tells the platform where the cell went (`te
   indices, screen position; at most 4096, newer cells drop the older ones they cover, `surf_fill` drops,
   `surf_blt_fast` moves entries inside the source rectangle). Per presented frame `tl_validate` compares
   the frame the presenter was given with what each glyph drew: ink = fg index, rest = bg index. A cell
-  is shown if no more than 30% of its ink and 50% of its area differ (the differing pixels, e.g. the
-  game's pointer, are repainted as plain pixels over the glyph); otherwise the low-res pixels show
-  through. Entries are never deleted by failing validation (a restored background brings them back).
+  is shown only if it matches exactly, except that when all the differing pixels of the frame lie in
+  one 32x32 box (the game's pointer sprite) and a cell keeps 70% of its ink and half its area, the cell is
+  shown with those pixels repainted as plain pixels over the glyph (the repaint path ran only in
+  `tests/textlayer_test.c`: no game capture had the pointer over a cell); otherwise the low-res pixels
+  show through. Entries are never deleted by failing validation (a restored background brings them back).
   Palette changes keep indices, so the text fades with the picture. Nothing in G, the screen surface, the
   saves or the checkpoints changes (`replay_det`, `standalone` pass).
 - Measured: text is drawn to surface 0 only (the primary); no BltFast from the primary to another
   surface occurs, 4-5 primary-to-primary ones do (handled); the wipe, swap, XOR and map code write the
   screen directly (validation covers them); the cursor is drawn by raw writes (hence the repaint); the
   letterbox shifts the pointer 40 lines (the screen row is taken from the pointer). The name-entry grid,
-  the title and status numbers are pictures, not 0x401900 text: they stay low-res. The ASCII cell is 16
+  the grid is a picture, not 0x401900 text: it stays low-res (the title and the status numbers were not
+  checked). The ASCII cell is 16
   wide but advances 8, so a half-width cell is tracked at its advance (no partial overlaps observed:
   `overlaps 0` over the runs).
 - Rendering (`present_metal.m`): the glyph is the face's outline (stb_truetype, antialiased) at the
@@ -1496,8 +1499,14 @@ after the cell copy of 0x401900 that tells the platform where the cell went (`te
   `tests/textlayer_test.c` checks tracking, validation, repaint, blit and fill without game data.
   GPU cost of a capture at 1280x960 / 3840x2160: +1.5 / +2-4 ms with text (CRT HD 7.5 vs 6 ms and 20 vs 17.5 ms;
   these include the read-back). The glyph rasteriser takes about 0.05 ms a glyph at 2.25x.
+- Also checked: a replay recorded with the unchanged master binary (8000 frames of the exploration bot,
+  33 checkpoints including the screen hash, text drawn) replays on the new binary, whose `text.c` and
+  `textlayer.c` are built -O2; the iOS simulator build (`tools/build_ios.sh`) compiles; text in
+  CRT 480 captures is pixel-identical to `--text bitmap`.
 - Known gaps: the pointer over a cell that loses more than 30% of its ink falls back to the bitmap glyph
-  for that cell; the first frames of a full page at 4K can mix vector and bitmap glyphs while the atlas
+  for that cell; no capture had text on screen during a dissolve (only the unit test covers the strict
+  rule), the fade captured had no text; F11 was not exercised live (same code path as F12; the game
+  never sees VK 0x7A); the first frames of a full page at 4K can mix vector and bitmap glyphs while the atlas
   fills (4 ms budget); text moved by the game's raw copies (wipe, swap) stays bitmap until redrawn; the
   presented frame on screen could not be checked live here (window not visible), only captured through
   `present_capture`; the iOS build was not compiled.

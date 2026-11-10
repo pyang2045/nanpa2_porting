@@ -250,18 +250,19 @@ static NSString *const shader_src = @
 	"}\n"
 	/* The text layer (platform/textlayer.h): opaque cells, each pixel mix(bg, fg, glyph coverage) in linear
 	 * light, drawn over the picture's raster; vs_text expands quad i of the buffer, fs_text reads the quad
-	 * again (flat index) for its colours and glyph rectangle. `encode` is 1 on the drawable (the raster is
-	 * the viewport there, so the quad's pixel is the fragment's minus the viewport's origin) and 0 on the
-	 * half-float raster of CRT HD. */
+	 * again (flat index) for its colours and glyph rectangle. The viewport is the raster (a rectangle of
+	 * the drawable in Sharp and Smooth: the NDC are relative to it, the fragment's position is not, so the
+	 * quad's pixel is the fragment's minus the viewport's origin). `encode` is 1 on the drawable and 0 on
+	 * the half-float raster of CRT HD. */
 	"struct TQuad { float4 cell; float4 glyph; float4 atlas; float4 fg; float4 bg; };\n"
-	"struct TU { float2 origin; float2 target; int encode; int pad0; int pad1; int pad2; };\n"
+	"struct TU { float2 origin; float2 raster; int encode; int pad0; int pad1; int pad2; };\n"
 	"struct TV { float4 pos [[position]]; uint qi [[flat]]; };\n"
 	"vertex TV vs_text(uint vid [[vertex_id]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]]) {\n"
 	"  uint qi = vid / 6, k = vid % 6;\n"
 	"  uint c = (k == 0 || k == 3) ? 0 : (k == 1) ? 1 : (k == 2 || k == 4) ? 2 : 3;\n"
 	"  float4 b = q[qi].cell;\n"
-	"  float2 p = float2((c == 1 || c == 2) ? b.z : b.x, (c >= 2) ? b.w : b.y) + u.origin;\n"
-	"  TV o; o.pos = float4(p.x / u.target.x * 2.0 - 1.0, 1.0 - p.y / u.target.y * 2.0, 0.0, 1.0); o.qi = qi;\n"
+	"  float2 p = float2((c == 1 || c == 2) ? b.z : b.x, (c >= 2) ? b.w : b.y);\n"
+	"  TV o; o.pos = float4(p.x / u.raster.x * 2.0 - 1.0, 1.0 - p.y / u.raster.y * 2.0, 0.0, 1.0); o.qi = qi;\n"
 	"  return o;\n"
 	"}\n"
 	"fragment float4 fs_text(TV in [[stage_in]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]],\n"
@@ -528,8 +529,8 @@ static void text_pass(id<MTLCommandBuffer> cb, id<MTLTexture> target, const stru
 	id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
 	[enc setRenderPipelineState:encode ? pipe_text_enc : pipe_text_lin];
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
-	struct { float origin[2], target[2]; int32_t encode, pad[3]; } tu = {
-		{ (float)x, (float)y }, { (float)target.width, (float)target.height }, encode, { 0, 0, 0 }
+	struct { float origin[2], raster[2]; int32_t encode, pad[3]; } tu = {
+		{ (float)x, (float)y }, { (float)w, (float)h }, encode, { 0, 0, 0 }
 	};
 	[enc setVertexBuffer:buf offset:0 atIndex:0];
 	[enc setVertexBytes:&tu length:sizeof tu atIndex:1];

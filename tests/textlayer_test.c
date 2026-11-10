@@ -143,6 +143,28 @@ int main(void)
 		      st.repaint, n);
 	}
 
+	/* differences all over (a wipe): strict, no cell with a differing pixel is shown, none is repainted */
+	{
+		uint8_t keep[8][16];
+		for (int r = 0; r < 4; r++)
+			memcpy(keep[r], frame + (100 + r) * SCREEN_W + 100, 16);
+		frame[(104) * SCREEN_W + 103] ^= 1;      /* a pixel of the first cell ... */
+		frame[(104) * SCREEN_W + 116 + 3] ^= 1;  /* ... and one of the second, 16 columns apart is still one box */
+		draw(100, 200, 0x4e01, 7, 12);
+		frame[204 * SCREEN_W + 103] ^= 1;        /* a third, in a cell 100 rows down: no longer one box */
+		const struct tl_quad *q;
+		tl_validate(frame, pal);
+		struct tl_stats st;
+		tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+		tl_get_stats(&st);
+		CHECK(st.repaint == 0, "spread differences are not repainted: %d", st.repaint);
+		tl_fill(SURF_PRIMARY_HANDLE, 100, 200, 116, 216);
+		frame[(104) * SCREEN_W + 103] ^= 1;
+		frame[(104) * SCREEN_W + 116 + 3] ^= 1;
+		for (int r = 0; r < 4; r++)
+			CHECK(!memcmp(keep[r], frame + (100 + r) * SCREEN_W + 100, 16), "test restored the frame");
+	}
+
 	/* the first cell cleared to its background (no tracked call): not shown, the second still is */
 	for (int r = 0; r < 16; r++)
 		for (int c = 0; c < 16; c++)

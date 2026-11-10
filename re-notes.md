@@ -192,9 +192,8 @@ surface operations only BltFast (0x401430) and the fill (0x4017b0) go through th
 dissolve wipe, the swap, the XOR rectangle and the map redraw write the screen directly. BltFast from
 the primary to the primary happens (4 or 5 times in the first 20000 frames), from the primary to another
 surface never. The ASCII cell is 16 wide but advances 8: the next cell covers its right half (the
-tracked width of a half-width cell is therefore its advance). The name-entry grid, the title and the
-status numbers are in the pictures (NAME.GP4, FONT.GP4), not drawn by 0x401900: a name-entry run
-drew no text cell at all.
+tracked width of a half-width cell is therefore its advance). The name-entry grid is part of the
+picture (NAME.GP4), not drawn by 0x401900: a name-entry run drew no text cell at all.
 
 ## Input (WndProc 0x4021c0)
 

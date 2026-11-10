@@ -56,6 +56,7 @@ void tl_on_change(void (*cb)(int))
 /* ---- tracking ---- */
 
 #define MAX_ENT 4096
+#define OVERLAY_BOX 32 /* the pointer sprite's size: the most one overlay can cover */
 #define MIN_INK 4 /* a cell with less ink is not worth showing (and would match by chance) */
 
 struct entry {
@@ -211,10 +212,52 @@ void tl_validate(const uint8_t *frame, const uint32_t pal[256])
 			lin[i][2] = powf((float)(pal[i] & 255) / 255.0f, 2.2f);
 		}
 	}
+	/* Pass 1: how many pixels of each cell differ from what its glyph drew, and the box that all the
+	 * differing pixels of all cells lie in. A cell must match exactly, except that when the differences
+	 * of the whole frame fit in one small box (the game's pointer is a 32x32 sprite drawn into the
+	 * screen) the cells touching it are shown with those pixels repainted as they are. Differences
+	 * spread wider (a wipe, a scroll, a cell drawn over) leave every cell strictly checked. */
+	static int bad_of[MAX_ENT];
+	int bx0 = 1 << 30, by0 = 1 << 30, bx1 = -1, by1 = -1;
+	for (int i = 0; i < nent; i++) {
+		const struct entry *e = &ents[i];
+		int bad_ink = 0, x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1;
+		bad_of[i] = 0;
+		if (e->surf != SURF_PRIMARY_HANDLE || e->x < 0 || e->y < 0 || e->x + e->w > SCREEN_W ||
+		    e->y + e->n > SCREEN_H)
+			continue;
+		for (int r = 0; r < e->n; r++) {
+			const uint8_t *row = frame + (e->y + r) * SCREEN_W + e->x;
+			uint32_t m = e->g.mask[r];
+			for (int c = 0; c < e->w; c++) {
+				int ink = m >> c & 1;
+				if (row[c] == (ink ? e->fg : e->bg))
+					continue;
+				bad_of[i]++;
+				bad_ink += ink;
+				if (e->x + c < x0) x0 = e->x + c;
+				if (e->x + c > x1) x1 = e->x + c;
+				if (e->y + r < y0) y0 = e->y + r;
+				if (e->y + r > y1) y1 = e->y + r;
+			}
+		}
+		/* a cell that lost most of itself is gone (wiped over, scrolled away), not overlaid: its
+		 * differences say nothing about a pointer, and stale cells of an earlier page must not keep
+		 * the frame strict for ever */
+		if (bad_of[i] && bad_of[i] <= e->w * e->n / 2 && bad_ink <= e->ink * 3 / 10) {
+			if (x0 < bx0) bx0 = x0;
+			if (x1 > bx1) bx1 = x1;
+			if (y0 < by0) by0 = y0;
+			if (y1 > by1) by1 = y1;
+		}
+	}
+	int overlay = bx1 >= 0 && bx1 - bx0 < OVERLAY_BOX && by1 - by0 < OVERLAY_BOX;
 	for (int i = 0; i < nent; i++) {
 		const struct entry *e = &ents[i];
 		if (e->surf != SURF_PRIMARY_HANDLE || e->x < 0 || e->y < 0 || e->x + e->w > SCREEN_W ||
 		    e->y + e->n > SCREEN_H)
+			continue;
+		if (bad_of[i] && !overlay)
 			continue;
 		/* A few pixels may differ (the pointer, a selection frame drawn over the cell): they are
 		 * repainted as they are. A cell that lost much of its ink (cleared to the background, drawn

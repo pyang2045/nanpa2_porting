@@ -182,16 +182,16 @@ debugging variable `NANPA2_TEXT=threshold|outline`, which changes how the bitmap
   drew (character, font, size, colours, the ink mask); at each frame the presenter checks the cell
   against the screen, and shows the vector glyph only where the pixels still are exactly what the glyph
   drew. A cell that was drawn over, erased, scrolled or wiped fails the check and the picture shows
-  through. Palette changes change colours, not indices, so the text fades with the picture. A few
-  differing pixels (the game's mouse pointer, a selection frame) are repainted over the vector glyph
-  as they are.
+  through. Palette changes change colours, not indices, so the text fades with the picture. The one
+  exception to an exact match: when every differing pixel of the frame lies in one 32x32 box (the
+  game's mouse pointer is a 32x32 sprite drawn into the screen) and the cell keeps most of its ink, the
+  cells touching it are shown with those pixels repainted over the vector glyph as they are.
 - Glyphs come from the same font as the bitmap ones (the strokes widened a little to match their
   weight, fallback face for kana), rasterised at the on-screen size into a glyph atlas, and composited
   in linear light as opaque cells: CRT HD draws them into the virtual raster before the tube model (so
   they get the same beam, grille and glow), Sharp and Smooth draw them on the output. CRT 480 always
   shows the game's own glyphs (it is the period-correct mode). The text drawn into the picture files
-  themselves (the name-entry grid, the title, the status numbers) is not text the game draws and stays
-  as it is.
+  themselves (the name-entry grid) is not text the game draws and stays as it is.
 - The Metal presenter implements it; the SDL_Renderer presenter accepts the option and the key and shows the
   game's glyphs.
 - `NANPA2_LOG_TEXT=1` (with a `--crt-shot` or `NANPA2_SHOT_PRESENT` capture) prints what the layer did,
