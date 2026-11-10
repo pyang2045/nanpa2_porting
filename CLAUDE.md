@@ -13,10 +13,12 @@ addresses.
 
 ## Hard rules
 
-- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe`;
+- **Game data is never committed, uploaded or published.** `game/` (the CD contents plus `nanpa2.exe`;
   `FLAG0..6` from a copied install are optional: the engine generates blank saves), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
-  gitignored. Never commit or upload them, and never copy tables or text out of them into the
-  source beyond small format constants (code tables, offsets) needed to read the data.
+  gitignored. Never commit, push, upload or publish them (no repo, release, artifact, issue or CI cache), and never copy
+  tables or text out of them into the source beyond small format constants (code tables, offsets) needed to read the data.
+  The one allowed copy is the user's own files onto the user's own devices, when the user asks (for example
+  `NANPA2.iso` into the iPad app's Documents folder, or the CD folder into the simulator container).
 - Never run any `.exe`. Static analysis of `nanpa2.exe` (Ghidra headless, objdump) only.
 - Commit as `pyang2045 <39607593+pyang2045@users.noreply.github.com>` with `TZ=UTC git commit`.
   No personal information (home paths, real names, emails) in commits, docs or release files.
@@ -114,7 +116,7 @@ The log line `Renderer: Metal | <GPU>` confirms Metal. Wrap scripted runs:
 
 ## Reverse engineering
 
-Ghidra 12.2 and its JDK live in `~/git/porting/tools/`:
+Ghidra 12.2 and a JDK are installed outside the repo (the paths below are the maintainer's layout; adjust):
 
 ```sh
 G=~/git/porting/tools/ghidra_12.2_PUBLIC
