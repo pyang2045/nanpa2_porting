@@ -17,9 +17,40 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1</string>
+	<string>@NANPA2_VERSION@</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>@NANPA2_BUILD@</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>iPhoneOS</string>
+	</array>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60</string>
+			</array>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60</string>
+				<string>AppIcon76</string>
+				<string>AppIcon83.5</string>
+			</array>
+		</dict>
+	</dict>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+		<string>metal</string>
+	</array>
 	<key>MinimumOSVersion</key>
 	<string>@NANPA2_IOS_MIN@</string>
 	<key>UIDeviceFamily</key>

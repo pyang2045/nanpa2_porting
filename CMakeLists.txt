@@ -104,8 +104,17 @@ if(NANPA2_IOS)
   set(NANPA2_APP_NAME "同級生２")
   set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
   set(NANPA2_IOS_MIN "13.0" CACHE STRING "Minimum iOS version")
+  set(NANPA2_VERSION "0.1" CACHE STRING "CFBundleShortVersionString")
+  execute_process(COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-list --count HEAD
+    OUTPUT_VARIABLE NANPA2_BUILD OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NOT NANPA2_BUILD)
+    set(NANPA2_BUILD "1")
+  endif()
   configure_file(cmake/Info.ios.plist.in "${CMAKE_BINARY_DIR}/Info.ios.plist" @ONLY)
-  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES})
+  set(NANPA2_ICONS cmake/ios/AppIcon60@2x.png cmake/ios/AppIcon60@3x.png
+    cmake/ios/AppIcon76@2x.png cmake/ios/AppIcon83.5@2x.png)
+  set_source_files_properties(${NANPA2_ICONS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES} ${NANPA2_ICONS})
   set_target_properties(nanpa2 PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.ios.plist"
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
@@ -114,6 +123,10 @@ else()
   add_executable(nanpa2 ${SOURCES})
 endif()
 target_include_directories(nanpa2 PRIVATE src third_party)
+if(NANPA2_IOS)
+  # no build paths in __FILE__ or debug info of the shipped binary
+  target_compile_options(nanpa2 PRIVATE -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+endif()
 if(TARGET SDL2::SDL2)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
 else()
