@@ -112,12 +112,16 @@ if(NANPA2_IOS)
     set(NANPA2_BUILD "1")
   endif()
   configure_file(cmake/Info.ios.plist.in "${CMAKE_BINARY_DIR}/Info.ios.plist" @ONLY)
-  set(NANPA2_ICONS cmake/ios/AppIcon60@2x.png cmake/ios/AppIcon60@3x.png
-    cmake/ios/AppIcon76@2x.png cmake/ios/AppIcon83.5@2x.png)
-  set_source_files_properties(${NANPA2_ICONS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES} ${NANPA2_ICONS})
+  # the app icon: cmake/ios/Assets.xcassets. Xcode generator: compiled by Xcode as a resource;
+  # Ninja builds: tools/build_ios.sh runs actool on it (the generator has no asset catalog step).
+  set(NANPA2_ASSETS "")
+  if(CMAKE_GENERATOR STREQUAL "Xcode")
+    set(NANPA2_ASSETS cmake/ios/Assets.xcassets)
+  endif()
+  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES} ${NANPA2_ASSETS})
   set_target_properties(nanpa2 PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.ios.plist"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
     XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
     XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${NANPA2_APP_ID}")
 else()

@@ -1495,3 +1495,18 @@ with an empty save folder (270000 frames, Prologue, saves written) recorded and 
 then a load from those saves; save selftest ok; title/name-entry shot looked at; iOS simulator build and run
 from `Documents/Game.iso` reaches name entry (app uninstalled afterwards). Timing: mount 5 ms warm, open+4 KB
 0.002 ms against 0.04-0.06 ms from the folder (warm cache). Not tested: Windows/MSYS2, Linux, a real iPad.
+
+## 2026-11-10: iOS app icon as an asset catalog
+
+`cmake/ios/Assets.xcassets/AppIcon.appiconset`: a single 1024x1024 universal/ios icon (opaque sRGB, no alpha,
+no pre-rounded corners, PNG chunks only IHDR/sRGB/IDAT/IEND). Single-size form chosen because `xcrun actool
+--minimum-deployment-target 13.0` still emits the old-size files from it (AppIcon60x60@2x.png,
+AppIcon76x76@2x~ipad.png) plus the AppIcon renditions in Assets.car, and a partial plist with `CFBundleIcons`,
+`CFBundleIcons~ipad` and `CFBundleIconName`. Design: 同級生２ (full-width ２) as a 2x2 grid (同級 / 生２), PingFang
+TC Semibold, white on dark blue, about 68% of the canvas; the single line was illegible at 40 px. Generator:
+`tools/make_ios_icon.swift` (CoreGraphics/CoreText). The four loose PNGs and the hand-listed `CFBundleIconFiles`
+are gone. Wiring: `build_ios.sh` runs actool and merges the partial plist for the simulator and `--ipa` (Ninja)
+builds; the Xcode generator (`--device`) gets the catalog as a resource with
+`ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon`. Checked: simulator home screen (icon present, clear, not clipped,
+app uninstalled afterwards); unsigned IPA holds Assets.car, `CFBundleIconName = AppIcon`, the icon dicts, no
+`/Users/` strings; `--device` runs through compile and stops only at signing (no team). Commit: see git log.
