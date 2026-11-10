@@ -541,3 +541,10 @@ but neither has been built or run. Known points:
 - `third_party/stb_truetype.h` (Sean Barrett; public domain / MIT) and `third_party/minimp3.h`,
   `minimp3_ex.h` (lieff; CC0 / public domain).
 - The reverse engineering used Ghidra (not included).
+
+## License
+
+- The code of this project is MIT-licensed; see `LICENSE`.
+- Third-party code keeps its own licenses: SDL3 is zlib, stb_truetype is MIT / public domain, minimp3 is CC0.
+- The game itself is not included and is not covered by this license. 同級生２ belongs to its rights holders,
+  and this project has no affiliation with them. You need your own copy of the game.
