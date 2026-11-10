@@ -5,7 +5,7 @@ Guidance for Claude Code in this repository.
 ## What this is
 
 A native port of 同級生２ (Doukyuusei 2), Taiwan Traditional Chinese release (`nanpa2.exe`,
-built 2000-07-10), to SDL2. The original engine is reimplemented in C from static analysis of
+built 2000-07-10), to SDL3. The original engine is reimplemented in C from static analysis of
 `nanpa2.exe`; the game's own data files are read unchanged. macOS presents through a
 CAMetalLayer; other platforms use SDL_Renderer. `README.md` is the overview and build guide,
 `NOTES.md` the dated status log, `re-notes.md` the reverse-engineered formats and native
@@ -33,7 +33,7 @@ addresses.
 
 The engine is plain C (refactor stages R0-R4, `docs/refactor.md`): no x86 code runs and nothing emulates
 the PC the game was written for. The game logic calls a small platform API; the platform implements it on
-SDL2. Game code never includes SDL, Metal or Objective-C.
+SDL3. Game code never includes SDL, Metal or Objective-C.
 
 - `src/game/`: the game. `state.h` defines `G`, one object that is the exe's data area (0x431000-0x4c0000) in
   its native layout, initialised by code (`state_init`, `state_defaults`: no data file is read) and the only game state; `gmem.h` has
@@ -49,7 +49,7 @@ SDL2. Game code never includes SDL, Metal or Objective-C.
   fill, palette, the screen), `text.h` (Big5 glyphs, stb_truetype), `window.h` (WM_* message queue, the
   16 ms timer, cursor), `sound.h` (SDL audio, MP3 via minimp3), `logo.c`, `clock.[ch]` (pacing, `--speed`),
   `present.h` (macOS: `present_metal.m` CAMetalLayer CRT shader; else `present_sdl.c` SDL_Renderer),
-  `dialog.h` (`dialog_macos.m` folder picker, `dialog_none.c` elsewhere).
+  `dialog.h` (`dialog_macos.m` folder picker, `dialog_sdl.c` (SDL_ShowOpenFolderDialog) elsewhere).
 - `src/dev/`: `replay.c` (deterministic mode, `--record`/`--replay`, state checkpoints), `explore.c` (the
   exploration bot), `dev.c` (scripted input, screenshots, `NANPA2_SAVETEST`), `status.c` (live status file).
 - `src/`: `hooks.[ch]` (the dev hook table: the only way `platform/` and `trap.c` reach `dev/`; `dev_install_hooks`
@@ -58,7 +58,7 @@ SDL2. Game code never includes SDL, Metal or Objective-C.
   `launch.c` (game folder lookup, remembered path, log file for Finder launches), `main.c`.
 - `ios/`: the iOS build, a standard Xcode project (`nanpa2.xcodeproj`, `Info.plist`, `Assets.xcassets`). CMake does not build iOS;
   `tools/gen_xcodeproj.py` is the source of the pbxproj (edit it, rerun, commit; test `xcodeproj` checks it against
-  CMake's source list), `tools/fetch_sdl.sh` builds the gitignored `ios/third_party/SDL2.xcframework`, and
+  CMake's source list), `tools/fetch_sdl.sh` builds the gitignored `ios/third_party/SDL3.xcframework`, and
   `tools/build_ios.sh` wraps `xcodebuild` (simulator, `--device`, unsigned `--ipa`). No team IDs or paths in the project.
 - `tools/`: `build.sh`, `build_msys2.sh`, `bundle_macos.sh` (target `nanpa2_app`: `build/同級生２.app` with
   SDL inside), `replay_diff.py`, `explore.py`, `gp4png.py`, `lzh.py`, `sheet.py`, `peek.py`, `disasm.py`

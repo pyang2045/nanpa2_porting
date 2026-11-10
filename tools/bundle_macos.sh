@@ -3,12 +3,9 @@
 #   bundle_macos.sh OUT.app BINARY Info.plist
 #
 # Copies the binary and every dylib it needs outside /usr/lib and /System
-# (Homebrew's SDL2) into Contents/Frameworks, pointing the load commands at
+# (Homebrew's libSDL3) into Contents/Frameworks, pointing the load commands at
 # @executable_path/../Frameworks (the binary) and @loader_path (the dylibs),
-# so the app runs from Finder without Homebrew's paths. Homebrew's SDL2 is
-# sdl2-compat, which dlopens SDL3 at run time, among other places from
-# @loader_path/libSDL3.dylib: so SDL3 is copied there under that name
-# (override with SDL3_LIBRARY=/path/libSDL3.0.dylib). The files are then
+# so the app runs from Finder without Homebrew's paths. The files are then
 # signed ad hoc (install_name_tool breaks the signatures), and
 # LSMinimumSystemVersion is set to the highest minos of the files.
 #
@@ -58,29 +55,6 @@ fix() {
 queue=$(mktemp)
 trap 'rm -f "$queue"' EXIT
 fix "$contents/MacOS/nanpa2" "@executable_path/../Frameworks"
-
-# sdl2-compat: the real SDL is SDL3, loaded with dlopen
-sdl2=$(ls "$fw"/libSDL2*.dylib 2>/dev/null | head -n 1 || true)
-if [ -n "$sdl2" ] && strings "$sdl2" | grep -q '@loader_path/libSDL3.dylib'; then
-	sdl3=${SDL3_LIBRARY:-}
-	if [ -z "$sdl3" ]; then
-		for d in "$(pkg-config --variable=libdir sdl3 2>/dev/null || true)" \
-			/opt/homebrew/opt/sdl3/lib /usr/local/opt/sdl3/lib /opt/homebrew/lib /usr/local/lib; do
-			if [ -n "$d" ] && [ -f "$d/libSDL3.0.dylib" ]; then
-				sdl3="$d/libSDL3.0.dylib"
-				break
-			fi
-		done
-	fi
-	[ -n "$sdl3" ] && [ -f "$sdl3" ] || {
-		echo "bundle: $sdl2 is sdl2-compat but libSDL3.0.dylib was not found (set SDL3_LIBRARY)" >&2
-		exit 1
-	}
-	cp -L "$sdl3" "$fw/libSDL3.dylib"
-	chmod u+w "$fw/libSDL3.dylib"
-	install_name_tool -id "@loader_path/libSDL3.dylib" "$fw/libSDL3.dylib" 2>/dev/null
-	echo "$fw/libSDL3.dylib" >>"$queue"
-fi
 
 # dependencies of the copied dylibs, until none are new
 done_n=0

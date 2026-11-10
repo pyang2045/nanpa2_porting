@@ -24,7 +24,7 @@
  * here (the cursor is drawn by the game from MOUSE.DAT). */
 #include "platform/logo.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -145,25 +145,25 @@ int logo_frame(int n, uint32_t *xrgb)
 	return count;
 }
 
-static SDL_AudioDeviceID open_audio(const struct avi *a)
+static SDL_AudioStream *open_audio(const struct avi *a)
 {
 	if (!a->audio_len || !a->a_rate || (a->a_bits != 8 && a->a_bits != 16) || a->a_channels < 1 ||
 	    a->a_channels > 2)
-		return 0;
-	if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
-		return 0;
+		return NULL;
+	if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
+		return NULL;
 	SDL_AudioSpec want = { 0 };
 	want.freq = a->a_rate;
-	want.format = a->a_bits == 8 ? AUDIO_U8 : AUDIO_S16LSB;
-	want.channels = (Uint8)a->a_channels;
-	want.samples = 1024;
-	SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, NULL, 0);
-	if (!dev) {
+	want.format = a->a_bits == 8 ? SDL_AUDIO_U8 : SDL_AUDIO_S16LE;
+	want.channels = a->a_channels;
+	/* the stream converts to whatever the device runs at */
+	SDL_AudioStream *st = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, NULL, NULL);
+	if (!st) {
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
-		return 0;
+		return NULL;
 	}
-	SDL_QueueAudio(dev, a->audio, (Uint32)a->audio_len);
-	return dev;
+	SDL_PutAudioStreamData(st, a->audio, (int)a->audio_len);
+	return st;
 }
 
 static int wanted(void)
@@ -182,9 +182,9 @@ void logo_play(void)
 		return;
 	}
 	hook_logo(1);
-	SDL_AudioDeviceID dev = open_audio(&a);
-	if (dev)
-		SDL_PauseAudioDevice(dev, 0);
+	SDL_AudioStream *dev = open_audio(&a);
+	if (dev) /* a stream's device starts paused */
+		SDL_ResumeAudioStreamDevice(dev);
 
 	Uint64 start = SDL_GetPerformanceCounter(), freq = SDL_GetPerformanceFrequency();
 	int done = 0, shown = 0, i;
@@ -205,14 +205,14 @@ void logo_play(void)
 		SDL_Event ev;
 		win_cursor_update(); /* the pointer may have left the image */
 		while (SDL_PollEvent(&ev)) {
-			if (ev.type == SDL_QUIT) {
+			if (ev.type == SDL_EVENT_QUIT) {
 				SDL_PushEvent(&ev); /* for the game's own loop */
 				done = 1;
 				break;
 			}
-			if ((ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP) && present_hotkey(&ev.key))
+			if ((ev.type == SDL_EVENT_KEY_DOWN || ev.type == SDL_EVENT_KEY_UP) && present_hotkey(&ev.key))
 				continue;
-			if ((ev.type == SDL_KEYDOWN && !ev.key.repeat) || ev.type == SDL_MOUSEBUTTONDOWN)
+			if ((ev.type == SDL_EVENT_KEY_DOWN && !ev.key.repeat) || ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
 				done = 1; /* WM_KEYDOWN, WM_LBUTTONDOWN, WM_RBUTTONDOWN: skip */
 		}
 	}
@@ -222,7 +222,7 @@ void logo_play(void)
 	SDL_Log("LOGO.AVI: %s after %d of %d frames (%d shown) in %u ms", done ? "skipped" : "ended", i,
 		a.nframes, shown, (unsigned)((SDL_GetPerformanceCounter() - start) * 1000 / freq));
 	if (dev) {
-		SDL_CloseAudioDevice(dev);
+		SDL_DestroyAudioStream(dev); /* closes the device it opened */
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
 	hook_logo(0);

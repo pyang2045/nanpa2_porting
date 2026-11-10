@@ -12,7 +12,7 @@
 #include "platform/text.h"
 #include "platform/surface.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

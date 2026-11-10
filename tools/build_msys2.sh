@@ -16,19 +16,19 @@
 #
 # Packages (once, from the MSYS2 MINGW64 shell):
 #   pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake \
-#     mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-SDL2 \
+#     mingw-w64-x86_64-ninja mingw-w64-x86_64-pkgconf mingw-w64-x86_64-sdl3 \
 #     mingw-w64-x86_64-python
 #
 # Why MSYS2 and not MSVC: CMakeLists.txt passes GCC/Clang flags, and the
 # sources use GNU extensions (__typeof__, __builtin_expect, POSIX getline).
-# MinGW-w64 GCC is the nearest compiler, and pacman has SDL2. The engine
+# MinGW-w64 GCC is the nearest compiler, and pacman has SDL3 (mingw-w64-x86_64-sdl3). The engine
 # assumes a 64-bit little-endian host (an LLP64 Windows build is fine: no code
 # depends on the width of long, and the layout of the game state and of the
 # FLAG files is fixed-width with static asserts).
 #
 # The program is built as nanpa2-port.exe, a GUI program (no console window;
 # set NANPA2_LOG_FILE to keep its log). BUILD_DIR/dist gets it with the DLLs
-# it needs from /mingw64/bin (SDL2.dll and the MinGW runtime). It holds no
+# it needs from /mingw64/bin (SDL3.dll and the MinGW runtime). It holds no
 # game code or data: run it with --game PATH.
 set -eu
 
@@ -64,7 +64,7 @@ missing=
 for t in gcc cmake ninja python objdump; do
 	command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
 done
-pkg-config --exists sdl2 2>/dev/null || missing="$missing SDL2"
+pkg-config --exists sdl3 2>/dev/null || missing="$missing SDL3"
 if [ -n "$missing" ]; then
 	echo "build_msys2.sh: missing:$missing. Install with:" >&2
 	sed -n '15,18p' "$0" | sed 's/^#//' >&2

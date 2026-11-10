@@ -7,7 +7,7 @@
 #ifndef NANPA2_STATUS_H
 #define NANPA2_STATUS_H
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 /* Start the writer thread before SDL_Init (phase "init": the file then
  * shows an instance stuck in the video setup). */

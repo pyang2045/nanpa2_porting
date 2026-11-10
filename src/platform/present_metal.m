@@ -5,7 +5,7 @@
  * beam widens with brightness, an aperture-grille mask and a vignette. */
 #include "present_common.h"
 
-#include <SDL_metal.h>
+#include <SDL3/SDL_metal.h>
 #import <TargetConditionals.h>
 #if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
@@ -340,14 +340,14 @@ static id<MTLTexture> make_texture(MTLPixelFormat fmt, int w, int h, MTLTextureU
 	return [device newTextureWithDescriptor:td];
 }
 
-Uint32 present_window_flags(void)
+SDL_WindowFlags present_window_flags(void)
 {
 #if TARGET_OS_OSX
 	return present_headless() ? 0 : SDL_WINDOW_METAL;
 #else
 	/* iOS: a full-screen Metal window; the view's layer is sized from its bounds x the display scale */
 	return present_headless() ? 0 : SDL_WINDOW_METAL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS |
-						 SDL_WINDOW_ALLOW_HIGHDPI;
+						 SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
 }
 
@@ -566,7 +566,7 @@ static void show(void)
 {
 	@autoreleasepool {
 		int dw, dh;
-		SDL_Metal_GetDrawableSize(window, &dw, &dh);
+		SDL_GetWindowSizeInPixels(window, &dw, &dh);
 		pstats.drawable_w = dw;
 		pstats.drawable_h = dh;
 		if (dw <= 0 || dh <= 0) {
@@ -635,7 +635,7 @@ int present_capture(const char *bmp_path, int w, int h)
 		return soft_capture(bmp_path, w, h);
 	@autoreleasepool {
 		if (w <= 0 || h <= 0) /* the window's drawable size */
-			SDL_Metal_GetDrawableSize(window, &w, &h);
+			SDL_GetWindowSizeInPixels(window, &w, &h);
 		MTLTextureDescriptor *td =
 			[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
 									   width:(NSUInteger)w
@@ -661,10 +661,9 @@ int present_capture(const char *bmp_path, int w, int h)
 			bytesPerRow:(NSUInteger)w * 4
 			 fromRegion:MTLRegionMake2D(0, 0, (NSUInteger)w, (NSUInteger)h)
 			mipmapLevel:0];
-		SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(buf, w, h, 32, w * 4,
-								    SDL_PIXELFORMAT_ARGB8888);
-		int ok = s && SDL_SaveBMP(s, bmp_path) == 0;
-		SDL_FreeSurface(s);
+		SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ARGB8888, buf, w * 4);
+		int ok = s && SDL_SaveBMP(s, bmp_path);
+		SDL_DestroySurface(s);
 		free(buf);
 		return ok;
 	}

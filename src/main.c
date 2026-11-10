@@ -1,5 +1,5 @@
 /*
- * 同級生２ (nanpa2.exe, Taiwan release) on SDL2.
+ * 同級生２ (nanpa2.exe, Taiwan release) on SDL3.
  *
  *   nanpa2 [--game DIR] [--font PATH]                  play
  *   nanpa2 --view [NAME.GP4] [--shot OUT.bmp]          picture viewer
@@ -41,7 +41,8 @@
  * (src/platform: files, surfaces, text, window, sound). The game state starts from
  * values defined in code (game/state.c): neither nanpa2.exe nor nanpa2.dat is read.
  */
-#include <SDL.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -159,11 +160,11 @@ static int show(const char *name)
 static int show_bmp(const char *path)
 {
 	SDL_Surface *b = SDL_LoadBMP(path);
-	SDL_Surface *s = b ? SDL_ConvertSurfaceFormat(b, SDL_PIXELFORMAT_XRGB8888, 0) : NULL;
-	SDL_FreeSurface(b);
+	SDL_Surface *s = b ? SDL_ConvertSurface(b, SDL_PIXELFORMAT_XRGB8888) : NULL;
+	SDL_DestroySurface(b);
 	if (!s || s->w != SCREEN_W || s->h != SCREEN_H) {
 		SDL_Log("cannot load %s as a %dx%d screenshot", path, SCREEN_W, SCREEN_H);
-		SDL_FreeSurface(s);
+		SDL_DestroySurface(s);
 		return 0;
 	}
 	int n = 0;
@@ -179,7 +180,7 @@ static int show_bmp(const char *path)
 			screen[y * SCREEN_W + x] = (uint8_t)(i < 256 ? i : 0);
 		}
 	}
-	SDL_FreeSurface(s);
+	SDL_DestroySurface(s);
 	return 1;
 }
 
@@ -193,14 +194,14 @@ static void show_screen(void)
 
 static void save_bmp(const char *path)
 {
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
+	SDL_Surface *s = SDL_CreateSurface(SCREEN_W, SCREEN_H, SDL_PIXELFORMAT_XRGB8888);
 	for (int y = 0; y < SCREEN_H; y++) {
 		uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
 		for (int x = 0; x < SCREEN_W; x++)
 			row[x] = palette[screen[y * SCREEN_W + x]];
 	}
 	SDL_SaveBMP(s, path);
-	SDL_FreeSurface(s);
+	SDL_DestroySurface(s);
 }
 
 /* the game speed: 1.0 is the original's (the time model of game/pace.h at real time) */
@@ -328,15 +329,15 @@ int main(int argc, char **argv)
 			if (display < 0)
 				fprintf(stderr, "--display: hd, 480, sharp or smooth\n");
 		} else if (!strcmp(argv[i], "--crt-lines") && i + 1 < argc)
-			SDL_setenv("NANPA2_CRT_LINES", argv[++i], 1);
+			SDL_setenv_unsafe("NANPA2_CRT_LINES", argv[++i], 1);
 		else if (!strcmp(argv[i], "--crt-scaler") && i + 1 < argc)
-			SDL_setenv("NANPA2_CRT_SCALER", argv[++i], 1);
+			SDL_setenv_unsafe("NANPA2_CRT_SCALER", argv[++i], 1);
 		else if (!strcmp(argv[i], "--logo-frame") && i + 1 < argc)
 			logo_frame_n = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "--logo"))
-			SDL_setenv("NANPA2_LOGO", "1", 1);
+			SDL_setenv_unsafe("NANPA2_LOGO", "1", 1);
 		else if (!strcmp(argv[i], "--no-logo"))
-			SDL_setenv("NANPA2_LOGO", "0", 1);
+			SDL_setenv_unsafe("NANPA2_LOGO", "0", 1);
 		else if (!strcmp(argv[i], "--window") && i + 1 < argc)
 			sscanf(argv[++i], "%dx%d", &win_w, &win_h);
 		else if (!strcmp(argv[i], "--fullscreen"))
@@ -344,13 +345,13 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "--speed") && i + 1 < argc)
 			speed = atof(argv[++i]), speed_set = 1;
 		else if (!strcmp(argv[i], "--record") && i + 1 < argc)
-			SDL_setenv("NANPA2_RECORD", argv[++i], 1);
+			SDL_setenv_unsafe("NANPA2_RECORD", argv[++i], 1);
 		else if (!strcmp(argv[i], "--replay") && i + 1 < argc)
-			SDL_setenv("NANPA2_REPLAY", argv[++i], 1);
+			SDL_setenv_unsafe("NANPA2_REPLAY", argv[++i], 1);
 		else if (!strcmp(argv[i], "--deterministic"))
-			SDL_setenv("NANPA2_DETERMINISTIC", "1", 1);
+			SDL_setenv_unsafe("NANPA2_DETERMINISTIC", "1", 1);
 		else if (!strcmp(argv[i], "--pause-inactive"))
-			SDL_setenv("NANPA2_PAUSE_INACTIVE", "1", 1);
+			SDL_setenv_unsafe("NANPA2_PAUSE_INACTIVE", "1", 1);
 	}
 	/* the game folder: --game, or found or asked for (launch.c); message
 	 * boxes and the picker only for a launch someone watches */
@@ -372,16 +373,15 @@ int main(int argc, char **argv)
 			return 1;
 		SDL_Log("LOGO.AVI frame %d of %d", logo_frame_n, n);
 		if (shot) {
-			SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(rgb, SCREEN_W, SCREEN_H, 32, SCREEN_W * 4,
-									    SDL_PIXELFORMAT_XRGB8888);
+			SDL_Surface *s = SDL_CreateSurfaceFrom(SCREEN_W, SCREEN_H, SDL_PIXELFORMAT_XRGB8888, rgb, SCREEN_W * 4);
 			SDL_SaveBMP(s, shot);
-			SDL_FreeSurface(s);
+			SDL_DestroySurface(s);
 			return 0;
 		}
 		logo_rgb = rgb;
 		viewer = 1;
 	} else if (view_bmp) {
-		if (SDL_Init(0) < 0 || !show_bmp(view_bmp))
+		if (!SDL_Init(0) || !show_bmp(view_bmp))
 			return 1;
 	} else if (viewer) {
 		list_gp4();
@@ -407,22 +407,21 @@ int main(int argc, char **argv)
 	 * is locked (where the display and GPU setup can block for good) */
 	int headless = getenv("NANPA2_HEADLESS") != NULL;
 	if (headless) {
-		SDL_setenv("SDL_VIDEODRIVER", "dummy", 1);
-		SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+		SDL_setenv_unsafe("SDL_VIDEODRIVER", "dummy", 1);
+		SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy");
 	}
 	/* the status file exists from here and names the startup stage: the
 	 * video setup can hang with the screen locked, see status.c */
 	if (!viewer)
 		status_early();
 	status_stage("sdl_init");
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_TIMER) < 0) {
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
 		fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
 		return 1;
 	}
 	status_stage("window");
-	SDL_Window *win = SDL_CreateWindow("同級生２", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-					   win_w, win_h,
-					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
+	SDL_Window *win = SDL_CreateWindow("同級生２", win_w, win_h,
+					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
 						   (headless ? SDL_WINDOW_HIDDEN : 0) | present_window_flags());
 	status_stage("present_init");
 	if (!win || !present_init(win)) {
@@ -442,7 +441,7 @@ int main(int argc, char **argv)
 		present_set_fullscreen(1);
 	if (viewer && crt_shot) {
 		/* let the window settle (fullscreen transition) for drawable-size shots */
-		for (Uint32 t = SDL_GetTicks() + (fullscreen ? 1500 : 100); SDL_GetTicks() < t;) {
+		for (Uint64 t = SDL_GetTicks() + (fullscreen ? 1500 : 100); SDL_GetTicks() < t;) {
 			SDL_Event ev;
 			while (SDL_PollEvent(&ev)) {
 			}
@@ -467,10 +466,10 @@ int main(int argc, char **argv)
 		for (int running = 1; running;) {
 			SDL_Event ev;
 			while (SDL_PollEvent(&ev)) {
-				if (ev.type == SDL_QUIT)
+				if (ev.type == SDL_EVENT_QUIT)
 					running = 0;
-				else if (ev.type == SDL_KEYDOWN && !present_hotkey(&ev.key)) {
-					SDL_Keycode k = ev.key.keysym.sym;
+				else if (ev.type == SDL_EVENT_KEY_DOWN && !present_hotkey(&ev.key)) {
+					SDL_Keycode k = ev.key.key;
 					if (k == SDLK_ESCAPE)
 						running = 0;
 					else if (name_count && (k == SDLK_RIGHT || k == SDLK_LEFT)) {
