@@ -48,6 +48,25 @@ xcrun simctl launch booted local.nanpa2
 DEVELOPMENT_TEAM=ABCDE12345 tools/build_ios.sh --device   # a real device, signed with your team ID
 ```
 
+#### Sideloading (no Apple developer team needed)
+
+```sh
+tools/build_ios.sh --ipa        # build-ios/nanpa2.ipa: unsigned, arm64, iOS 13+, no game data inside
+```
+
+The IPA is unsigned on purpose: a sideloading tool signs it with your own Apple ID.
+- **Sideloadly** (Mac/Windows): connect the iPad, drag in `nanpa2.ipa`, enter your Apple ID, Start. It may
+  change the bundle identifier; that is fine. **AltStore / SideStore**: add the IPA from the Files app.
+- **Xcode** (alternative): Window > Devices and Simulators > your iPad > "+" and pick the IPA. Xcode needs a
+  signing team, so for a personal team use `DEVELOPMENT_TEAM=... NANPA2_APP_ID=com.yourname.nanpa2
+  tools/build_ios.sh --device` instead.
+- A free Apple ID's apps expire after 7 days (sideload again, or let AltStore refresh it; saves stay) and a
+  free account may have at most 3 sideloaded apps at a time.
+- On the iPad: Settings > Privacy & Security > Developer Mode > on (restart), and after the first install
+  Settings > General > VPN & Device Management > your Apple ID > Trust.
+- Then copy your game folder into the app as described below (Finder's Files tab, or the Files app). Not
+  tested on a real device yet.
+
 Needs Xcode, CMake and Ninja. The script downloads the official SDL2 release source into `build-ios/`
 (gitignored) and builds it statically for the same SDK. A device build uses the Xcode generator and your
 Apple team ID (a free personal team works; set `NANPA2_APP_ID` to a bundle identifier of your own), then

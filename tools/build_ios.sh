@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build the iPad / iPhone app (iOS 13+, universal, landscape only).
 #
-#   tools/build_ios.sh [--device] [--build-dir DIR] [--debug]
+#   tools/build_ios.sh [--device | --ipa] [--build-dir DIR] [--debug]
 #
 # Default: the iOS Simulator (the host architecture), ad-hoc signed: build-ios/sim/nanpa2.app (display name 同級生２).
 #   xcrun simctl boot "iPad Pro 11-inch (M4)"      # once
@@ -15,6 +15,10 @@
 # A free personal team works; set NANPA2_APP_ID to a bundle identifier unique to you (default
 # local.nanpa2). Needs a connected, trusted device and Developer Mode on it (untested here).
 #
+# --ipa builds an UNSIGNED device app (arm64, no team, no profile) and packs build-ios/nanpa2.ipa
+# for sideloading tools that re-sign it with your own Apple ID (Sideloadly, AltStore/SideStore, or
+# Xcode's Devices window > + for a personal team): README "Sideloading". No Apple account needed here.
+#
 # SDL2 is not bundled: the official release source is downloaded once into build-ios/ (gitignored)
 # and built as a static library for the same SDK. Needs Xcode, CMake and Ninja (no sudo, nothing
 # installed). The app holds none of the game: copy your game folder into the app's Documents
@@ -24,15 +28,17 @@ set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 root=$here/build-ios
 device=0
+ipa=0
 type=Release
 sdl_ver=${SDL2_VERSION:-2.32.10}
 
 while [ $# -gt 0 ]; do
 	case $1 in
 	--device) device=1 ;;
+	--ipa) device=1; ipa=1 ;;
 	--build-dir) root=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift ;;
 	--debug) type=Debug ;;
-	-h | --help) sed -n '2,22p' "$0"; exit 0 ;;
+	-h | --help) sed -n '2,26p' "$0"; exit 0 ;;
 	*) echo "unknown option $1" >&2; exit 2 ;;
 	esac
 	shift
@@ -45,6 +51,7 @@ done
 if [ "$device" = 1 ]; then
 	sdk=iphoneos
 	out=$root/device
+	[ "$ipa" = 1 ] && out=$root/ipa
 	arch=arm64
 else
 	sdk=iphonesimulator
@@ -67,14 +74,31 @@ if [ ! -f "$src/CMakeLists.txt" ]; then
 fi
 if [ ! -f "$sdl/lib/libSDL2.a" ]; then
 	# shellcheck disable=SC2086
-	cmake -S "$src" -B "$out/sdl-build" -G Ninja $common -DCMAKE_BUILD_TYPE=Release \
+	cmake -S "$src" -B "$out/sdl-build" -G Ninja $common -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-ffile-prefix-map=$root=sdl" -DCMAKE_OBJC_FLAGS="-ffile-prefix-map=$root=sdl" \
 		-DCMAKE_INSTALL_PREFIX="$sdl" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF
 	cmake --build "$out/sdl-build"
 	cmake --install "$out/sdl-build"
 fi
 
 # ---- the game ----
-if [ "$device" = 1 ]; then
+if [ "$ipa" = 1 ]; then
+	# Ninja: a flat iOS bundle, no signing step at all; any signature is removed below.
+	# shellcheck disable=SC2086
+	cmake -S "$here" -B "$out/build" -G Ninja $common -DCMAKE_BUILD_TYPE="$type" \
+		-DSDL2_DIR="$sdl/lib/cmake/SDL2" ${NANPA2_APP_ID:+-DNANPA2_APP_ID="$NANPA2_APP_ID"}
+	cmake --build "$out/build" --target nanpa2
+	app=$out/nanpa2.app
+	rm -rf "$app" "$out/Payload"
+	cp -R "$out/build/nanpa2.app" "$app"
+	rm -rf "$app/_CodeSignature" "$app/embedded.mobileprovision"
+	codesign --remove-signature "$app/nanpa2" 2>/dev/null || true # the linker's ad-hoc signature
+	strip -x "$app/nanpa2"
+	mkdir "$out/Payload"
+	cp -R "$app" "$out/Payload/"
+	rm -f "$root/nanpa2.ipa"
+	(cd "$out" && ditto -c -k --norsrc --noextattr --noqtn --keepParent Payload "$root/nanpa2.ipa")
+	echo "build_ios: $root/nanpa2.ipa (unsigned, arm64; re-sign by sideloading)"
+elif [ "$device" = 1 ]; then
 	: "${DEVELOPMENT_TEAM:?set DEVELOPMENT_TEAM to your Apple team ID}"
 	# shellcheck disable=SC2086
 	cmake -S "$here" -B "$out/build" -G Xcode $common -DSDL2_DIR="$sdl/lib/cmake/SDL2" \
