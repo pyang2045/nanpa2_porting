@@ -4,9 +4,14 @@
 #include <stddef.h>
 #include <stdio.h>
 
-/* Set the game folder (the CD contents). */
+/* Set the game folder (the CD contents), or a .iso image of the CD (iso.h): every call
+ * below then reads from the image. Saves are never written there. */
 void fsys_set_root(const char *dir);
 const char *fsys_root(void);
+
+int fsys_is_iso(void);
+/* The files directly in dir of an ISO root (original case); 0 if the root is a folder. */
+int fsys_list_iso(const char *dir, void (*cb)(const char *name, void *arg), void *arg);
 
 /* Open a game file by its DOS-style relative path ("DATA\\01.GP4").
  * Backslashes become slashes and each component is matched

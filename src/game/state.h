@@ -383,6 +383,8 @@ extern struct game_state G;
 
 /* Set G to its start values (defined in code, state.c) */
 void state_init(void);
+/* Set G.save to the values a new game starts with (the part of state_init the FLAG file holds) */
+void save_defaults(void);
 
 /* Field access with the width and zero extension of rd8/rd16/wr8/wr16 */
 #define SV(f) ((uint32_t)G.save.n.f)

@@ -4,6 +4,7 @@
 #include "launch.h"
 
 #include <SDL.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,6 +134,25 @@ static int try_dir(const char *dir, const char *source)
 	return 1;
 }
 
+/* Any *.iso in dir (extension in any case) that holds the game: the CD image. */
+static int try_isos_in(const char *dir, const char *source)
+{
+	DIR *d = opendir(dir);
+	if (!d)
+		return 0;
+	struct dirent *e;
+	int ok = 0;
+	while (!ok && (e = readdir(d))) {
+		size_t n = strlen(e->d_name);
+		char path[PATH_CAP + 300];
+		if (n > 4 && !SDL_strcasecmp(e->d_name + n - 4, ".iso") && e->d_name[0] != '.' &&
+		    snprintf(path, sizeof path, "%s/%s", dir, e->d_name) < (int)sizeof path)
+			ok = try_dir(path, source);
+	}
+	closedir(d);
+	return ok;
+}
+
 static void remembered_path(char *out, size_t cap)
 {
 	snprintf(out, cap, "%s/game-folder.txt", launch_pref_dir() ? launch_pref_dir() : ".");
@@ -201,6 +221,9 @@ UNUSED_ON_IOS static int try_near_exe(void)
 		snprintf(cand, sizeof cand, "%s/game", dir);
 		if (try_dir(cand, "next to the executable"))
 			return 1;
+		if (((!launch_in_bundle() || i >= 3) && try_isos_in(dir, "next to the executable")) ||
+		    try_isos_in(cand, "next to the executable"))
+			return 1;
 		strip_last(dir);
 	}
 	return 0;
@@ -216,8 +239,8 @@ UNUSED_ON_IOS static int pick(void)
 {
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
 		return 0;
-	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）\n"
-			     "Choose the 同級生２ game folder (with DATA)";
+	const char *prompt = "請選擇同級生２的遊戲資料夾（含 DATA）或光碟映像檔 (.iso)\n"
+			     "Choose the 同級生２ game folder (with DATA) or the CD image (.iso)";
 	char dir[PATH_CAP];
 	while (dialog_pick_folder(prompt, dir, sizeof dir)) {
 		const char *why = check(dir);
@@ -252,16 +275,16 @@ static const char *ios_game_dir(int interactive)
 	char cand[PATH_CAP + 8];
 	if (docs) {
 		snprintf(cand, sizeof cand, "%s/game", docs);
-		if (try_dir(cand, "Documents") || try_dir(docs, "Documents"))
+		if (try_dir(cand, "Documents") || try_dir(docs, "Documents") || try_isos_in(docs, "Documents"))
 			return found;
 	}
 	char text[PATH_CAP + 900];
 	int n = snprintf(text, sizeof text,
 			 "找不到遊戲資料。請用 Finder（USB 連接）或「檔案」App，把遊戲資料夾"
-			 "（光碟內容加上 data1.cab 內的 FLAG0..FLAG6，內含 DATA 資料夾）複製到"
+			 "（光碟內容，內含 DATA 資料夾）複製到"
 			 "「在我的 iPad 上 > 同級生２」，然後重新開啟本程式。\n\n"
-			 "The game data was not found. Copy the game folder (the CD contents plus FLAG0..FLAG6 "
-			 "from data1.cab, with DATA inside) into this app's Documents through Finder (USB) or "
+			 "The game data was not found. Copy the game folder (the CD contents, with DATA "
+			 "inside) into this app's Documents through Finder (USB) or "
 			 "the Files app (On My iPad > 同級生２), then relaunch.");
 	if (launch_pref_dir() && n > 0 && (size_t)n < sizeof text)
 		snprintf(text + n, sizeof text - (size_t)n, "\n\nLog: %s/nanpa2.log", launch_pref_dir());
@@ -306,8 +329,7 @@ const char *launch_game_dir(const char *cli, int interactive)
 		return found;
 	char text[PATH_CAP + 400];
 	int n = snprintf(text, sizeof text,
-			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents with "
-			 "FLAG0..FLAG6 from data1.cab.\n\n"
+			 "找不到遊戲資料。\nThe game folder was not found. It is the CD contents.\n\n"
 			 "Choose it when asked, put it next to the app (in a folder named \"game\"), "
 			 "or start with --game DIR or NANPA2_GAME_DIR.");
 	if (log_file && launch_pref_dir() && n > 0 && (size_t)n < sizeof text)

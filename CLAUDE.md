@@ -13,8 +13,8 @@ addresses.
 
 ## Hard rules
 
-- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe` and
-  `FLAG0..6` from `data1.cab`), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
+- **Game data never leaves this machine.** `game/` (the CD contents plus `nanpa2.exe`;
+  `FLAG0..6` from a copied install are optional: the engine generates blank saves), `*.iso` and `decomp/` (Ghidra project and decompiled C) are
   gitignored. Never commit or upload them, and never copy tables or text out of them into the
   source beyond small format constants (code tables, offsets) needed to read the data.
 - Never run any `.exe`. Static analysis of `nanpa2.exe` (Ghidra headless, objdump) only.
@@ -56,6 +56,10 @@ SDL2. Game code never includes SDL, Metal or Objective-C.
   in `dev/dev.c` fills it from `main`; nothing outside `dev/` and `main.c` includes a `dev/` header, test `headers`),
   `hash.[ch]` (the checkpoint hash), `trap.c` (`game_trap`, probes), `lzh.c` + `gp4.c` (GP4/ANI), `fsys.c` (case-insensitive files),
   `launch.c` (game folder lookup, remembered path, log file for Finder launches), `main.c`.
+- `ios/`: the iOS build, a standard Xcode project (`nanpa2.xcodeproj`, `Info.plist`, `Assets.xcassets`). CMake does not build iOS;
+  `tools/gen_xcodeproj.py` is the source of the pbxproj (edit it, rerun, commit; test `xcodeproj` checks it against
+  CMake's source list), `tools/fetch_sdl.sh` builds the gitignored `ios/third_party/SDL2.xcframework`, and
+  `tools/build_ios.sh` wraps `xcodebuild` (simulator, `--device`, unsigned `--ipa`). No team IDs or paths in the project.
 - `tools/`: `build.sh`, `build_msys2.sh`, `bundle_macos.sh` (target `nanpa2_app`: `build/同級生２.app` with
   SDL inside), `replay_diff.py`, `explore.py`, `gp4png.py`, `lzh.py`, `sheet.py`, `peek.py`, `disasm.py`
   (table-aware objdump to `decomp/game.asm`), `timing_stats.py`; `ghidra_scripts/DecompileAll.java`;

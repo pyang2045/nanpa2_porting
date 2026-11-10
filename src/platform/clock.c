@@ -98,3 +98,8 @@ uint64_t clock_log_ms(void)
 {
 	return hook_det() ? hook_virtual_ms() : SDL_GetTicks();
 }
+
+uint64_t clock_host_ns(void)
+{
+	return SDL_GetPerformanceCounter() * 1000000000ull / SDL_GetPerformanceFrequency();
+}

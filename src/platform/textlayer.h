@@ -26,6 +26,8 @@
 #include <stdint.h>
 
 enum { TEXT_BITMAP, TEXT_HIRES, TEXT_MODES };
+#define TL_MAX_FONTS 8 /* font numbers (text_font_create) and faces the layer can key */
+#define TL_MAX_FACES 8
 void tl_set_mode(int mode);
 int tl_get_mode(void);
 void tl_toggle(void);
@@ -60,8 +62,11 @@ void tl_blit(uint32_t dst, int x, int y, uint32_t src, int l, int t, int r, int 
 /* ---- presenter ---- */
 
 /* Check the entries against the frame the presenter was given (640x480 indices) and its palette
- * (0x00RRGGBB); selects what is shown. tl_clear: nothing is (a true-colour frame). */
-void tl_validate(const uint8_t *frame, const uint32_t pal[256]);
+ * (0x00RRGGBB); selects what is shown. A cell must match exactly, except for pixels that lie inside the
+ * game pointer's 32x32 sprite at (ptr_x, ptr_y) (have_ptr: the pointer's position is known): those are
+ * repainted as they are, if the cell keeps most of its ink. tl_clear: nothing is shown (a true-colour
+ * frame). */
+void tl_validate(const uint8_t *frame, const uint32_t pal[256], int have_ptr, int ptr_x, int ptr_y);
 void tl_clear(void);
 
 /* One cell to draw, opaque: the rectangle [x0, x1) x [y0, y1) of the raster gets, for each pixel,
@@ -81,11 +86,11 @@ struct tl_quad {
  * spent and the entries whose glyph is not ready stay low-resolution this frame (budget_us < 0: no
  * limit). Returns the quad count (0: draw nothing; the layer is off, or sy < 1.5), the quads valid until
  * the next call. */
-int tl_layout(float sx, float sy, int w, int h, int budget_us, const struct tl_quad **out);
+int tl_layout(float sx, float sy, int budget_us, const struct tl_quad **out);
 
 /* The glyph atlas (8-bit coverage) and the rows [*y0, *y1) that changed since the last
  * tl_atlas_clean (*y0 >= *y1: none). The atlas is cleared (all positions change) when it fills. */
-#define TL_ATLAS_W 2048
+#define TL_ATLAS_W 4096
 #define TL_ATLAS_H 2048
 const uint8_t *tl_atlas(int *y0, int *y1);
 void tl_atlas_clean(void);
@@ -94,7 +99,7 @@ struct tl_stats {
 	int entries;       /* tracked cells */
 	int valid;         /* of them, still on the screen as drawn (last tl_validate) */
 	int shown;         /* drawn by the last tl_layout */
-	int waiting;       /* left low-resolution by the last tl_layout (glyph not rasterised yet) */
+	int waiting;       /* left low-resolution by the last tl_layout (glyph not rasterised yet, atlas full) */
 	int repaint;       /* single pixels repainted over shown cells */
 	unsigned long atlas_resets;
 	unsigned long glyphs;     /* glyphs rasterised so far */
@@ -107,6 +112,7 @@ struct tl_stats {
 	unsigned long total_drawn; /* cells the game drew */
 	unsigned long total_overlaps; /* ... that partly covered an earlier cell */
 };
+/* The counters as the main thread last published them (validate, layout): safe to call from another thread. */
 void tl_get_stats(struct tl_stats *out);
 /* NANPA2_LOG_TEXT=2: print and reset how well the vector glyphs agree with the bitmap ones */
 void tl_print_diag(void);

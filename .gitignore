@@ -14,3 +14,7 @@ compile_commands.json
 tools/.venv/
 .cache/
 .claude/
+# SDL2.xcframework (tools/fetch_sdl.sh)
+ios/third_party/
+xcuserdata/
+*.xcuserstate

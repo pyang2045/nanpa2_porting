@@ -1,15 +1,31 @@
 /* The high-resolution text layer: see textlayer.h. */
 #include "platform/textlayer.h"
 
-#include <SDL.h>
 #include <math.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "platform/present.h"
+#include "platform/clock.h"
 #include "platform/surface.h"
 #include "platform/text.h"
+
+#define SCREEN_W 640 /* the game's screen */
+#define SCREEN_H 480
+
+static int popcount32(uint32_t v)
+{
+	int n = 0;
+	for (; v; v &= v - 1)
+		n++;
+	return n;
+}
+
+static double ms_since(uint64_t t0_ns)
+{
+	return (double)(clock_host_ns() - t0_ns) / 1e6;
+}
 
 /* ---- mode ---- */
 
@@ -56,7 +72,8 @@ void tl_on_change(void (*cb)(int))
 /* ---- tracking ---- */
 
 #define MAX_ENT 4096
-#define OVERLAY_BOX 32 /* the pointer sprite's size: the most one overlay can cover */
+#define POINTER_SIZE 32 /* the pointer sprite's size (0x4012e0) */
+#define POINTER_SLACK 8 /* the pointer moved a little between the message and its drawing */
 #define MIN_INK 4 /* a cell with less ink is not worth showing (and would match by chance) */
 
 struct entry {
@@ -125,7 +142,7 @@ void tl_cell_placed(uint32_t surface, int x, int y, int n, int fg, int bg)
 		return;
 	int ink = 0;
 	for (int r = 0; r < n; r++)
-		ink += __builtin_popcount(last.mask[r] & (w >= 32 ? ~0u : (1u << w) - 1));
+		ink += popcount32(last.mask[r] & (w >= 32 ? ~0u : (1u << w) - 1));
 	if (ink < MIN_INK)
 		return;
 	struct entry *e = add_entry();
@@ -201,9 +218,11 @@ void tl_clear(void)
 	valid_count = 0;
 }
 
-void tl_validate(const uint8_t *frame, const uint32_t pal[256])
+static void publish_stats(void);
+
+void tl_validate(const uint8_t *frame, const uint32_t pal[256], int have_ptr, int ptr_x, int ptr_y)
 {
-	uint64_t t0 = SDL_GetPerformanceCounter();
+	uint64_t t0 = clock_host_ns();
 	nvis = nrep = 0;
 	if (nent) {
 		for (int i = 0; i < 256; i++) {
@@ -212,57 +231,19 @@ void tl_validate(const uint8_t *frame, const uint32_t pal[256])
 			lin[i][2] = powf((float)(pal[i] & 255) / 255.0f, 2.2f);
 		}
 	}
-	/* Pass 1: how many pixels of each cell differ from what its glyph drew, and the box that all the
-	 * differing pixels of all cells lie in. A cell must match exactly, except that when the differences
-	 * of the whole frame fit in one small box (the game's pointer is a 32x32 sprite drawn into the
-	 * screen) the cells touching it are shown with those pixels repainted as they are. Differences
-	 * spread wider (a wipe, a scroll, a cell drawn over) leave every cell strictly checked. */
-	static int bad_of[MAX_ENT];
-	int bx0 = 1 << 30, by0 = 1 << 30, bx1 = -1, by1 = -1;
-	for (int i = 0; i < nent; i++) {
-		const struct entry *e = &ents[i];
-		int bad_ink = 0, x0 = 1 << 30, y0 = 1 << 30, x1 = -1, y1 = -1;
-		bad_of[i] = 0;
-		if (e->surf != SURF_PRIMARY_HANDLE || e->x < 0 || e->y < 0 || e->x + e->w > SCREEN_W ||
-		    e->y + e->n > SCREEN_H)
-			continue;
-		for (int r = 0; r < e->n; r++) {
-			const uint8_t *row = frame + (e->y + r) * SCREEN_W + e->x;
-			uint32_t m = e->g.mask[r];
-			for (int c = 0; c < e->w; c++) {
-				int ink = m >> c & 1;
-				if (row[c] == (ink ? e->fg : e->bg))
-					continue;
-				bad_of[i]++;
-				bad_ink += ink;
-				if (e->x + c < x0) x0 = e->x + c;
-				if (e->x + c > x1) x1 = e->x + c;
-				if (e->y + r < y0) y0 = e->y + r;
-				if (e->y + r > y1) y1 = e->y + r;
-			}
-		}
-		/* a cell that lost most of itself is gone (wiped over, scrolled away), not overlaid: its
-		 * differences say nothing about a pointer, and stale cells of an earlier page must not keep
-		 * the frame strict for ever */
-		if (bad_of[i] && bad_of[i] <= e->w * e->n / 2 && bad_ink <= e->ink * 3 / 10) {
-			if (x0 < bx0) bx0 = x0;
-			if (x1 > bx1) bx1 = x1;
-			if (y0 < by0) by0 = y0;
-			if (y1 > by1) by1 = y1;
-		}
-	}
-	int overlay = bx1 >= 0 && bx1 - bx0 < OVERLAY_BOX && by1 - by0 < OVERLAY_BOX;
+	/* The pointer's sprite, where differences are forgiven (and a little around it). */
+	int rx0 = ptr_x - POINTER_SLACK, ry0 = ptr_y - POINTER_SLACK, rx1 = ptr_x + POINTER_SIZE + POINTER_SLACK,
+	    ry1 = ptr_y + POINTER_SIZE + POINTER_SLACK;
 	for (int i = 0; i < nent; i++) {
 		const struct entry *e = &ents[i];
 		if (e->surf != SURF_PRIMARY_HANDLE || e->x < 0 || e->y < 0 || e->x + e->w > SCREEN_W ||
 		    e->y + e->n > SCREEN_H)
 			continue;
-		if (bad_of[i] && !overlay)
-			continue;
-		/* A few pixels may differ (the pointer, a selection frame drawn over the cell): they are
-		 * repainted as they are. A cell that lost much of its ink (cleared to the background, drawn
-		 * over) or most of its area is the picture's again: with the ink gone the vector glyph's
-		 * edges between repainted pixels would be a ghost. */
+		/* A cell is shown only if it is on the screen as drawn. The pixels under the pointer may
+		 * differ: they are repainted as they are, as long as the cell keeps 70% of its ink and half
+		 * its area (with the ink gone the glyph's edges between repainted pixels would be a ghost).
+		 * A difference anywhere else (a wipe, a page rewritten by the game's raw copies, even by a
+		 * look-alike character) hides the cell. */
 		int bad = 0, bad_ink = 0, bad_max = e->w * e->n / 2, bad_ink_max = e->ink * 3 / 10, rep0 = nrep, ok = 1;
 		for (int r = 0; r < e->n && ok; r++) {
 			const uint8_t *row = frame + (e->y + r) * SCREEN_W + e->x;
@@ -271,14 +252,16 @@ void tl_validate(const uint8_t *frame, const uint32_t pal[256])
 				int ink = m >> c & 1;
 				if (row[c] == (ink ? e->fg : e->bg))
 					continue;
+				int px = e->x + c, py = e->y + r;
 				bad++;
 				bad_ink += ink;
-				if (bad > bad_max || bad_ink > bad_ink_max || nrep >= MAX_REP) {
+				if (!have_ptr || px < rx0 || px >= rx1 || py < ry0 || py >= ry1 || bad > bad_max ||
+				    bad_ink > bad_ink_max || nrep >= MAX_REP) {
 					ok = 0;
 					break;
 				}
-				repaint[nrep].x = e->x + c;
-				repaint[nrep].y = e->y + r;
+				repaint[nrep].x = px;
+				repaint[nrep].y = py;
 				memcpy(repaint[nrep].c, lin[row[c]], sizeof repaint[nrep].c);
 				nrep++;
 			}
@@ -295,9 +278,10 @@ void tl_validate(const uint8_t *frame, const uint32_t pal[256])
 		memcpy(v->bg, lin[e->bg], sizeof v->bg);
 	}
 	valid_count = nvis;
-	validate_ms = (double)(SDL_GetPerformanceCounter() - t0) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	validate_ms = ms_since(t0);
 	if (validate_ms > worst_validate_ms)
 		worst_validate_ms = validate_ms;
+	publish_stats();
 }
 
 /* ---- the glyph cache and atlas ---- */
@@ -315,12 +299,18 @@ struct slot {
 static struct slot slots[NSLOT];
 static int nslots;
 static unsigned long atlas_resets, glyph_count;
+static unsigned long layouts, layouts_at_reset; /* tl_layout calls with something to draw; at the last reset */
+#define RESET_GAP 120 /* frames between atlas resets: a working set that does not fit stays partly bitmap
+		       * instead of being rasterised and uploaded again every frame */
+
+/* bit 0 set (so no key is 0), then code point 21 bits, face 3, font 3, Big5 1, em 8, bold 1, scale 12 */
+_Static_assert(TL_MAX_FONTS <= 8 && TL_MAX_FACES <= 8, "key_of: 3 bits each for font and face");
 
 static uint64_t key_of(const struct tl_glyph *g, int sq)
 {
-	return 1ull | (uint64_t)g->cp << 1 | (uint64_t)g->face << 22 | (uint64_t)g->fi << 24 |
-	       (uint64_t)(g->len > 1) << 26 | (uint64_t)g->em << 27 | (uint64_t)g->bold << 35 |
-	       (uint64_t)sq << 36;
+	return 1ull | (uint64_t)(g->cp & 0x1fffff) << 1 | (uint64_t)(g->face & 7) << 22 | (uint64_t)(g->fi & 7) << 25 |
+	       (uint64_t)(g->len > 1) << 28 | (uint64_t)g->em << 29 | (uint64_t)g->bold << 37 |
+	       (uint64_t)(sq & 0xfff) << 38;
 }
 
 static struct slot *find_slot(uint64_t key, int create)
@@ -384,13 +374,17 @@ static struct slot *glyph_slot(const struct tl_glyph *g, int sq, uint64_t deadli
 	struct slot *s = find_slot(key, 0);
 	if (s)
 		return s;
-	if (deadline && SDL_GetPerformanceCounter() > deadline)
+	if (deadline && clock_host_ns() > deadline)
 		return NULL;
-	uint64_t t0 = SDL_GetPerformanceCounter();
+	uint64_t t0 = clock_host_ns();
 	int w = 0, h = 0, xo = 0, yo = 0;
 	float pen = 0;
 	uint8_t *bm = text_hires_glyph(g, (float)sq / 64.0f, &w, &h, &xo, &yo, &pen);
 	int ax = 0, ay = 0;
+	if (bm && (w > TL_ATLAS_W || h > TL_ATLAS_H)) { /* too big for the atlas at all: stays bitmap */
+		text_hires_free(bm);
+		bm = NULL;
+	}
 	if (bm && !atlas_alloc(w, h, &ax, &ay)) {
 		text_hires_free(bm);
 		*full = 1;
@@ -429,7 +423,7 @@ static struct slot *glyph_slot(const struct tl_glyph *g, int sq, uint64_t deadli
 			dirty_y1 = ay + h;
 		text_hires_free(bm);
 	}
-	*raster_ms += (double)(SDL_GetPerformanceCounter() - t0) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	*raster_ms += ms_since(t0);
 	return s;
 }
 
@@ -534,10 +528,8 @@ void tl_print_diag(void)
 	memset(&dg, 0, sizeof dg);
 }
 
-int tl_layout(float sx, float sy, int w, int h, int budget_us, const struct tl_quad **out)
+int tl_layout(float sx, float sy, int budget_us, const struct tl_quad **out)
 {
-	(void)w;
-	(void)h;
 	*out = NULL;
 	st.shown = st.waiting = st.repaint = 0;
 	st.layout_ms = st.raster_ms = 0;
@@ -545,82 +537,105 @@ int tl_layout(float sx, float sy, int w, int h, int budget_us, const struct tl_q
 		return 0;
 	if (diag < 0)
 		diag = getenv("NANPA2_LOG_TEXT") && atoi(getenv("NANPA2_LOG_TEXT")) >= 2;
-	uint64_t t0 = SDL_GetPerformanceCounter();
-	uint64_t deadline = budget_us < 0 ? 0 : t0 + (uint64_t)budget_us * SDL_GetPerformanceFrequency() / 1000000u;
+	uint64_t t0 = clock_host_ns();
+	uint64_t deadline = budget_us < 0 ? 0 : t0 + (uint64_t)budget_us * 1000u;
 	int sq = rnd(sy * 64.0f);
 	if (sq > 4000)
 		sq = 4000;
-	for (int attempt = 0; attempt < 2; attempt++) {
+	layouts++;
+	int reset_done = 0;
+restart:
+	nquads = 0;
+	st.shown = st.waiting = st.repaint = 0;
+	st.raster_ms = 0;
+	for (int i = 0; i < nvis; i++) {
+		const struct vis *v = &vis[i];
+		const struct entry *e = &v->e;
 		int full = 0;
-		nquads = 0;
-		st.shown = st.waiting = st.repaint = 0;
-		st.raster_ms = 0;
-		for (int i = 0; i < nvis && !full; i++) {
-			const struct vis *v = &vis[i];
-			const struct entry *e = &v->e;
-			struct slot *s = glyph_slot(&e->g, sq, deadline, &full, &st.raster_ms);
-			if (!s) {
-				if (!full)
-					st.waiting++;
-				continue;
-			}
-			int cx0 = rnd((float)e->x * sx), cx1 = rnd((float)(e->x + e->w) * sx);
-			int cy0 = rnd((float)e->y * sy), cy1 = rnd((float)(e->y + e->n) * sy);
-			if (diag && !s->empty)
-				diagnose(e, s, sx, sy);
-			struct tl_quad *q = quad_add(cx0, cy0, cx1, cy1);
-			if (!q)
-				continue;
-			memcpy(q->fg, v->fg, sizeof q->fg);
-			memcpy(q->bg, v->bg, sizeof q->bg);
-			if (!s->empty) {
-				q->gx = (float)(rnd(((float)e->x + s->pen_x) * sx) + s->xo);
-				q->gy = (float)(rnd(((float)e->y + e->g.base + BASE_SHIFT) * sy) + s->yo);
-				q->gw = (float)s->w;
-				q->gh = (float)s->h;
-				q->ax = (float)s->ax;
-				q->ay = (float)s->ay;
-			}
-			for (int k = v->rep0; k < v->rep1; k++) {
-				const struct rep *r = &repaint[k];
-				struct tl_quad *p = quad_add(rnd((float)r->x * sx), rnd((float)r->y * sy),
-							     rnd((float)(r->x + 1) * sx), rnd((float)(r->y + 1) * sy));
-				if (!p)
-					continue;
-				memcpy(p->fg, r->c, sizeof p->fg);
-				memcpy(p->bg, r->c, sizeof p->bg);
-				st.repaint++;
-			}
-			st.shown++;
+		struct slot *s = glyph_slot(&e->g, sq, deadline, &full, &st.raster_ms);
+		if (!s && full && !reset_done && layouts - layouts_at_reset >= RESET_GAP) {
+			/* the atlas is full: start it again with the glyphs of this frame, once */
+			atlas_reset();
+			layouts_at_reset = layouts;
+			reset_done = 1;
+			goto restart;
 		}
-		if (!full)
-			break;
-		/* the atlas filled: start it again with the glyphs of this frame */
-		atlas_reset();
+		if (!s) { /* not rasterised yet, or no room: the bitmap glyph shows this frame */
+			st.waiting++;
+			continue;
+		}
+		if (s->empty) /* the face has no outline for it: the bitmap glyph shows */
+			continue;
+		int cx0 = rnd((float)e->x * sx), cx1 = rnd((float)(e->x + e->w) * sx);
+		int cy0 = rnd((float)e->y * sy), cy1 = rnd((float)(e->y + e->n) * sy);
+		if (diag)
+			diagnose(e, s, sx, sy);
+		struct tl_quad *q = quad_add(cx0, cy0, cx1, cy1);
+		if (!q)
+			continue;
+		memcpy(q->fg, v->fg, sizeof q->fg);
+		memcpy(q->bg, v->bg, sizeof q->bg);
+		q->gx = (float)(rnd(((float)e->x + s->pen_x) * sx) + s->xo);
+		q->gy = (float)(rnd(((float)e->y + e->g.base + BASE_SHIFT) * sy) + s->yo);
+		q->gw = (float)s->w;
+		q->gh = (float)s->h;
+		q->ax = (float)s->ax;
+		q->ay = (float)s->ay;
+		for (int k = v->rep0; k < v->rep1; k++) {
+			const struct rep *r = &repaint[k];
+			struct tl_quad *p = quad_add(rnd((float)r->x * sx), rnd((float)r->y * sy), rnd((float)(r->x + 1) * sx),
+						     rnd((float)(r->y + 1) * sy));
+			if (!p)
+				continue;
+			memcpy(p->fg, r->c, sizeof p->fg);
+			memcpy(p->bg, r->c, sizeof p->bg);
+			st.repaint++;
+		}
+		st.shown++;
 	}
-	st.layout_ms = (double)(SDL_GetPerformanceCounter() - t0) * 1000.0 / (double)SDL_GetPerformanceFrequency();
+	st.layout_ms = ms_since(t0);
 	if (nquads) {
 		layout_calls++;
 		layout_total_ms += st.layout_ms;
 		if (st.layout_ms > worst_layout_ms)
 			worst_layout_ms = st.layout_ms;
 	}
+	publish_stats();
 	*out = quads;
 	return nquads;
 }
 
+/* The counters for another thread (the status file's): the main thread composes and publishes them
+ * under a sequence number, readers retry while it is odd or changed. */
+static struct tl_stats pub;
+static atomic_uint pub_seq;
+
+static void publish_stats(void)
+{
+	struct tl_stats c = st;
+	c.entries = nent;
+	c.valid = valid_count;
+	c.atlas_resets = atlas_resets;
+	c.glyphs = glyph_count;
+	c.validate_ms = validate_ms;
+	c.worst_validate_ms = worst_validate_ms;
+	c.worst_layout_ms = worst_layout_ms;
+	c.layout_total_ms = layout_total_ms;
+	c.layout_calls = layout_calls;
+	c.total_drawn = total_drawn;
+	c.total_overlaps = total_overlaps;
+	atomic_fetch_add_explicit(&pub_seq, 1, memory_order_acq_rel);
+	pub = c;
+	atomic_fetch_add_explicit(&pub_seq, 1, memory_order_release);
+}
+
 void tl_get_stats(struct tl_stats *out)
 {
-	st.entries = nent;
-	st.valid = valid_count;
-	st.atlas_resets = atlas_resets;
-	st.glyphs = glyph_count;
-	st.validate_ms = validate_ms;
-	st.worst_validate_ms = worst_validate_ms;
-	st.worst_layout_ms = worst_layout_ms;
-	st.layout_total_ms = layout_total_ms;
-	st.layout_calls = layout_calls;
-	st.total_drawn = total_drawn;
-	st.total_overlaps = total_overlaps;
-	*out = st;
+	unsigned a, b;
+	do {
+		a = atomic_load_explicit(&pub_seq, memory_order_acquire);
+		*out = pub;
+		atomic_thread_fence(memory_order_acquire);
+		b = atomic_load_explicit(&pub_seq, memory_order_relaxed);
+	} while ((a & 1) || a != b);
 }

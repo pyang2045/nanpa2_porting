@@ -14,8 +14,6 @@
 
 #include "platform/textlayer.h"
 
-#include "platform/textlayer.h"
-
 /* Find the font: font_path (may be NULL) or a candidate of the host. 0 if there is none (text
  * is then blank). */
 int text_init(const char *font_path);

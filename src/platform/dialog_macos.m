@@ -1,4 +1,4 @@
-/* Folder picker (dialog.h): NSOpenPanel, directories only. */
+/* Folder picker (dialog.h): NSOpenPanel, a directory or a file (the .iso). */
 #include "dialog.h"
 
 #import <AppKit/AppKit.h>
@@ -13,7 +13,7 @@ int dialog_pick_folder(const char *prompt, char *out, size_t cap)
 		[NSApp activateIgnoringOtherApps:YES];
 		NSOpenPanel *p = [NSOpenPanel openPanel];
 		p.canChooseDirectories = YES;
-		p.canChooseFiles = NO;
+		p.canChooseFiles = YES; /* a .iso image of the CD; launch.c validates */
 		p.allowsMultipleSelection = NO;
 		p.canCreateDirectories = NO;
 		p.prompt = @"選擇";

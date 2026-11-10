@@ -1511,3 +1511,85 @@ after the cell copy of 0x401900 that tells the platform where the cell went (`te
   fills (4 ms budget); text moved by the game's raw copies (wipe, swap) stays bitmap until redrawn; the
   presented frame on screen could not be checked live here (window not visible), only captured through
   `present_capture`; the iOS build was not compiled.
+
+## 2026-11-10: unsigned iOS IPA for sideloading
+
+Commit 0b1b767. `tools/build_ios.sh --ipa` builds iphoneos arm64 Release with the Ninja generator (a flat
+bundle, no signing step), removes any signature, `_CodeSignature` and `embedded.mobileprovision`, strips
+the binary and packs `build-ios/nanpa2.ipa` (`ditto --norsrc --noextattr`, `Payload/` at the root, no
+`__MACOSX`). About 640 KB. `cmake/Info.ios.plist.in` gained `CFBundleSupportedPlatforms`,
+`UIRequiredDeviceCapabilities` (arm64, metal), icon keys, and a version (`0.1`, build = git commit count);
+icons are original (the title text on a plain background, rendered with the system font) in `cmake/ios/`.
+No entitlements. `-ffile-prefix-map` for the game and the SDL build keeps build paths out of the binary.
+- Checks: `lipo` arm64; `LC_BUILD_VERSION` platform 2 (iOS), minos 13.0, sdk 26.5; `codesign -dv` "not
+  signed at all"; `tests/no_game_bytes.py` over the unzipped app: 0 matches; `strings` finds no `/Users/`,
+  user name or email; the simulator build (`tools/build_ios.sh`) still reaches the name-entry screen in the
+  iPad Pro 11-inch (M4) simulator (then uninstalled). Not tested: a real-device install and re-signing.
+
+## 2026-11-10: blank saves are generated (FLAG0..6 no longer needed)
+
+`state_save_blank` (`state_view.c`) = `save_defaults` (split out of `state_defaults`: the start values of
+`G.save`) plus `vm_init` (0x406395), exported. The load op (04 21, native 0x407152, `ops_vm.c flag_load`)
+uses it when `game_file_read` finds neither a save in the save folder nor a file in the game folder;
+nothing is written to disk. Order stays save folder, game folder, generated. Comparison with the
+installer's FLAG0 (all seven identical) and the unreadable remainder: re-notes.md "Save files". README,
+game/README.md, CLAUDE.md, launch.c messages (including iOS) now call FLAG0..6 optional.
+Checks: ctest passes with the real game folder and with a folder without FLAGs; bot seed 7 / 25000
+frames (title, name entry, S1-S6, save of FLAG0 and FLAG6) records identical `li.screen`, regs, clock and
+rng checkpoints with and without the real FLAGs (only `li.save`, `li.files` and `raw.gdata` differ: the
+padding bytes and the file list); a bot run on the generated saves loads them from the title.
+
+## 2026-11-10: the game runs from the CD image (.iso)
+
+`src/iso.c` (ISO 9660 + Joliet reader, index built at mount) sits behind `fsys` (`fsys_set_root` mounts a
+regular file as an image; `fsys_open/read/path/load_data` work unchanged; `fsys_list_iso` for the picture
+viewer and `decode_all`). The game's callers read whole files, so the FILE view is a cookie stream and sound
+and the logo use `fsys_read` directly. `launch.c`: a `.iso` is accepted wherever a folder is (`--game`,
+`NANPA2_GAME_DIR`, remembered, picked), the search looks for `*.iso` next to the executable, in `game/` and,
+on iOS, in Documents; the macOS picker also lets a file be chosen. FLAG lookups simply find nothing in the
+image, so `flag_load` generates the blank save (2eb9b57). Format: re-notes.md "ISO image". Commits: 049543a
+(reader, launch, tests), docs commit after the merge of master (16839a1).
+Checks: `decode_all NANPA2.iso` ok 705 bad 0; `iso_check` 12357 files (662 MB) identical, whole and through the
+stream, 8 s cold; ctest `iso` (set `NANPA2_ISO` or `-DNANPA2_ISO=`): a folder recording replays on the image
+with all checkpoints and the same fopen/music/voice sequence (2500 and 60000 frames); newgame from the image
+with an empty save folder (270000 frames, Prologue, saves written) recorded and replayed, 1081 checkpoints ok,
+then a load from those saves; save selftest ok; title/name-entry shot looked at; iOS simulator build and run
+from `Documents/Game.iso` reaches name entry (app uninstalled afterwards). Timing: mount 5 ms warm, open+4 KB
+0.002 ms against 0.04-0.06 ms from the folder (warm cache). Not tested: Windows/MSYS2, Linux, a real iPad.
+
+## 2026-11-10: iOS app icon as an asset catalog
+
+`cmake/ios/Assets.xcassets/AppIcon.appiconset`: a single 1024x1024 universal/ios icon (opaque sRGB, no alpha,
+no pre-rounded corners, PNG chunks only IHDR/sRGB/IDAT/IEND). Single-size form chosen because `xcrun actool
+--minimum-deployment-target 13.0` still emits the old-size files from it (AppIcon60x60@2x.png,
+AppIcon76x76@2x~ipad.png) plus the AppIcon renditions in Assets.car, and a partial plist with `CFBundleIcons`,
+`CFBundleIcons~ipad` and `CFBundleIconName`. Design: 同級生２ (full-width ２) as a 2x2 grid (同級 / 生２), PingFang
+TC Semibold, white on dark blue, about 68% of the canvas; the single line was illegible at 40 px. Generator:
+`tools/make_ios_icon.swift` (CoreGraphics/CoreText). The four loose PNGs and the hand-listed `CFBundleIconFiles`
+are gone. Wiring: `build_ios.sh` runs actool and merges the partial plist for the simulator and `--ipa` (Ninja)
+builds; the Xcode generator (`--device`) gets the catalog as a resource with
+`ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon`. Checked: simulator home screen (icon present, clear, not clipped,
+app uninstalled afterwards); unsigned IPA holds Assets.car, `CFBundleIconName = AppIcon`, the icon dicts, no
+`/Users/` strings; `--device` runs through compile and stops only at signing (no team). Commit: see git log.
+
+## 2026-11-10: iOS build is a standard Xcode project
+
+`ios/nanpa2.xcodeproj` (shared scheme `nanpa2`, one app target; iPhone+iPad, iOS 13, automatic signing with an
+empty `DEVELOPMENT_TEAM`, bundle id `local.nanpa2` via `PRODUCT_BUNDLE_IDENTIFIER`) replaces the CMake iOS path
+(the `NANPA2_IOS` blocks, `cmake/Info.ios.plist.in`, the actool step). `tools/gen_xcodeproj.py` writes the
+project deterministically (IDs hashed from names) and is its source; `ios/Info.plist` is static with
+`$(PRODUCT_BUNDLE_IDENTIFIER)`, `$(MARKETING_VERSION)`, `$(CURRENT_PROJECT_VERSION)`; the icon catalog moved to
+`ios/Assets.xcassets` and Xcode compiles it (`ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon`). Same flags as CMake
+(c11, -Wall -Wextra, `-ffile-prefix-map`; modules off, since clang modules clash with iso.c's `struct entry`).
+SDL: SDL's own `Xcode/SDL/SDL.xcodeproj` as a subproject was tried first and abandoned: Xcode 26 compiles its
+Metal shader and fails without the separate Metal Toolchain download. Instead `tools/fetch_sdl.sh` downloads the
+release tarball (pinned SHA-256), builds static SDL2+SDL2main with CMake/Ninja for iphoneos arm64 and
+simulator arm64+x86_64, and packs the gitignored `ios/third_party/SDL2.xcframework` (one dependency entry; the
+version is a parameter). `tools/build_ios.sh` is a wrapper over `xcodebuild` (simulator, `--device`, `--ipa`).
+ctest `xcodeproj` (tests/xcodeproj.py) fails when CMake compiles a source the project does not. Commits: 88720ad
+(project, scripts), 7b3381c (merge of master and the CMake removal, drift test, docs).
+Checked: simulator build, iPad Pro 11 simulator from `Documents/NANPA2.iso`, name-entry screen, log
+`Renderer: Metal`, app uninstalled; `--ipa`: Payload/ + Assets.car, arm64, unsigned, all Info.plist keys and
+`CFBundleIconName`, no `/Users/` strings, no_game_bytes clean; `--device` without a team stops with a message,
+with a dummy team stops only at provisioning; macOS cmake+ninja+ctest 10/10 (smoke, iso skipped). Not tested: a
+real device, opening in the Xcode GUI.

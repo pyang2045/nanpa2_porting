@@ -1,11 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(nanpa2 C)
 
-# iOS / iPadOS (tools/build_ios.sh): CMAKE_SYSTEM_NAME=iOS. APPLE is true there too, so the macOS-only parts
-# (AppKit, the folder picker, bundle_macos.sh) test NANPA2_MACOS.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-  set(NANPA2_IOS ON)
-elseif(APPLE)
+# iOS / iPadOS is not built here: ios/nanpa2.xcodeproj (tools/build_ios.sh, tools/gen_xcodeproj.py).
+# tests/xcodeproj.py checks that it compiles the sources listed below.
+if(APPLE)
   set(NANPA2_MACOS ON)
 endif()
 
@@ -63,6 +61,7 @@ set(SOURCES
   src/lzh.c
   src/gp4.c
   src/fsys.c
+  src/iso.c
   src/trap.c
   src/hooks.c
   src/hash.c
@@ -72,6 +71,7 @@ set(SOURCES
   src/platform/surface.c
   src/platform/text.c
   src/platform/textlayer.c
+  src/platform/textraster.c
   src/platform/logo.c
   src/cinepak.c
   src/platform/sound.c
@@ -96,30 +96,14 @@ if(NANPA2_MACOS)
 else()
   list(APPEND SOURCES src/platform/dialog_none.c)
 endif()
-if(NANPA2_IOS)
-  list(APPEND SOURCES src/platform/docs_ios.m)
-endif()
-
-if(NANPA2_IOS)
-  # the .app: Info.plist from cmake/Info.ios.plist.in (landscape, full screen, file sharing)
-  set(NANPA2_APP_NAME "同級生２")
-  set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
-  set(NANPA2_IOS_MIN "13.0" CACHE STRING "Minimum iOS version")
-  configure_file(cmake/Info.ios.plist.in "${CMAKE_BINARY_DIR}/Info.ios.plist" @ONLY)
-  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES})
-  set_target_properties(nanpa2 PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.ios.plist"
-    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${NANPA2_APP_ID}")
-else()
-  add_executable(nanpa2 ${SOURCES})
-endif()
+add_executable(nanpa2 ${SOURCES})
 target_include_directories(nanpa2 PRIVATE src third_party)
-# The default build is unoptimised (Debug); the glyph rasteriser (stb_truetype in text.c, used by the text
-# layer for every new glyph at the display's resolution, textlayer.c) is not fast enough that way: optimise
-# these two files whatever the build type. Neither is part of the game's own computation.
+# The default build is unoptimised (Debug); the text layer's glyph rasteriser (stb_truetype in textraster.c, run
+# for every new glyph at the display's resolution) is not fast enough that way: optimise these two files
+# whatever the build type. Neither takes part in the game's own computation (text.c, which makes the game's ink
+# masks, keeps the project's flags).
 if(NOT MSVC)
-  set_source_files_properties(src/platform/text.c src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
+  set_source_files_properties(src/platform/textraster.c src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 if(TARGET SDL2::SDL2)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
@@ -147,8 +131,6 @@ if(APPLE)
 endif()
 if(NANPA2_MACOS)
   target_link_libraries(nanpa2 PRIVATE "-framework AppKit")
-elseif(NANPA2_IOS)
-  target_link_libraries(nanpa2 PRIVATE "-framework UIKit")
 endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(nanpa2 PRIVATE m) # stb_truetype, minimp3
@@ -177,10 +159,10 @@ if(NANPA2_MACOS)
     VERBATIM)
 endif()
 
-if(NOT NANPA2_IOS)
-  add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c)
-  target_include_directories(decode_all PRIVATE src)
-endif()
+add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c src/iso.c)
+target_include_directories(decode_all PRIVATE src)
+add_executable(iso_check tests/iso_check.c src/iso.c)
+target_include_directories(iso_check PRIVATE src)
 
 if(NOT NANPA2_IOS)
 # The text layer's tracking and validation, with a stub rasteriser (tests/textlayer_test.c, no game data).
@@ -211,10 +193,22 @@ add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
-if(NOT NANPA2_IOS)
-  add_test(NAME textlayer COMMAND textlayer_test)
-  set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
-endif()
+add_test(NAME textlayer COMMAND textlayer_test)
+set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
+
+# ISO image (tests/iso.py): every DATA/MUSIC/SPEECH file reads the same bytes from the CD image
+# as from the folder, decode_all agrees, and a recording made on the folder replays on the image.
+# The image: -DNANPA2_ISO=/path/NANPA2.iso or the environment variable NANPA2_ISO; skipped without.
+set(NANPA2_ISO "" CACHE FILEPATH "CD image (.iso) for the ISO test")
+add_test(NAME iso COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/iso.py"
+  $<TARGET_FILE:nanpa2> $<TARGET_FILE:iso_check> $<TARGET_FILE:decode_all>
+  "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/iso-test" "${NANPA2_ISO}")
+set_tests_properties(iso PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+
+# The iOS Xcode project compiles the same sources as this file lists, plus the iOS-specific ones
+# (tests/xcodeproj.py; regenerate with tools/gen_xcodeproj.py).
+add_test(NAME xcodeproj COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/xcodeproj.py" "${CMAKE_SOURCE_DIR}")
+set_tests_properties(xcodeproj PROPERTIES TIMEOUT 30)
 
 # Self-test (a few seconds, headless): a save round trip through the lifted
 # save/load code.

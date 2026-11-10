@@ -284,6 +284,19 @@ at OPEN.MES 0x2522) saves slot 0 and then slot 6; FLAG6 is the diary index the t
 (請選擇日記, six books in a row at y 170, the lit one at x 440 for slot 0; Exit at (410,204)).
 Title menu: Prologue (320,170), Data Load (320,226).
 
+The blank FLAG (the seven identical files of `data1.cab`) is the VM state at start-up: name
+`start.mes\0\r\n$`, the text-window and menu inputs of `state_defaults`, the 16 base colours, and the
+VM set-up 0x406395 ('@', @[0], @[22] menu list). Compared byte for byte with the engine's start state,
+the differences are: '@', @[0] and @[22] (0xe456/0xe51e/0xf5fb: native heap-relative, redone by the
+set-up after every load); the segment table 0x44533c (native heap addresses, never taken from a file);
+@[2..4] = 0x8000, 0xa000, 0xa000 (0x4452d2..d7) and bit 7 of @[9] (0x4452e0): DOS-style leftovers no
+engine code reads (the game rewrites @[3]/@[4] by itself: a save after play differs from the real
+blank only at the padding); 0x44532c..0x44533b (8 more palette words), 0x44534c..0x445389 (two tables of
+four segment-like dwords and four offsets), 0x445389, 0x445392, and 'elf    ' at 0x445a71: padding the
+port has no field for and never reads. The port generates the blank from `save_defaults` plus
+`vm_init` (`state_save_blank`); with and without the real FLAGs the bot (seed 7, 25000 frames, through
+S6.MES with a save) has identical screens, registers, clock and rng at all checkpoints.
+
 Menus return the item's index in the list as written, not its position on screen: hidden
 items (a false `0f expr 03` guard) are packed out of the 2x2 grid ((215,383) (420,383)
 (215,407) (420,407)), so S5's 存檔 is item 4 even when it is drawn third. A click outside every
@@ -890,3 +903,19 @@ plain C:
   0x456, the base palette 0x494, the four segment bases 0x4c4 (the only addresses in it; rewritten by the VM
   set-up after every load), the last picture rectangle 0x512, the work buffer 0x51e. The words 0x445a78-0x445cdc
   after it and the native top ESP at 0x445cdc are not saved.
+
+
+## ISO image (src/iso.c, behind fsys)
+
+The CD image is plain ISO 9660 with cooked 2048-byte sectors and a Joliet supplementary descriptor
+(sector 17; escape `%/@`, `%/C` or `%/E`), which is used when present (UCS-2 big-endian names, mixed case,
+the Chinese-named .htm). Volume descriptors start at sector 16 ("CD001"); the root directory record sits at
+offset 156 of the descriptor (extent LE at +2, length LE at +10). A directory is a run of records
+(length byte, extended-attribute length at +1, extent +2, size +10, flags +25, name length +32, name +33),
+none crossing a sector, a zero length byte skipping to the next sector; flag 0x02 is a directory, 0x80
+(multi-extent) does not occur in this image. Every file is one contiguous extent; names end in `;1` (ISO
+tree) and are matched case-insensitively. All 12 357 files under DATA, MUSIC and SPEECH read byte-identical
+to the extracted folder. The root holds the CD's installer files and `LOGO.AVI`, but no FLAG files (they are
+in `data1.cab`, not parsed: the engine generates blank saves, see "Save files"). Mounting walks and sorts the
+12 394 entries once (about 5 ms warm); a read is one pread; `fsys_open` returns a seekable cookie stream
+(funopen on Apple/BSD, fopencookie on glibc/musl/bionic, a deleted-on-close temp file on Windows).
