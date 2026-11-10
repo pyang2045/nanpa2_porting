@@ -56,22 +56,22 @@ static SDL_Window *window;
 static double speed;
 static char path[1024], tmp_path[1040];
 static SDL_Thread *thread;
-static SDL_mutex *lock;
-static SDL_atomic_t quit;
+static SDL_Mutex *lock;
+static SDL_AtomicInt quit;
 static time_t start_wall;
 static uint32_t launch_ticks; /* status_early() */
 static uint32_t start_ticks;  /* status_init(): the game starts */
-static SDL_atomic_t phase;    /* 0 before status_init, 1 game */
+static SDL_AtomicInt phase;    /* 0 before status_init, 1 game */
 static const char *volatile stage = "start"; /* status_stage() */
 static int headless, scripted;
 static char env_json[2048];
-static SDL_atomic_t logo;
+static SDL_AtomicInt logo;
 
 /* filled by the main thread under lock */
 static struct snap {
 	uint32_t tick; /* SDL_GetTicks() of the last refresh */
 	int windows;   /* SDL windows */
-	uint32_t flags;
+	uint64_t flags;
 	int w, h, x, y;
 	int focus;
 	int cursor_count, cursor_shown, cursor_over; /* win_cursor_state */
@@ -178,7 +178,7 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 		     now - s->tick, ps->worst_wait_ms);
 		return;
 	}
-	int timer = win_timer_running(), in_logo = SDL_AtomicGet(&logo);
+	int timer = win_timer_running(), in_logo = SDL_GetAtomicInt(&logo);
 	if (timer && !in_logo && now - last_frame_change > WATCH_FRAME_MS && (headless || ps->occluded != 1)) {
 		if (!active)
 			warn("timer", "timer stopped: 0x4ac4ec=0 (game deactivated), frame counter %u for %u ms", frame,
@@ -268,7 +268,7 @@ static void write_status(void)
 	uint32_t now = SDL_GetTicks();
 	int locked, asleep;
 	desktop_state(&locked, &asleep);
-	if (!SDL_AtomicGet(&phase)) {
+	if (!SDL_GetAtomicInt(&phase)) {
 		write_init_status(now, locked, asleep);
 		return;
 	}
@@ -297,7 +297,7 @@ static void write_status(void)
 		"  \"pid\": %d, \"started\": \"%s\", \"uptime_ms\": %u, \"stage\": \"running\", \"init_ms\": %u,\n"
 		"  \"mode\": {\"headless\": %d, \"scripted\": %d, \"env\": %s},\n"
 		"  \"desktop\": {\"locked\": %d, \"asleep\": %d, \"app_hidden\": %d},\n"
-		"  \"window\": {\"count\": %d, \"os_windows\": %d, \"id\": %u, \"flags\": %u, \"shown\": %d, "
+		"  \"window\": {\"count\": %d, \"os_windows\": %d, \"id\": %u, \"flags\": %llu, \"shown\": %d, "
 		"\"hidden\": %d, \"size\": [%d, %d], \"pos\": [%d, %d], \"drawable\": [%d, %d], \"focus\": %d, "
 		"\"occluded\": %d},\n"
 		"  \"cursor\": {\"count\": %d, \"host_shown\": %d, \"over_image\": %d},\n"
@@ -318,7 +318,7 @@ static void write_status(void)
 		"}\n",
 		(int)getpid(), started, now - launch_ticks, start_ticks - launch_ticks, headless, scripted, env_json,
 		locked, asleep, ps->app_hidden, s.windows, ps->os_windows,
-		window ? SDL_GetWindowID(window) : 0, s.flags, !!(s.flags & SDL_WINDOW_SHOWN),
+		window ? SDL_GetWindowID(window) : 0, (unsigned long long)s.flags, !(s.flags & SDL_WINDOW_HIDDEN),
 		!!(s.flags & SDL_WINDOW_HIDDEN), s.w, s.h, s.x, s.y, ps->drawable_w, ps->drawable_h, s.focus,
 		ps->occluded, s.cursor_count, s.cursor_shown, s.cursor_over, present_name(), ps->frames_in,
 		ps->presented, ps->skip_occluded, ps->skip_drawable,
@@ -330,15 +330,15 @@ static void write_status(void)
 		ts.glyphs, ts.atlas_resets, ts.validate_ms, ts.worst_validate_ms, ts.layout_ms, ts.worst_layout_ms,
 		ts.layout_calls ? ts.layout_total_ms / (double)ts.layout_calls : 0.0, frame,
 		now - last_frame_change, active, win_timer_running(), speed, now - s.tick,
-		SDL_AtomicGet(&logo), music, vq, "null", wq, warning_key, warnings, warned);
+		SDL_GetAtomicInt(&logo), music, vq, "null", wq, warning_key, warnings, warned);
 	write_json(buf);
 }
 
 static int writer(void *ud)
 {
-	while (!SDL_AtomicGet(&quit)) {
+	while (!SDL_GetAtomicInt(&quit)) {
 		write_status();
-		for (int i = 0; i < 10 && !SDL_AtomicGet(&quit); i++)
+		for (int i = 0; i < 10 && !SDL_GetAtomicInt(&quit); i++)
 			SDL_Delay(100);
 	}
 	return 0;
@@ -389,8 +389,10 @@ void status_main(void)
 	last = now;
 	struct snap s = { 0 };
 	s.tick = now ? now : 1;
-	for (Uint32 id = 1; id < 64; id++)
-		s.windows += SDL_GetWindowFromID(id) != NULL;
+	int nwin = 0;
+	SDL_Window **wins = SDL_GetWindows(&nwin);
+	s.windows = wins ? nwin : 0;
+	SDL_free(wins);
 	if (window) {
 		s.flags = SDL_GetWindowFlags(window);
 		SDL_GetWindowSize(window, &s.w, &s.h);
@@ -406,7 +408,7 @@ void status_main(void)
 
 void status_set_logo(int playing)
 {
-	SDL_AtomicSet(&logo, playing);
+	SDL_SetAtomicInt(&logo, playing);
 }
 
 void status_early(void)
@@ -432,7 +434,7 @@ void status_early(void)
 	remove_stale(dir);
 	lock = SDL_CreateMutex();
 	atexit(status_shutdown);
-	/* SIGINT and SIGTERM stay with SDL (SDL_QUIT: a clean exit, which
+	/* SIGINT and SIGTERM stay with SDL (SDL_EVENT_QUIT: a clean exit, which
 	 * removes the file); SIGALRM is the perl alarm wrapper of test runs */
 #ifndef _WIN32
 	signal(SIGHUP, on_signal);
@@ -459,7 +461,7 @@ void status_init(SDL_Window *win, double speed_setting)
 	/* phase first: the writer thread must not write the early file (no
 	 * "game" section) with stage "running" in between (smoke.py read
 	 * such a file once and stopped with KeyError 'game') */
-	SDL_AtomicSet(&phase, 1);
+	SDL_SetAtomicInt(&phase, 1);
 	stage = "running";
 }
 
@@ -467,7 +469,7 @@ void status_shutdown(void)
 {
 	if (!thread)
 		return;
-	SDL_AtomicSet(&quit, 1);
+	SDL_SetAtomicInt(&quit, 1);
 	SDL_WaitThread(thread, NULL);
 	thread = NULL;
 	remove(path);

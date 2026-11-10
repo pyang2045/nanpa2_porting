@@ -19,7 +19,7 @@
  *
  * The high-resolution text layer (platform/textlayer.h) is not drawn here: the layer is tracked and
  * validated by the platform, but SDL_Renderer has no linear-light blending into the CRT's raster, so this
- * presenter never asks for it and shows the game's own glyphs (--text and F11 are accepted and do
+ * presenter never asks for it and shows the game's own glyphs (--text and Shift+F12 are accepted and do
  * nothing but change the remembered preference). present_metal.m is the implementation. */
 #include "present_common.h"
 
@@ -40,9 +40,9 @@ static int big_k, grille_w;
 static float grille_ms;
 static uint32_t rgba[SCREEN_W * SCREEN_H];
 
-Uint32 present_window_flags(void)
+SDL_WindowFlags present_window_flags(void)
 {
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 	return SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS;
 #else
 	return 0;
@@ -82,7 +82,7 @@ static SDL_Texture *make_scanlines(int k, int lines)
 	}
 	SDL_UpdateTexture(t, NULL, rows, 4);
 	SDL_SetTextureBlendMode(t, SDL_BLENDMODE_MOD);
-	SDL_SetTextureScaleMode(t, SDL_ScaleModeNearest);
+	SDL_SetTextureScaleMode(t, SDL_SCALEMODE_NEAREST);
 	return t;
 }
 
@@ -100,7 +100,7 @@ static SDL_Texture *make_vignette(void)
 		}
 	SDL_UpdateTexture(t, NULL, px, VW * 4);
 	SDL_SetTextureBlendMode(t, SDL_BLENDMODE_MOD);
-	SDL_SetTextureScaleMode(t, SDL_ScaleModeLinear);
+	SDL_SetTextureScaleMode(t, SDL_SCALEMODE_LINEAR);
 	return t;
 }
 
@@ -127,7 +127,7 @@ static void make_grille(int w, float ms)
 		SDL_free(px);
 	}
 	SDL_SetTextureBlendMode(grille, SDL_BLENDMODE_MOD);
-	SDL_SetTextureScaleMode(grille, SDL_ScaleModeNearest);
+	SDL_SetTextureScaleMode(grille, SDL_SCALEMODE_NEAREST);
 }
 
 static SDL_Texture *make_target(int w, int h, SDL_ScaleMode scale)
@@ -149,21 +149,18 @@ int present_init(SDL_Window *win)
 	}
 	window = win;
 	present_common_init(win);
-	renderer = SDL_CreateRenderer(win, -1,
-				      SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC |
-					      SDL_RENDERER_TARGETTEXTURE);
-	if (!renderer)
-		renderer = SDL_CreateRenderer(win, -1, 0);
+	renderer = SDL_CreateRenderer(win, NULL);
 	if (!renderer)
 		return 0;
+	SDL_SetRenderVSync(renderer, 1); /* best effort */
 	texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_XRGB8888, SDL_TEXTUREACCESS_STREAMING,
 				    SCREEN_W, SCREEN_H);
 	if (!texture)
 		return 0;
-	SDL_SetTextureScaleMode(texture, SDL_ScaleModeNearest);
+	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 	vignette = make_vignette();
-	glow_half = make_target(SCREEN_W / 2, SCREEN_H / 2, SDL_ScaleModeLinear);
-	glow_quarter = make_target(SCREEN_W / 4, SCREEN_H / 4, SDL_ScaleModeLinear);
+	glow_half = make_target(SCREEN_W / 2, SCREEN_H / 2, SDL_SCALEMODE_LINEAR);
+	glow_quarter = make_target(SCREEN_W / 4, SCREEN_H / 4, SDL_SCALEMODE_LINEAR);
 	if (glow_quarter) {
 		SDL_SetTextureBlendMode(glow_quarter, SDL_BLENDMODE_ADD);
 		SDL_SetTextureColorMod(glow_quarter, 24, 24, 24);
@@ -177,7 +174,7 @@ static void draw(int ow, int oh)
 	SDL_Texture *target = SDL_GetRenderTarget(renderer);
 	int x, y, w, h;
 	present_fit(ow, oh, &x, &y, &w, &h);
-	SDL_Rect dst = { x, y, w, h };
+	SDL_FRect dst = { (float)x, (float)y, (float)w, (float)h };
 
 	int mode = disp_mode, crt = mode <= DISPLAY_CRT_480;
 	int bw = SCREEN_W, bh = SCREEN_H; /* the CRT raster: the game's, or CRT HD's virtual one */
@@ -197,13 +194,13 @@ static void draw(int ow, int oh)
 	if (mode != DISPLAY_CRT_480 && m != ipix_m) {
 		if (ipix)
 			SDL_DestroyTexture(ipix);
-		ipix = make_target(SCREEN_W * m, SCREEN_H * m, SDL_ScaleModeLinear);
+		ipix = make_target(SCREEN_W * m, SCREEN_H * m, SDL_SCALEMODE_LINEAR);
 		ipix_m = ipix ? m : 0;
 	}
 	if (crt && (k != big_k || bw != big_w || bh != big_h)) {
 		if (big)
 			SDL_DestroyTexture(big);
-		big = make_target(bw * k, bh * k, SDL_ScaleModeLinear);
+		big = make_target(bw * k, bh * k, SDL_SCALEMODE_LINEAR);
 		big_k = big ? k : 0;
 		big_w = bw;
 		big_h = bh;
@@ -211,14 +208,14 @@ static void draw(int ow, int oh)
 	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 	if (mode != DISPLAY_CRT_480 && ipix) {
 		SDL_SetRenderTarget(renderer, ipix);
-		SDL_RenderCopy(renderer, texture, NULL, NULL);
+		SDL_RenderTexture(renderer, texture, NULL, NULL);
 		SDL_SetRenderTarget(renderer, target);
 	}
 	SDL_Texture *src = mode == DISPLAY_CRT_480 || !ipix ? texture : ipix;
 	if (!crt || !big) {
 		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 		SDL_RenderClear(renderer);
-		SDL_RenderCopy(renderer, src, NULL, &dst);
+		SDL_RenderTexture(renderer, src, NULL, &dst);
 		return;
 	}
 	if (k > 1 && (!scan_tex[k] || scan_lines[k] != bh)) {
@@ -229,22 +226,22 @@ static void draw(int ow, int oh)
 	}
 	/* 1: k-times picture with scanlines, and the glow source */
 	SDL_SetRenderTarget(renderer, big);
-	SDL_RenderCopy(renderer, src, NULL, NULL);
+	SDL_RenderTexture(renderer, src, NULL, NULL);
 	if (scan_tex[k] && k > 1)
-		SDL_RenderCopy(renderer, scan_tex[k], NULL, NULL);
+		SDL_RenderTexture(renderer, scan_tex[k], NULL, NULL);
 	if (glow_half && glow_quarter) {
 		SDL_SetRenderTarget(renderer, glow_half);
-		SDL_RenderCopy(renderer, big, NULL, NULL);
+		SDL_RenderTexture(renderer, big, NULL, NULL);
 		SDL_SetRenderTarget(renderer, glow_quarter);
-		SDL_RenderCopy(renderer, glow_half, NULL, NULL);
+		SDL_RenderTexture(renderer, glow_half, NULL, NULL);
 	}
 	SDL_SetRenderTarget(renderer, target);
 	SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 	SDL_RenderClear(renderer);
 	/* 2: picture, glow */
-	SDL_RenderCopy(renderer, big, NULL, &dst);
+	SDL_RenderTexture(renderer, big, NULL, &dst);
 	if (glow_quarter)
-		SDL_RenderCopy(renderer, glow_quarter, NULL, &dst);
+		SDL_RenderTexture(renderer, glow_quarter, NULL, &dst);
 	/* 3: grille (faint at 2x, full from 3.5x, none at 1x), damper wires,
 	 * vignette, then the glass's dark grey added under everything */
 	float scale = (float)h / bh;
@@ -252,8 +249,8 @@ static void draw(int ow, int oh)
 	if (ms > 0.01f) {
 		make_grille(ow, ms);
 		if (grille) {
-			SDL_Rect src = { x, 0, w, 1 };
-			SDL_RenderCopy(renderer, grille, &src, &dst);
+			SDL_FRect src = { (float)x, 0, (float)w, 1 };
+			SDL_RenderTexture(renderer, grille, &src, &dst);
 		}
 	}
 	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_MOD);
@@ -261,11 +258,11 @@ static void draw(int ow, int oh)
 	Uint8 wire = (Uint8)((1.0f - 0.22f * cover) * 255.0f + 0.5f);
 	SDL_SetRenderDrawColor(renderer, wire, wire, wire, 255);
 	for (int i = 1; i <= 2; i++) {
-		SDL_Rect r = { x, y + h * i / 3, w, 1 };
+		SDL_FRect r = { (float)x, (float)(y + h * i / 3), (float)w, 1 };
 		SDL_RenderFillRect(renderer, &r);
 	}
 	if (vignette)
-		SDL_RenderCopy(renderer, vignette, NULL, &dst);
+		SDL_RenderTexture(renderer, vignette, NULL, &dst);
 	SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_ADD);
 	SDL_SetRenderDrawColor(renderer, 7, 8, 9, 255);
 	SDL_RenderFillRect(renderer, &dst);
@@ -292,7 +289,7 @@ void present_frame_rgb(const uint32_t *xrgb)
 	SDL_UpdateTexture(texture, NULL, xrgb, SCREEN_W * 4);
 	present_note_in(present_luma_rgb(xrgb));
 	int ow, oh;
-	if (SDL_GetRendererOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0) {
+	if (!SDL_GetCurrentRenderOutputSize(renderer, &ow, &oh) || ow <= 0 || oh <= 0) {
 		pstats.skip_size++;
 		return;
 	}
@@ -319,18 +316,22 @@ int present_capture(const char *bmp_path, int w, int h)
 	if (soft)
 		return soft_capture(bmp_path, w, h);
 	if (w <= 0 || h <= 0)
-		if (SDL_GetRendererOutputSize(renderer, &w, &h))
+		if (!SDL_GetCurrentRenderOutputSize(renderer, &w, &h))
 			return 0;
-	SDL_Texture *t = make_target(w, h, SDL_ScaleModeNearest);
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_ARGB8888);
+	SDL_Texture *t = make_target(w, h, SDL_SCALEMODE_NEAREST);
+	SDL_Surface *s = NULL;
 	int ok = 0;
-	if (t && s && !SDL_SetRenderTarget(renderer, t)) {
+	if (t && SDL_SetRenderTarget(renderer, t)) {
 		draw(w, h);
-		ok = !SDL_RenderReadPixels(renderer, NULL, SDL_PIXELFORMAT_ARGB8888, s->pixels, s->pitch) &&
-		     !SDL_SaveBMP(s, bmp_path);
+		SDL_Surface *raw = SDL_RenderReadPixels(renderer, NULL);
+		if (raw) {
+			s = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+			SDL_DestroySurface(raw);
+		}
+		ok = s && SDL_SaveBMP(s, bmp_path);
 		SDL_SetRenderTarget(renderer, NULL);
 	}
-	SDL_FreeSurface(s);
+	SDL_DestroySurface(s);
 	if (t)
 		SDL_DestroyTexture(t);
 	return ok;
@@ -338,9 +339,9 @@ int present_capture(const char *bmp_path, int w, int h)
 
 const char *present_name(void)
 {
-	SDL_RendererInfo info;
-	if (renderer && !SDL_GetRendererInfo(renderer, &info))
-		SDL_snprintf(name, sizeof name, "SDL_Renderer (%s)", info.name);
+	const char *rn = renderer ? SDL_GetRendererName(renderer) : NULL;
+	if (rn)
+		SDL_snprintf(name, sizeof name, "SDL_Renderer (%s)", rn);
 	return name;
 }
 

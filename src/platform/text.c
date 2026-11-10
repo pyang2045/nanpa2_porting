@@ -13,8 +13,7 @@
 #include "platform/surface.h"
 #include "platform/textlayer.h"
 
-#include <SDL.h>
-#include <math.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

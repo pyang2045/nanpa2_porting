@@ -2,17 +2,30 @@
  * rasteriser and no game data: what is shown when the screen is as the game drew it, when part of it
  * was drawn over (the pointer), when the cell was cleared or drawn over, after a fill, after a BltFast
  * that moved it, and with another palette. Exit 0 = pass. */
-#include <SDL.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "platform/present.h"
 #include "platform/surface.h"
 #include "platform/text.h"
 #include "platform/textlayer.h"
 
+#define SCREEN_W 640
+#define SCREEN_H 480
+
 /* ---- stubs of the rest of the platform ---- */
+uint64_t clock_host_ns(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
+}
+
+static int g_empty;   /* the stub rasteriser finds no outline */
+static int g_big = 1; /* glyph size factor, to make the atlas fill */
+static int g_ptr, g_px, g_py; /* the pointer the validation is told of */
+
 int surf_size(uint32_t s, int *w, int *h)
 {
 	(void)s;
@@ -24,7 +37,9 @@ int surf_size(uint32_t s, int *w, int *h)
 uint8_t *text_hires_glyph(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x)
 {
 	(void)g;
-	*w = *h = (int)(8 * scale);
+	if (g_empty)
+		return NULL;
+	*w = *h = (int)(8 * scale) * g_big;
 	*xo = 0;
 	*yo = -*h;
 	*pen_x = 1;
@@ -82,10 +97,10 @@ static void draw(int x, int y, uint32_t cp, int fg, int bg)
 
 static int shown(void)
 {
-	tl_validate(frame, pal);
+	tl_validate(frame, pal, g_ptr, g_px, g_py);
 	struct tl_stats st;
 	const struct tl_quad *q;
-	int n = tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+	int n = tl_layout(2.0f, 2.0f, -1, &q);
 	tl_get_stats(&st);
 	(void)n;
 	return st.shown;
@@ -93,7 +108,6 @@ static int shown(void)
 
 int main(void)
 {
-	SDL_Init(SDL_INIT_TIMER);
 	pal[7] = 0xf0f0f0;
 	pal[12] = 0x90b0c0;
 	tl_set_mode(TEXT_HIRES);
@@ -107,14 +121,14 @@ int main(void)
 	/* the quads: the cell rectangle at 2x, colours in linear light from the palette */
 	{
 		const struct tl_quad *q;
-		int n = tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+		int n = tl_layout(2.0f, 2.0f, -1, &q);
 		CHECK(n == 2, "quads %d", n);
 		CHECK(q[0].x0 == 200 && q[0].y0 == 200 && q[0].x1 == 232 && q[0].y1 == 232, "cell rect %g,%g-%g,%g", q[0].x0,
 		      q[0].y0, q[0].x1, q[0].y1);
 		CHECK(q[0].fg[0] > 0.85f && q[0].fg[0] < 0.9f, "fg linear %g", q[0].fg[0]);
 		CHECK(q[0].gw > 0, "glyph rectangle");
 		/* below the factor 1.5 there is no layer */
-		CHECK(tl_layout(1.0f, 1.0f, 640, 480, -1, &q) == 0, "1x draws nothing");
+		CHECK(tl_layout(1.0f, 1.0f, -1, &q) == 0, "1x draws nothing");
 	}
 
 	/* the same indices with another palette: the colours follow, the cells stay */
@@ -122,27 +136,32 @@ int main(void)
 	pal[12] = 0x000000;
 	{
 		const struct tl_quad *q;
-		tl_validate(frame, pal);
-		tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+		tl_validate(frame, pal, g_ptr, g_px, g_py);
+		tl_layout(2.0f, 2.0f, -1, &q);
 		CHECK(q[0].fg[0] < 0.01f && q[0].bg[0] == 0.0f, "faded colours %g %g", q[0].fg[0], q[0].bg[0]);
 	}
 	pal[7] = 0xf0f0f0;
 	pal[12] = 0x90b0c0;
 
-	/* the pointer over a corner of the first cell: a few pixels differ and are repainted */
+	/* the pointer over a corner of the first cell: a few pixels differ and are repainted (only if the
+	 * pointer is known to be there) */
+	g_ptr = 1;
+	g_px = 96;
+	g_py = 96;
 	for (int r = 0; r < 4; r++)
 		for (int c = 0; c < 4; c++)
 			frame[(100 + r) * SCREEN_W + 100 + c] = 0;
 	{
 		const struct tl_quad *q;
-		tl_validate(frame, pal);
+		tl_validate(frame, pal, g_ptr, g_px, g_py);
 		struct tl_stats st;
-		int n = tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+		int n = tl_layout(2.0f, 2.0f, -1, &q);
 		tl_get_stats(&st);
 		CHECK(st.shown == 2 && st.repaint > 0 && n == 2 + st.repaint, "pointer: shown %d repaint %d quads %d", st.shown,
 		      st.repaint, n);
 	}
 
+	g_ptr = 0;
 	/* differences all over (a wipe): strict, no cell with a differing pixel is shown, none is repainted */
 	{
 		uint8_t keep[8][16];
@@ -153,9 +172,9 @@ int main(void)
 		draw(100, 200, 0x4e01, 7, 12);
 		frame[204 * SCREEN_W + 103] ^= 1;        /* a third, in a cell 100 rows down: no longer one box */
 		const struct tl_quad *q;
-		tl_validate(frame, pal);
+		tl_validate(frame, pal, g_ptr, g_px, g_py);
 		struct tl_stats st;
-		tl_layout(2.0f, 2.0f, 1280, 960, -1, &q);
+		tl_layout(2.0f, 2.0f, -1, &q);
 		tl_get_stats(&st);
 		CHECK(st.repaint == 0, "spread differences are not repainted: %d", st.repaint);
 		tl_fill(SURF_PRIMARY_HANDLE, 100, 200, 116, 216);
@@ -216,7 +235,7 @@ int main(void)
 	tl_set_mode(TEXT_BITMAP);
 	{
 		const struct tl_quad *q;
-		CHECK(tl_layout(2.0f, 2.0f, 1280, 960, -1, &q) == 0, "bitmap mode draws nothing");
+		CHECK(tl_layout(2.0f, 2.0f, -1, &q) == 0, "bitmap mode draws nothing");
 	}
 
 	/* a same-colour cell and an inkless one are not tracked */
@@ -229,6 +248,78 @@ int main(void)
 		tl_glyph_drawn(&g);
 		tl_cell_placed(SURF_PRIMARY_HANDLE, 520, 400, 16, 7, 12);
 		CHECK(shown() == before, "fg == bg and no ink are skipped");
+	}
+
+	/* a look-alike character: a few pixels of a cell change (the game's raw copies rewrote the page).
+	 * Without the pointer there, the cell is hidden; with the pointer over those pixels it is repainted */
+	{
+		tl_set_mode(TEXT_HIRES);
+		tl_fill(SURF_PRIMARY_HANDLE, 0, 0, 640, 480);
+		draw(300, 100, 0x672a, 7, 12);
+		CHECK(shown() == 1, "fresh cell: %d", shown());
+		frame[105 * SCREEN_W + 304] ^= 1;
+		frame[106 * SCREEN_W + 305] ^= 1;
+		g_ptr = 0;
+		CHECK(shown() == 0, "changed pixels, no pointer: hidden (%d)", shown());
+		g_ptr = 1;
+		g_px = 400;
+		g_py = 300;
+		CHECK(shown() == 0, "changed pixels, pointer elsewhere: hidden (%d)", shown());
+		g_px = 290;
+		g_py = 95;
+		CHECK(shown() == 1, "changed pixels under the pointer: shown (%d)", shown());
+		g_ptr = 0;
+		frame[105 * SCREEN_W + 304] ^= 1;
+		frame[106 * SCREEN_W + 305] ^= 1;
+		/* a 3 px band changed across two cells (a wipe edge), pointer far away */
+		draw(316, 100, 0x672b, 7, 12);
+		for (int r = 0; r < 16; r++)
+			for (int c = 14; c < 18; c++)
+				frame[(100 + r) * SCREEN_W + 300 + c] = 3;
+		g_ptr = 1;
+		g_px = 500;
+		g_py = 400;
+		CHECK(shown() == 0, "wipe band: both hidden (%d)", shown());
+		g_ptr = 0;
+	}
+
+	/* a glyph the rasteriser has no outline for: the bitmap glyph stays (no quad for the cell) */
+	{
+		tl_fill(SURF_PRIMARY_HANDLE, 0, 0, 640, 480);
+		draw(100, 100, 0x4e01, 7, 12);
+		draw(116, 100, 0x4e02, 7, 12);
+		g_empty = 1;
+		const struct tl_quad *q;
+		tl_validate(frame, pal, 0, 0, 0);
+		int n = tl_layout(2.0f, 2.0f, -1, &q);
+		CHECK(n == 0, "empty glyphs draw no cell: %d quads", n);
+		g_empty = 0;
+	}
+
+	/* an atlas that cannot hold the screen's glyphs: one reset at most, the rest wait (bitmap), no
+	 * rasterising and uploading every frame */
+	{
+		tl_fill(SURF_PRIMARY_HANDLE, 0, 0, 640, 480);
+		g_big = 4;
+		int cells = 0;
+		for (int y = 0; y + 16 <= 400 && cells < 400; y += 16)
+			for (int x = 0; x + 16 <= 640 && cells < 400; x += 16, cells++)
+				draw(x, y, 0x5000 + (uint32_t)cells, 7, 12);
+		struct tl_stats a, b;
+		tl_validate(frame, pal, 0, 0, 0);
+		const struct tl_quad *q;
+		tl_layout(6.0f, 6.0f, -1, &q);
+		tl_get_stats(&a);
+		for (int f = 0; f < 20; f++) {
+			tl_validate(frame, pal, 0, 0, 0);
+			tl_layout(6.0f, 6.0f, -1, &q);
+		}
+		tl_get_stats(&b);
+		CHECK(b.atlas_resets - a.atlas_resets <= 1, "atlas resets in 20 frames: %lu", b.atlas_resets - a.atlas_resets);
+		CHECK(b.shown + b.waiting == cells, "shown %d + waiting %d = %d cells", b.shown, b.waiting, cells);
+		CHECK(b.waiting > 0 && b.shown > 0, "partly shown: %d / %d", b.shown, b.waiting);
+		CHECK(b.glyphs - a.glyphs < (unsigned long)cells, "no re-rasterising every frame: %lu", b.glyphs - a.glyphs);
+		g_big = 1;
 	}
 
 	/* the cap: far more cells than fit */

@@ -1,6 +1,6 @@
 #!/bin/sh
-# Build ios/third_party/SDL2.xcframework (gitignored), which ios/nanpa2.xcodeproj links: SDL2 and
-# SDL2main, static, for iOS devices (arm64) and the simulator (arm64 + x86_64).
+# Build ios/third_party/SDL3.xcframework (gitignored), which ios/nanpa2.xcodeproj links: SDL3,
+# static, for iOS devices (arm64) and the simulator (arm64 + x86_64).
 #
 #   tools/fetch_sdl.sh
 #
@@ -11,33 +11,34 @@
 # Metal Toolchain download, which this game does not need. Nothing is installed, no sudo.
 set -eu
 
-ver=${SDL2_VERSION:-2.32.10}
-sha=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165 # SDL2-2.32.10.tar.gz
-[ "$ver" = 2.32.10 ] || sha=${SDL2_SHA256:?SDL2_VERSION other than 2.32.10 needs SDL2_SHA256}
+# The one place the SDL version lives (tools/build_msys2.sh and the README refer here).
+ver=${SDL3_VERSION:-3.4.18}
+sha=9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3 # SDL3-3.4.18.tar.gz
+[ "$ver" = 3.4.18 ] || sha=${SDL3_SHA256:?SDL3_VERSION other than 3.4.18 needs SDL3_SHA256}
 
 here=$(cd "$(dirname "$0")/.." && pwd)
-dest=$here/ios/third_party/SDL2.xcframework
+dest=$here/ios/third_party/SDL3.xcframework
 if [ -f "$dest/.version" ] && [ "$(cat "$dest/.version")" = "$ver" ]; then
-	echo "fetch_sdl: SDL2 $ver xcframework already built"
+	echo "fetch_sdl: SDL3 $ver xcframework already built"
 	exit 0
 fi
-for t in xcrun xcodebuild cmake ninja curl tar shasum libtool; do
+for t in xcrun xcodebuild cmake ninja curl tar shasum; do
 	command -v "$t" >/dev/null 2>&1 || { echo "fetch_sdl: $t not found (install Xcode, then: brew install cmake ninja)" >&2; exit 1; }
 done
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-echo "fetch_sdl: downloading SDL2 $ver"
-curl -fL -s -o "$tmp/sdl.tar.gz" "https://github.com/libsdl-org/SDL/releases/download/release-$ver/SDL2-$ver.tar.gz"
+echo "fetch_sdl: downloading SDL3 $ver"
+curl -fL -s -o "$tmp/sdl.tar.gz" "https://github.com/libsdl-org/SDL/releases/download/release-$ver/SDL3-$ver.tar.gz"
 got=$(shasum -a 256 "$tmp/sdl.tar.gz" | cut -d' ' -f1)
 if [ "$got" != "$sha" ]; then
-	echo "fetch_sdl: SHA-256 mismatch for SDL2-$ver.tar.gz: got $got, expected $sha" >&2
+	echo "fetch_sdl: SHA-256 mismatch for SDL3-$ver.tar.gz: got $got, expected $sha" >&2
 	exit 1
 fi
 mkdir "$tmp/src"
 tar -xzf "$tmp/sdl.tar.gz" -C "$tmp/src" --strip-components=1
 
-# one slice per SDK: a static library (SDL2 + SDL2main merged) and the headers
+# one slice per SDK: a static library and the headers
 args=""
 for sdk in iphoneos iphonesimulator; do
 	archs="arm64"
@@ -49,11 +50,10 @@ for sdk in iphoneos iphonesimulator; do
 	cmake -S "$tmp/src" -B "$b" -G Ninja -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT="$sysroot" \
 		-DCMAKE_OSX_ARCHITECTURES="$archs" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_C_FLAGS="-ffile-prefix-map=$tmp=sdl" -DCMAKE_OBJC_FLAGS="-ffile-prefix-map=$tmp=sdl" \
-		-DCMAKE_INSTALL_PREFIX="$i" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF -DSDL_TESTS=OFF >/dev/null
+		-DCMAKE_INSTALL_PREFIX="$i" -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_CAMERA=OFF >/dev/null
 	cmake --build "$b" >/dev/null
 	cmake --install "$b" >/dev/null
-	libtool -static -o "$i/lib/libSDL2all.a" "$i/lib/libSDL2.a" "$i/lib/libSDL2main.a" 2>/dev/null
-	args="$args -library $i/lib/libSDL2all.a -headers $i/include/SDL2"
+	args="$args -library $i/lib/libSDL3.a -headers $i/include" # include/SDL3/*.h: #include <SDL3/SDL.h>
 done
 
 rm -rf "$dest"
@@ -61,4 +61,4 @@ mkdir -p "$(dirname "$dest")"
 # shellcheck disable=SC2086
 xcodebuild -create-xcframework $args -output "$dest" >/dev/null
 echo "$ver" >"$dest/.version"
-echo "fetch_sdl: ios/third_party/SDL2.xcframework ready"
+echo "fetch_sdl: ios/third_party/SDL3.xcframework ready"

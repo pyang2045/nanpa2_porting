@@ -6,8 +6,9 @@
 #define PRESENT_TEXT_LAYER 1 /* this presenter draws the text layer (platform/textlayer.h) */
 #include "present_common.h"
 #include "platform/textlayer.h"
+#include "platform/window.h"
 
-#include <SDL_metal.h>
+#include <SDL3/SDL_metal.h>
 #import <TargetConditionals.h>
 #if TARGET_OS_OSX
 #import <AppKit/AppKit.h>
@@ -34,6 +35,7 @@ static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
 static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat, pipe_text_lin, pipe_text_enc;
 static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex, hd_tex, atlas_tex;
+static int text_ok; /* the text layer can be drawn (its pipelines and atlas exist) */
 static int capturing; /* present_capture: no time limit on rasterising glyphs */
 static int rgb_mode; /* the last frame came from present_frame_rgb */
 static id<MTLSamplerState> linear_sampler;
@@ -369,14 +371,14 @@ static id<MTLTexture> make_texture(MTLPixelFormat fmt, int w, int h, MTLTextureU
 	return [device newTextureWithDescriptor:td];
 }
 
-Uint32 present_window_flags(void)
+SDL_WindowFlags present_window_flags(void)
 {
 #if TARGET_OS_OSX
 	return present_headless() ? 0 : SDL_WINDOW_METAL;
 #else
 	/* iOS: a full-screen Metal window; the view's layer is sized from its bounds x the display scale */
 	return present_headless() ? 0 : SDL_WINDOW_METAL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS |
-						 SDL_WINDOW_ALLOW_HIGHDPI;
+						 SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #endif
 }
 
@@ -415,21 +417,24 @@ int present_init(SDL_Window *win)
 	pipe_up = make_pipeline(lib, vs, @"fs_up", MTLPixelFormatRGBA16Float);
 	pipe_hd = make_pipeline(lib, vs, @"fs_hd", layer.pixelFormat);
 	pipe_flat = make_pipeline(lib, vs, @"fs_flat", layer.pixelFormat);
+	/* the text layer's pipelines and atlas: without them the layer is off and the picture still shows */
+	text_ok = 1;
 	for (int enc = 0; enc < 2; enc++) {
 		MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
 		pd.vertexFunction = [lib newFunctionWithName:@"vs_text"];
 		pd.fragmentFunction = [lib newFunctionWithName:@"fs_text"];
 		pd.colorAttachments[0].pixelFormat = enc ? layer.pixelFormat : MTLPixelFormatRGBA16Float;
 		id<MTLRenderPipelineState> tp = [device newRenderPipelineStateWithDescriptor:pd error:&err];
-		if (!tp)
+		if (!tp) {
 			SDL_Log("Metal pipeline text: %s", err.localizedDescription.UTF8String);
+			text_ok = 0;
+		}
 		if (enc)
 			pipe_text_enc = tp;
 		else
 			pipe_text_lin = tp;
 	}
-	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat || !pipe_text_lin ||
-	    !pipe_text_enc)
+	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat)
 		return 0;
 	{
 		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
@@ -440,7 +445,9 @@ int present_init(SDL_Window *win)
 		td.storageMode = MTLStorageModePrivate;
 		atlas_tex = [device newTextureWithDescriptor:td];
 		if (!atlas_tex)
-			return 0;
+			text_ok = 0;
+		if (!text_ok)
+			SDL_Log("text layer unavailable: the picture is shown with the game's own glyphs");
 	}
 
 	index_tex = make_texture(MTLPixelFormatR8Uint, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
@@ -553,9 +560,9 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	 * output; CRT 480 keeps the game's own glyphs */
 	const struct tl_quad *tq = NULL;
 	int ntq = 0;
-	if (!rgb_mode && mode != DISPLAY_CRT_480) {
+	if (text_ok && !rgb_mode && mode != DISPLAY_CRT_480) {
 		int rw = mode == DISPLAY_CRT_HD ? vw : w, rh = mode == DISPLAY_CRT_HD ? vh : h;
-		ntq = tl_layout((float)rw / SCREEN_W, (float)rh / SCREEN_H, rw, rh, capturing ? -1 : 4000, &tq);
+		ntq = tl_layout((float)rw / SCREEN_W, (float)rh / SCREEN_H, capturing ? -1 : 4000, &tq);
 		if (ntq)
 			text_upload_atlas(cb);
 	}
@@ -664,8 +671,10 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 			     withBytes:bgra
 			   bytesPerRow:sizeof bgra];
 		rgb_mode = 0;
-		if (tl_get_mode() == TEXT_HIRES)
-			tl_validate(pixels, pal);
+		if (text_ok && tl_get_mode() == TEXT_HIRES) {
+			int px = 0, py = 0, have = win_mouse_pos(&px, &py);
+			tl_validate(pixels, pal, have, px, py);
+		}
 		else
 			tl_clear();
 		present_note_in(present_luma_indexed(pixels, pal));
@@ -696,7 +705,7 @@ static void show(void)
 {
 	@autoreleasepool {
 		int dw, dh;
-		SDL_Metal_GetDrawableSize(window, &dw, &dh);
+		SDL_GetWindowSizeInPixels(window, &dw, &dh);
 		pstats.drawable_w = dw;
 		pstats.drawable_h = dh;
 		if (dw <= 0 || dh <= 0) {
@@ -765,7 +774,7 @@ int present_capture(const char *bmp_path, int w, int h)
 		return soft_capture(bmp_path, w, h);
 	@autoreleasepool {
 		if (w <= 0 || h <= 0) /* the window's drawable size */
-			SDL_Metal_GetDrawableSize(window, &w, &h);
+			SDL_GetWindowSizeInPixels(window, &w, &h);
 		MTLTextureDescriptor *td =
 			[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
 									   width:(NSUInteger)w
@@ -807,10 +816,9 @@ int present_capture(const char *bmp_path, int w, int h)
 			bytesPerRow:(NSUInteger)w * 4
 			 fromRegion:MTLRegionMake2D(0, 0, (NSUInteger)w, (NSUInteger)h)
 			mipmapLevel:0];
-		SDL_Surface *s = SDL_CreateRGBSurfaceWithFormatFrom(buf, w, h, 32, w * 4,
-								    SDL_PIXELFORMAT_ARGB8888);
-		int ok = s && SDL_SaveBMP(s, bmp_path) == 0;
-		SDL_FreeSurface(s);
+		SDL_Surface *s = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_ARGB8888, buf, w * 4);
+		int ok = s && SDL_SaveBMP(s, bmp_path);
+		SDL_DestroySurface(s);
 		free(buf);
 		return ok;
 	}

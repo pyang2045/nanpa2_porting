@@ -28,7 +28,7 @@
  * runs the mixer in real time, so the dump and game timing are the same. */
 #include "platform/sound.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +42,7 @@
 
 #define RATE 44100
 
-static SDL_AudioDeviceID dev;
+static SDL_AudioStream *dev; /* the device's stream; the mixer runs in its callback */
 static int log_on;
 
 /* PCM clip: 16-bit interleaved at its own rate/channels */
@@ -155,20 +155,34 @@ static int load_wav(const unsigned char *d, size_t n, struct clip *c)
 	SDL_AudioSpec spec;
 	Uint8 *buf;
 	Uint32 len;
-	SDL_RWops *rw = SDL_RWFromConstMem(d, (int)n);
-	if (!SDL_LoadWAV_RW(rw, 1, &spec, &buf, &len))
+	SDL_IOStream *rw = SDL_IOFromConstMem(d, (int)n);
+	if (!SDL_LoadWAV_IO(rw, 1, &spec, &buf, &len))
 		return 0;
-	SDL_AudioCVT cvt;
-	SDL_BuildAudioCVT(&cvt, spec.format, spec.channels, spec.freq, AUDIO_S16SYS, spec.channels,
-			  spec.freq);
-	cvt.len = (int)len;
-	cvt.buf = malloc((size_t)len * (size_t)(cvt.len_mult > 0 ? cvt.len_mult : 1) + 16);
-	memcpy(cvt.buf, buf, len);
-	SDL_FreeWAV(buf);
-	if (cvt.needed)
-		SDL_ConvertAudio(&cvt);
-	int out_len = cvt.needed ? cvt.len_cvt : cvt.len;
-	c->pcm = (int16_t *)cvt.buf;
+	/* to 16-bit at the file's own rate and channels; the mixer resamples */
+	Uint8 *out = NULL;
+	int out_len = 0;
+	if (spec.format == SDL_AUDIO_S16LE) {
+		out = buf;
+		out_len = (int)len;
+	} else if (spec.format == SDL_AUDIO_U8) {
+		int16_t *o = SDL_malloc((size_t)len * 2 + 16);
+		if (o)
+			for (Uint32 i = 0; i < len; i++)
+				o[i] = (int16_t)(((int)buf[i] - 128) * 256);
+		SDL_free(buf);
+		out = (Uint8 *)o;
+		out_len = (int)len * 2;
+	} else {
+		SDL_AudioSpec to = spec;
+		to.format = SDL_AUDIO_S16LE;
+		bool ok = SDL_ConvertAudioSamples(&spec, buf, (int)len, &to, &out, &out_len);
+		SDL_free(buf);
+		if (!ok)
+			return 0;
+	}
+	if (!out)
+		return 0;
+	c->pcm = (int16_t *)out; /* SDL_malloc'd: freed with SDL_free */
 	c->channels = spec.channels;
 	c->rate = spec.freq;
 	c->frames = (size_t)out_len / (2u * (unsigned)spec.channels);
@@ -240,12 +254,15 @@ static void mix_mp3(int32_t *out, int frames)
 	}
 }
 
-static void callback(void *ud, Uint8 *stream, int len)
+/* Stream callback (the device thread): feed the stream the bytes it asks for, in the stream's own format
+ * (44100 Hz S16 stereo); the stream converts to the device's format. */
+static void callback(void *ud, SDL_AudioStream *stream, int additional, int total)
 {
 	(void)ud;
-	int frames = len / 4;
+	(void)total;
+	int frames = additional / 4;
 	int32_t mix[1024 * 2];
-	int16_t *o = (int16_t *)stream;
+	int16_t o[1024 * 2];
 	while (frames > 0) {
 		int n = frames > 1024 ? 1024 : frames;
 		memset(mix, 0, sizeof(int32_t) * (size_t)n * 2);
@@ -262,22 +279,21 @@ static void callback(void *ud, Uint8 *stream, int len)
 			o[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 		}
 		dump_write(o, n);
-		o += 2 * n;
+		SDL_PutAudioStreamData(stream, o, n * 4);
 		frames -= n;
 	}
 }
 
 /* ---- native entry points ---- */
 
-static SDL_AudioDeviceID open_device(void)
+static SDL_AudioStream *open_device(void)
 {
-	SDL_AudioSpec want = { 0 }, have;
+	SDL_AudioSpec want = { 0 };
 	want.freq = RATE;
-	want.format = AUDIO_S16SYS;
+	want.format = SDL_AUDIO_S16;
 	want.channels = 2;
-	want.samples = 1024;
-	want.callback = callback;
-	return SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+	SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "1024");
+	return SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &want, callback, NULL);
 }
 
 /* native 0x402ad0. The caller (0x402620) ignores the result: without sound
@@ -287,7 +303,7 @@ int sound_init(void)
 	if (dev)
 		return 1;
 	log_on = getenv("NANPA2_LOG") != NULL;
-	if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0)
+	if (SDL_InitSubSystem(SDL_INIT_AUDIO))
 		dev = open_device();
 	if (!dev) {
 		SDL_Log("audio: no device (%s)%s", SDL_GetError(),
@@ -296,8 +312,8 @@ int sound_init(void)
 			return 0;
 		/* the dump still needs a real-time mixer */
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
-		SDL_setenv("SDL_AUDIODRIVER", "dummy", 1);
-		if (SDL_InitSubSystem(SDL_INIT_AUDIO) == 0)
+		SDL_setenv_unsafe("SDL_AUDIODRIVER", "dummy", 1);
+		if (SDL_InitSubSystem(SDL_INIT_AUDIO))
 			dev = open_device();
 		if (!dev) {
 			SDL_Log("audio: dummy driver failed (%s)", SDL_GetError());
@@ -307,7 +323,7 @@ int sound_init(void)
 	if (log_on)
 		fprintf(stderr, "audio: driver %s\n", SDL_GetCurrentAudioDriver());
 	dump_open();
-	SDL_PauseAudioDevice(dev, 0);
+	SDL_ResumeAudioStreamDevice(dev); /* a stream's device starts paused */
 	return 1;
 }
 
@@ -318,8 +334,8 @@ void sound_shutdown(void)
 		return;
 	sound_voice_stop();
 	sound_music_stop();
-	SDL_CloseAudioDevice(dev); /* joins the callback thread */
-	dev = 0;
+	SDL_DestroyAudioStream(dev); /* closes the device and joins the callback thread */
+	dev = NULL;
 	dump_close();
 }
 
@@ -330,7 +346,7 @@ static void music_free(void)
 	if (music.is_mp3)
 		mp3dec_ex_close(&music.mp3);
 	free(music.file);
-	free(music.wav.pcm);
+	SDL_free(music.wav.pcm);
 	music.file = NULL;
 	music.wav.pcm = NULL;
 	music.active = music.loaded = music.is_mp3 = 0;
@@ -341,11 +357,11 @@ void sound_music_stop(void)
 {
 	if (!dev)
 		return;
-	SDL_LockAudioDevice(dev);
+	SDL_LockAudioStream(dev);
 	if (music.loaded)
 		slog("music stop", "");
 	music_free();
-	SDL_UnlockAudioDevice(dev);
+	SDL_UnlockAudioStream(dev);
 }
 
 /* native 0x402cb0 */
@@ -358,7 +374,7 @@ void sound_music_play(int n)
 	sound_music_stop();
 	snprintf(rel, sizeof rel, "MUSIC\\%02d.MP3", n);
 	unsigned char *d = fsys_read(rel, &len);
-	SDL_LockAudioDevice(dev);
+	SDL_LockAudioStream(dev);
 	if (d && !mp3dec_ex_open_buf(&music.mp3, d, len, MP3D_SEEK_TO_SAMPLE)) {
 		music.file = d;
 		music.is_mp3 = 1;
@@ -378,7 +394,7 @@ void sound_music_play(int n)
 	}
 	music.num = n;
 	music.paused = 0;
-	SDL_UnlockAudioDevice(dev);
+	SDL_UnlockAudioStream(dev);
 	if (music.active)
 		slog("music", rel);
 	else
@@ -393,7 +409,7 @@ void sound_music_pause(int pause)
 {
 	if (!dev)
 		return;
-	SDL_LockAudioDevice(dev);
+	SDL_LockAudioStream(dev);
 	if (music.loaded) {
 		if (!pause && !music.is_mp3 && !music.active) {
 			music.wav.pos = 0;
@@ -401,7 +417,7 @@ void sound_music_pause(int pause)
 		}
 		music.paused = pause;
 	}
-	SDL_UnlockAudioDevice(dev);
+	SDL_UnlockAudioStream(dev);
 }
 
 /* For the status file: the music number playing (-1 none) and the last
@@ -418,13 +434,13 @@ void sound_voice_stop(void)
 {
 	if (!dev)
 		return;
-	SDL_LockAudioDevice(dev);
+	SDL_LockAudioStream(dev);
 	if (voice.active && log_on)
 		slog("voice cut", "");
 	voice.active = 0;
-	free(voice.pcm);
+	SDL_free(voice.pcm);
 	voice.pcm = NULL;
-	SDL_UnlockAudioDevice(dev);
+	SDL_UnlockAudioStream(dev);
 }
 
 /* native 0x403360 */
@@ -437,10 +453,10 @@ void sound_voice_play(const char *rel)
 	unsigned char *d = fsys_read(rel, &len);
 	struct clip c = { 0 };
 	if (d && load_wav(d, len, &c)) {
-		SDL_LockAudioDevice(dev);
+		SDL_LockAudioStream(dev);
 		voice = c;
 		voice.active = 1;
-		SDL_UnlockAudioDevice(dev);
+		SDL_UnlockAudioStream(dev);
 		snprintf(voice_name, sizeof voice_name, "%s", rel);
 		slog("voice", rel);
 	} else {
@@ -505,7 +521,7 @@ int sound_wav_check(int n, char **files)
 		       files[i], pass ? "ok" : "FAIL", ch, rate, bits, c.channels, c.rate, c.frames, got, mixed,
 		       want);
 		bad += !pass;
-		free(c.pcm);
+		SDL_free(c.pcm);
 		free(d);
 	}
 	return bad;

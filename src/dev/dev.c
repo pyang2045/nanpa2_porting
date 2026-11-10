@@ -1,7 +1,8 @@
 /* Developer hooks for scripted, headless testing (environment variables):
  *   NANPA2_SHOT_DIR=dir NANPA2_SHOT_SCHEDULE=start_ms,interval_ms,count
  *       save the screen as dir/shot_NNN.bmp on that schedule
- *   NANPA2_SHOT_PRESENT=1 (2: also dir/bitmap_NNN.bmp, the same frame without the text layer)
+ *   NANPA2_SHOT_PRESENT=1 (2: also dir/bitmap_NNN.bmp, the same frame without the text layer, and
+ *       dir/prev_NNN.bmp, the raw frame the presenter was showing, which is what the capture shows)
  *       also save what the presenter draws (CRT included) at the window's
  *       drawable size (NANPA2_SHOT_SIZE=WxH: at that size) as dir/present_NNN.bmp
  *   NANPA2_INPUT="click,MS,X,Y;rclick,MS,X,Y;move,MS,X,Y;key,MS,VK;quit,MS"
@@ -20,7 +21,7 @@
  *       fast as the host can; NANPA2_TURBO is the old name), for long scripted runs
  *   NANPA2_HOTSPOTS=1  log the script hit-test table when it changes */
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -127,14 +128,14 @@ static uint32_t clock_now(void)
 
 static void save_frame(const uint8_t *frame, const uint32_t pal[256], const char *path)
 {
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, SCREEN_W, SCREEN_H, 32, SDL_PIXELFORMAT_XRGB8888);
+	SDL_Surface *s = SDL_CreateSurface(SCREEN_W, SCREEN_H, SDL_PIXELFORMAT_XRGB8888);
 	for (int y = 0; y < SCREEN_H; y++) {
 		uint32_t *row = (uint32_t *)((uint8_t *)s->pixels + y * s->pitch);
 		for (int x = 0; x < SCREEN_W; x++)
 			row[x] = pal[frame[y * SCREEN_W + x]];
 	}
 	SDL_SaveBMP(s, path);
-	SDL_FreeSurface(s);
+	SDL_DestroySurface(s);
 }
 
 static void dev_frame_impl(const uint8_t *frame, const uint32_t pal[256], const uint8_t *prev, const uint32_t *prevpal, int have_prev)
@@ -160,7 +161,7 @@ static void dev_frame_impl(const uint8_t *frame, const uint32_t pal[256], const 
 		int cw = 0, ch = 0;
 		if (getenv("NANPA2_SHOT_SIZE"))
 			sscanf(getenv("NANPA2_SHOT_SIZE"), "%dx%d", &cw, &ch);
-		if (have_prev) {
+		if (have_prev && !strcmp(getenv("NANPA2_SHOT_PRESENT"), "2")) {
 			snprintf(path, sizeof path, "%s/prev_%03u.bmp", shot_dir, shot_done);
 			save_frame(prev_frame, prev_pal, path);
 		}
@@ -185,7 +186,7 @@ void dev_frame(const uint8_t *frame, const uint32_t pal[256])
 	static uint32_t prev_pal[256];
 	static int have_prev;
 	dev_frame_impl(frame, pal, prev_frame, prev_pal, have_prev);
-	if (shot_dir) {
+	if (shot_dir && getenv("NANPA2_SHOT_PRESENT") && !strcmp(getenv("NANPA2_SHOT_PRESENT"), "2")) {
 		memcpy(prev_frame, frame, sizeof prev_frame);
 		memcpy(prev_pal, pal, sizeof prev_pal);
 		have_prev = 1;

@@ -5,7 +5,7 @@
 #include "game/pace.h"
 #include "platform/clock.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,8 +32,22 @@ static struct msg {
 } queue[QUEUE_LEN];
 static int q_head, q_count;
 
+static int mouse_known, mouse_px, mouse_py;
+
+int win_mouse_pos(int *x, int *y)
+{
+	*x = mouse_px;
+	*y = mouse_py;
+	return mouse_known;
+}
+
 void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
+	if (msg >= 0x200 && msg <= 0x208) { /* WM_MOUSEMOVE .. WM_RBUTTONDBLCLK: lparam is y << 16 | x */
+		mouse_known = 1;
+		mouse_px = (int16_t)(lparam & 0xffff);
+		mouse_py = (int16_t)(lparam >> 16);
+	}
 	/* coalesce mouse moves, as Windows does */
 	if (msg == WM_MOUSEMOVE && q_count) {
 		struct msg *last = &queue[(q_head + q_count - 1) % QUEUE_LEN];
@@ -72,8 +86,8 @@ static uint32_t sdl_to_vk(SDL_Keycode k)
 	case SDLK_INSERT: return 0x2d;
 	case SDLK_F1: return 0x70;
 	}
-	if (k >= SDLK_a && k <= SDLK_z)
-		return 'A' + (uint32_t)(k - SDLK_a);
+	if (k >= SDLK_A && k <= SDLK_Z)
+		return 'A' + (uint32_t)(k - SDLK_A);
 	if (k >= SDLK_0 && k <= SDLK_9)
 		return '0' + (uint32_t)(k - SDLK_0);
 	return 0;
@@ -99,15 +113,19 @@ void win_cursor_update(void)
 	SDL_Window *w = SDL_GetMouseFocus();
 	int over = 0;
 	if (w && (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS)) {
-		int wx, wy, sx, sy;
-		SDL_GetMouseState(&wx, &wy);
-		over = present_window_to_screen(wx, wy, &sx, &sy);
+		int sx, sy;
+		float fx, fy;
+		SDL_GetMouseState(&fx, &fy);
+		over = present_window_to_screen((int)fx, (int)fy, &sx, &sy);
 	}
 	cursor_over = over;
 	int shown = cursor_count >= 0 || !over;
 	if (shown != cursor_shown) {
 		cursor_shown = shown;
-		SDL_ShowCursor(shown ? SDL_ENABLE : SDL_DISABLE);
+		if (shown)
+			SDL_ShowCursor();
+		else
+			SDL_HideCursor();
 	}
 }
 
@@ -121,7 +139,7 @@ int win_show_cursor(int show)
 void win_cursor_state(int *count, int *shown, int *over_image)
 {
 	*count = cursor_count;
-	*shown = SDL_ShowCursor(SDL_QUERY) == SDL_ENABLE;
+	*shown = SDL_CursorVisible();
 	*over_image = cursor_over;
 }
 
@@ -144,10 +162,10 @@ static int pause_inactive(void)
 	return on;
 }
 
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 /* ---- touch (iOS/iPadOS) ----
  * SDL's own touch-to-mouse events are off (win_open): a one-finger tap is a left click, a two-finger
- * tap a right click (the game's cancel/menu button), a three-finger tap toggles the CRT shader (F12 on
+ * tap a right click (the game's cancel/menu button), a four-finger tap the text layer (Shift+F12), a three-finger tap cycles the display modes (F12 on
  * a keyboard); holding or dragging one finger keeps the left button down. The left press waits until
  * the finger lifts, moves or is held, so that more fingers can still turn the touch into a right
  * click. Finger positions are window points, mapped to the screen by the presenter's letterbox
@@ -214,10 +232,10 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 	int x, y;
 	touch_point(f, &x, &y);
 	uint32_t now = SDL_GetTicks();
-	if (type == SDL_FINGERDOWN) {
+	if (type == SDL_EVENT_FINGER_DOWN) {
 		if (touch.fingers == 0) {
 			memset(&touch, 0, sizeof touch);
-			touch.primary = f->fingerId;
+			touch.primary = f->fingerID;
 			touch.x = touch.x0 = x;
 			touch.y = touch.y0 = y;
 			touch.t0 = now;
@@ -227,8 +245,8 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 		touch.fingers++;
 		if (touch.fingers > touch.max_fingers)
 			touch.max_fingers = touch.fingers;
-	} else if (type == SDL_FINGERMOTION) {
-		if (f->fingerId != touch.primary)
+	} else if (type == SDL_EVENT_FINGER_MOTION) {
+		if (f->fingerID != touch.primary)
 			return;
 		touch.x = x;
 		touch.y = y;
@@ -236,10 +254,10 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 		int dx = x - touch.x0, dy = y - touch.y0;
 		if (touch.max_fingers == 1 && !touch.left_down && dx * dx + dy * dy > TAP_SLOP * TAP_SLOP)
 			touch_press_left();
-	} else if (type == SDL_FINGERUP) {
+	} else if (type == SDL_EVENT_FINGER_UP) {
 		if (touch.fingers <= 0)
 			return;
-		if (f->fingerId == touch.primary) {
+		if (f->fingerID == touch.primary) {
 			touch.x = x;
 			touch.y = y;
 		}
@@ -253,8 +271,10 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 		else if (now - touch.t0 < TAP_MAX_MS) {
 			if (touch.max_fingers == 2)
 				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
-			else
+			else if (touch.max_fingers == 3)
 				present_cycle_mode();
+			else if (touch.max_fingers == 4)
+				present_toggle_text(); /* not tested on a device: SDL's report of four fingers */
 		}
 		memset(&touch, 0, sizeof touch);
 	}
@@ -270,13 +290,13 @@ static void touch_tick(void)
 		flush_up();
 }
 
-/* SDL_APP_WILLENTERBACKGROUND must be handled at once (the OS stops graphics work when it returns),
+/* SDL_EVENT_WILL_ENTER_BACKGROUND must be handled at once (the OS stops graphics work when it returns),
  * hence an event watch. The game timer needs nothing: it drops the ticks it missed. */
-static int lifecycle_watch(void *ud, SDL_Event *e)
+static bool lifecycle_watch(void *ud, SDL_Event *e)
 {
 	static int music_paused;
 	switch (e->type) {
-	case SDL_APP_WILLENTERBACKGROUND:
+	case SDL_EVENT_WILL_ENTER_BACKGROUND:
 		in_background = 1;
 		touch_reset();
 		if (!music_paused) {
@@ -284,7 +304,7 @@ static int lifecycle_watch(void *ud, SDL_Event *e)
 			music_paused = 1;
 		}
 		break;
-	case SDL_APP_DIDENTERFOREGROUND:
+	case SDL_EVENT_DID_ENTER_FOREGROUND:
 		in_background = 0;
 		if (music_paused) {
 			sound_music_pause(0);
@@ -292,7 +312,7 @@ static int lifecycle_watch(void *ud, SDL_Event *e)
 		}
 		break;
 	}
-	return 0;
+	return true;
 }
 #endif
 
@@ -311,7 +331,7 @@ static void collect_events(void)
 	} else {
 		hook_inject();
 	}
-	/* scripted runs only take SDL_QUIT from the host, so the Cocoa event
+	/* scripted runs only take SDL_EVENT_QUIT from the host, so the Cocoa event
 	 * pump (most of their host CPU) can run every 16 ms */
 	if (hook_scripted() && !hook_det()) {
 		static uint32_t last;
@@ -322,24 +342,25 @@ static void collect_events(void)
 	}
 	int cursor_check = 0;
 	while (SDL_PollEvent(&ev)) {
-		if (ev.type == SDL_MOUSEMOTION || ev.type == SDL_WINDOWEVENT)
+		if (ev.type == SDL_EVENT_MOUSE_MOTION ||
+		    (ev.type >= SDL_EVENT_WINDOW_FIRST && ev.type <= SDL_EVENT_WINDOW_LAST))
 			cursor_check = 1;
 		/* scripted runs: the real cursor, keys and focus changes on a shared
 		 * desktop would move the injected mouse or stop the timer
 		 * (WM_ACTIVATEAPP 0 clears 0x4ac4ec) */
-		if (hook_scripted() && ev.type != SDL_QUIT)
+		if (hook_scripted() && ev.type != SDL_EVENT_QUIT)
 			continue;
 		switch (ev.type) {
-		case SDL_QUIT:
+		case SDL_EVENT_QUIT:
 			win_post_ext(WM_QUIT, 0, 0);
 			break;
-		case SDL_MOUSEMOTION:
-			win_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(ev.motion.x, ev.motion.y));
+		case SDL_EVENT_MOUSE_MOTION:
+			win_post_ext(WM_MOUSEMOVE, 0, mouse_lparam((int)ev.motion.x, (int)ev.motion.y));
 			break;
-		case SDL_MOUSEBUTTONDOWN:
-		case SDL_MOUSEBUTTONUP: {
-			int down = ev.type == SDL_MOUSEBUTTONDOWN;
-			uint32_t lp = mouse_lparam(ev.button.x, ev.button.y);
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		case SDL_EVENT_MOUSE_BUTTON_UP: {
+			int down = ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+			uint32_t lp = mouse_lparam((int)ev.button.x, (int)ev.button.y);
 			if (ev.button.button == SDL_BUTTON_LEFT)
 				win_post_ext(down ? WM_LBUTTONDOWN : WM_LBUTTONUP, 0, lp);
 			else if (ev.button.button == SDL_BUTTON_RIGHT) {
@@ -347,41 +368,41 @@ static void collect_events(void)
 			}
 			break;
 		}
-		case SDL_KEYDOWN:
-		case SDL_KEYUP: {
-			if (ev.type == SDL_KEYDOWN && ev.key.repeat)
+		case SDL_EVENT_KEY_DOWN:
+		case SDL_EVENT_KEY_UP: {
+			if (ev.type == SDL_EVENT_KEY_DOWN && ev.key.repeat)
 				break;
 			if (present_hotkey(&ev.key)) { /* port hotkeys: CRT, fullscreen */
 				cursor_check = 1; /* the image may have moved */
 				break;
 			}
-			uint32_t vk = sdl_to_vk(ev.key.keysym.sym);
+			uint32_t vk = sdl_to_vk(ev.key.key);
 			if (vk)
-				win_post_ext(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
+				win_post_ext(ev.type == SDL_EVENT_KEY_DOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
 			break;
 		}
-#ifdef __IPHONEOS__
-		case SDL_FINGERDOWN:
-		case SDL_FINGERMOTION:
-		case SDL_FINGERUP:
+#ifdef SDL_PLATFORM_IOS
+		case SDL_EVENT_FINGER_DOWN:
+		case SDL_EVENT_FINGER_MOTION:
+		case SDL_EVENT_FINGER_UP:
 			touch_event(&ev.tfinger, ev.type);
 			break;
 #endif
-		case SDL_WINDOWEVENT:
-#ifdef __IPHONEOS__
-			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
-				touch_reset();
+		case SDL_EVENT_WINDOW_FOCUS_GAINED:
+			win_post_ext(WM_ACTIVATEAPP, 1, 0);
+			break;
+		case SDL_EVENT_WINDOW_FOCUS_LOST:
+#ifdef SDL_PLATFORM_IOS
+			touch_reset();
 #endif
-			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
-				win_post_ext(WM_ACTIVATEAPP, 1, 0);
-			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && pause_inactive())
+			if (pause_inactive())
 				win_post_ext(WM_ACTIVATEAPP, 0, 0);
 			break;
 		}
 	}
 	if (cursor_check)
 		win_cursor_update();
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 	touch_tick();
 #endif
 }
@@ -449,7 +470,7 @@ int win_pump(void)
 	/* PeekMessage on Windows 95 costs a 486 some hundreds of instructions;
 	 * charging it keeps the throttle from running the game's pump loops
 	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 	while (in_background) { /* no graphics work in the background (the OS suspends the process anyway) */
 		SDL_PumpEvents();
 		SDL_Delay(50);
@@ -481,7 +502,7 @@ int win_pump(void)
 uint32_t win_open(const struct win_handlers *h)
 {
 	handlers = *h;
-#ifdef __IPHONEOS__
+#ifdef SDL_PLATFORM_IOS
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0"); /* touch_event does it */
 	SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
 	SDL_DisableScreenSaver(); /* the idle timer would dim the screen during long cutscenes */

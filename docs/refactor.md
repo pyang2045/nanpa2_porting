@@ -666,7 +666,7 @@ state_init (start values in code, no file) --> G (struct game_state, native layo
         |  reads and writes G by field names and G addresses (gmem.h)
         |  calls the platform API: files.h surface.h text.h window.h sound.h  (and ctl_work_us for time)
         v
- src/platform: files.c surface.c text.c window.c sound.c logo.c clock.c present_*.{c,m} -> SDL2 (+ Metal)
+ src/platform: files.c surface.c text.c window.c sound.c logo.c clock.c present_*.{c,m} -> SDL3 (+ Metal)
  src/dev: replay.c (checkpoints over G and the screen), explore.c, dev.c, status.c
 ```
 

@@ -125,7 +125,7 @@ static inline int soft_capture(const char *bmp_path, int w, int h)
 		h = SCREEN_H;
 	}
 	soft_convert();
-	SDL_Surface *s = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_XRGB8888);
+	SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_XRGB8888);
 	if (!s)
 		return 0;
 	for (int y = 0; y < h; y++) {
@@ -134,8 +134,8 @@ static inline int soft_capture(const char *bmp_path, int w, int h)
 		for (int x = 0; x < w; x++)
 			row[x] = src[x * SCREEN_W / w];
 	}
-	int ok = SDL_SaveBMP(s, bmp_path) == 0;
-	SDL_FreeSurface(s);
+	int ok = SDL_SaveBMP(s, bmp_path);
+	SDL_DestroySurface(s);
 	return ok;
 }
 
@@ -215,7 +215,7 @@ static inline void present_common_tick(void)
 	}
 }
 
-/* the window title carries a note for two seconds (the mode's name after F12, the text layer's after F11) */
+/* the window title carries a note for two seconds (the mode's name after F12, the text layer's after Shift+F12) */
 static void present_title_note(const char *note)
 {
 	if (!disp_win)
@@ -228,6 +228,20 @@ static void present_title_note(const char *note)
 	disp_title_until = SDL_GetTicks() + 2000;
 	if (!disp_title_until)
 		disp_title_until = 1;
+}
+
+/* the text layer on or off (Shift+F12, a four-finger tap): hi-res vector text or the game's own bitmap glyphs */
+void present_toggle_text(void)
+{
+	tl_toggle();
+	char note[64];
+#ifdef PRESENT_TEXT_LAYER
+	snprintf(note, sizeof note, "text: %s", tl_mode_name(tl_get_mode()));
+#else
+	/* this renderer draws the game's own glyphs only (present_sdl.c) */
+	snprintf(note, sizeof note, "text: %s (hires needs the Metal renderer)", tl_mode_name(tl_get_mode()));
+#endif
+	present_title_note(note);
 }
 
 void present_cycle_mode(void)
@@ -288,12 +302,12 @@ static inline void present_unmap_point(SDL_Window *win, int sx, int sy, int *wx,
 
 static inline void present_common_set_fullscreen(SDL_Window *win, int on)
 {
-	SDL_SetWindowFullscreen(win, on ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	SDL_SetWindowFullscreen(win, on != 0);
 }
 
 static inline int present_common_get_fullscreen(SDL_Window *win)
 {
-	return (SDL_GetWindowFlags(win) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_FULLSCREEN_DESKTOP)) != 0;
+	return (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN) != 0;
 }
 
 /* Shared hotkey handling (see present_hotkey). The key that completes a
@@ -302,10 +316,10 @@ static inline int present_common_get_fullscreen(SDL_Window *win)
 static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent *k)
 {
 	static SDL_Keycode held;
-	SDL_Keycode sym = k->keysym.sym;
-	Uint16 mod = k->keysym.mod;
-	if (k->type == SDL_KEYUP) {
-		if (sym == SDLK_F12 || sym == SDLK_F11)
+	SDL_Keycode sym = k->key;
+	Uint16 mod = k->mod;
+	if (k->type == SDL_EVENT_KEY_UP) {
+		if (sym == SDLK_F12)
 			return 1;
 		if (held && sym == held) {
 			held = 0;
@@ -314,27 +328,17 @@ static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent
 		return 0;
 	}
 	if (sym == SDLK_F12) {
-		if (!k->repeat)
-			present_cycle_mode();
-		return 1;
-	}
-	if (sym == SDLK_F11) { /* the text layer: hi-res vector text or the game's own bitmap glyphs */
 		if (!k->repeat) {
-			tl_toggle();
-			char note[64];
-#ifdef PRESENT_TEXT_LAYER
-			snprintf(note, sizeof note, "text: %s", tl_mode_name(tl_get_mode()));
-#else
-			/* this renderer draws the game's own glyphs only (present_sdl.c) */
-			snprintf(note, sizeof note, "text: %s (hires needs the Metal renderer)", tl_mode_name(tl_get_mode()));
-#endif
-			present_title_note(note);
+			if (mod & SDL_KMOD_SHIFT)
+				present_toggle_text();
+			else
+				present_cycle_mode();
 		}
 		return 1;
 	}
-	int alt_enter = (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && (mod & KMOD_ALT);
+	int alt_enter = (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && (mod & SDL_KMOD_ALT);
 #ifdef __APPLE__
-	int cmd_f = sym == SDLK_f && (mod & KMOD_GUI);
+	int cmd_f = sym == SDLK_F && (mod & SDL_KMOD_GUI);
 #else
 	int cmd_f = 0;
 #endif

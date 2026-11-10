@@ -192,6 +192,8 @@ void tl_blit(uint32_t dst, int x, int y, uint32_t src, int l, int t, int r, int 
 		*add_entry() = moved[i];
 }
 
+static void publish_stats(void);
+
 /* ---- validation ---- */
 
 struct vis {
@@ -216,9 +218,8 @@ void tl_clear(void)
 {
 	nvis = nrep = 0;
 	valid_count = 0;
+	publish_stats();
 }
-
-static void publish_stats(void);
 
 void tl_validate(const uint8_t *frame, const uint32_t pal[256], int have_ptr, int ptr_x, int ptr_y)
 {
@@ -533,8 +534,10 @@ int tl_layout(float sx, float sy, int budget_us, const struct tl_quad **out)
 	*out = NULL;
 	st.shown = st.waiting = st.repaint = 0;
 	st.layout_ms = st.raster_ms = 0;
-	if (mode != TEXT_HIRES || sy < 1.5f || !nvis)
+	if (mode != TEXT_HIRES || sy < 1.5f || !nvis) {
+		publish_stats();
 		return 0;
+	}
 	if (diag < 0)
 		diag = getenv("NANPA2_LOG_TEXT") && atoi(getenv("NANPA2_LOG_TEXT")) >= 2;
 	uint64_t t0 = clock_host_ns();

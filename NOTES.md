@@ -1593,3 +1593,38 @@ Checked: simulator build, iPad Pro 11 simulator from `Documents/NANPA2.iso`, nam
 `CFBundleIconName`, no `/Users/` strings, no_game_bytes clean; `--device` without a team stops with a message,
 with a dummy team stops only at provisioning; macOS cmake+ninja+ctest 10/10 (smoke, iso skipped). Not tested: a
 real device, opening in the Xcode GUI.
+
+## 2026-11-10: port from SDL2 (via sdl2-compat) to native SDL3
+
+SDL3 3.4.18 (Homebrew; MSYS2 package `mingw-w64-x86_64-sdl3`; iOS from the release tarball, SHA-256 pinned in
+`tools/fetch_sdl.sh`, the one place the iOS SDL version lives). CMake `find_package(SDL3 CONFIG)` + `SDL3::SDL3`;
+no SDL2main (`<SDL3/SDL_main.h>` in `src/main.c`). First pass by SDL's `rename_headers.py`/`rename_symbols.py`,
+the rest by hand (migration guide). Per area:
+- events: `SDL_EVENT_*`, `key.key`, float mouse coordinates cast to int as SDL2 gave them, `fingerID`, window
+  events top-level (focus gained/lost), `SDL_PLATFORM_IOS` for `__IPHONEOS__`, `SDL_CursorVisible`/`HideCursor`,
+  event watch returns bool; `SDL_GetWindows` replaces probing window ids in the status file.
+- window: `SDL_CreateWindow(title, w, h, flags)`, `SDL_GetWindowSizeInPixels` for the Metal drawable (640x480
+  points, 1280x960 pixels on this Retina screen, as before), `SDL_SetWindowFullscreen(win, bool)` (desktop
+  fullscreen is the default), `SDL_GetBasePath` no longer freed.
+- audio (`sound.c`, `logo.c`): `SDL_OpenAudioDeviceStream` with a stream callback that runs the same mixer
+  (44100 Hz S16 stereo, 1024-frame device buffer hint); the stream converts to the device format.
+  `SDL_AudioCVT` is gone: WAV clips are made S16 by hand (U8 as before) or `SDL_ConvertAudioSamples`.
+  Locking is `SDL_LockAudioStream`.
+- presenter: Metal unchanged apart from the size call and surface constructors; `present_sdl.c` uses
+  `SDL_FRect`, `SDL_CreateRenderer(win, NULL)` + `SDL_SetRenderVSync`, `SDL_RenderReadPixels` returning a surface.
+- dialogs/folders: `dialog_macos.m` stays (SDL's dialogs take a folder or a file, not either in one panel, and the
+  .iso case needs both). `dialog_none.c` is replaced by `dialog_sdl.c` (`SDL_ShowOpenFolderDialog`, events pumped
+  until the callback; Windows/Linux, untested). iOS Documents comes from `SDL_GetUserFolder(DOCUMENTS)`
+  (`docs_ios.c`, replacing `docs_ios.m`).
+- build: `tools/bundle_macos.sh` copies libSDL3 only (no sdl2-compat); `otool -L` shows `@executable_path` SDL3 and
+  system libraries. iOS: `fetch_sdl.sh` builds `SDL3.xcframework` (SDL_CAMERA off: it would need CoreMedia),
+  `gen_xcodeproj.py` regenerated, ctest `xcodeproj` passes.
+Checked: ctest 10/10 (smoke skipped), decode_all ok 705; explore bot, 60000 frames, seed 31: recording on the
+SDL2 build and on SDL3 are byte-identical (5742 lines, 240 checkpoints) and replay on SDL3 passes; an
+`NANPA2_INPUT` run with clicks, right clicks and keys records identically; `--view A_END2.GP4 --crt-shot` in hd,
+480, sharp, smooth at 1280x960 and 1920x1080 is `cmp`-identical to the SDL2 build for Metal and for
+`-DNANPA2_SDL_RENDERER=ON`; `NANPA2_AUDIO_DUMP` of a 1200-frame bot run is bit-identical, and a longer run plays
+MUSIC\38.MP3 into the dump; iPad Pro 11 simulator build runs from `Documents/NANPA2.iso` to the name-entry
+screen (the simulator screenshot shows it sideways, the portrait simulator with a landscape app). Commits:
+04227b0, c388082, 4376cf0, b8cfeb8. Not tested: Windows, Linux, `dialog_sdl.c`, a real iPad, the smoke test
+(window occluded here), real keyboard/mouse/touch through SDL3 (scripted runs bypass SDL events).

@@ -1,7 +1,7 @@
 #ifndef NANPA2_PRESENT_H
 #define NANPA2_PRESENT_H
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdint.h>
 
 /* The game draws into a 640x480 8-bit screen with a 256-entry palette
@@ -13,7 +13,7 @@
 #define SCREEN_H 480
 
 /* Window flags the presenter needs (e.g. SDL_WINDOW_METAL). */
-Uint32 present_window_flags(void);
+SDL_WindowFlags present_window_flags(void);
 int present_init(SDL_Window *win);
 /* pixels: SCREEN_W*SCREEN_H palette indices; pal: 0x00RRGGBB */
 void present_frame(const uint8_t *pixels, const uint32_t pal[256]);
@@ -30,7 +30,7 @@ int present_window_to_screen(int wx, int wy, int *sx, int *sy);
  * present_window_to_screen, for warping the mouse (SetCursorPos). */
 void present_screen_to_window(int sx, int sy, int *wx, int *wy);
 
-/* Port hotkeys: F12 cycles the display modes, F11 the text layer (platform/textlayer.h), Alt+Enter (and Cmd+F on
+/* Port hotkeys: F12 cycles the display modes, Shift+F12 toggles the text layer (platform/textlayer.h), Alt+Enter (and Cmd+F on
  * macOS) toggles fullscreen. Returns 1 if the key event (down, up or
  * repeat) belongs to one of them, so the caller does not pass it on. */
 int present_hotkey(const SDL_KeyboardEvent *key);
@@ -52,6 +52,8 @@ enum { DISPLAY_CRT_HD, DISPLAY_CRT_480, DISPLAY_SHARP, DISPLAY_SMOOTH, DISPLAY_M
 void present_set_mode(int mode);
 int present_get_mode(void);
 void present_cycle_mode(void);
+/* the text layer on or off (Shift+F12, a four-finger tap; platform/textlayer.h) */
+void present_toggle_text(void);
 const char *present_mode_name(int mode);
 int present_parse_mode(const char *s); /* hd|480|sharp|smooth, or -1 */
 /* CRT HD's virtual raster height (600..1600) and scaler (0 sharp, 1 smooth) */
