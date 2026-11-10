@@ -48,6 +48,9 @@ xcrun simctl launch booted local.nanpa2
 DEVELOPMENT_TEAM=ABCDE12345 tools/build_ios.sh --device   # a real device, signed with your team ID
 ```
 
+The app icon is the asset catalog `cmake/ios/Assets.xcassets` (one 1024 px universal icon; actool derives the
+sizes). `swift tools/make_ios_icon.swift OUT.png` regenerates the PNG (PingFang TC, 2x2 grid, opaque sRGB).
+
 #### Sideloading (no Apple developer team needed)
 
 ```sh

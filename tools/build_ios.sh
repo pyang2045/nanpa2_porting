@@ -81,6 +81,15 @@ if [ ! -f "$sdl/lib/libSDL2.a" ]; then
 fi
 
 # ---- the game ----
+# Ninja bundles have no asset catalog step: compile cmake/ios/Assets.xcassets into the app with actool and
+# merge the icon keys it reports into the app's Info.plist (the Xcode generator does this itself).
+add_icon() { # APP SDK
+	w=$root/actool-$2; mkdir -p "$w"; rm -f "$w/icon.plist"
+	xcrun actool "$here/cmake/ios/Assets.xcassets" --compile "$1" --platform "$2" --minimum-deployment-target 13.0 \
+		--app-icon AppIcon --target-device iphone --target-device ipad \
+		--output-partial-info-plist "$w/icon.plist" >"$w/actool.log" 2>&1 || { cat "$w/actool.log" >&2; exit 1; }
+	/usr/libexec/PlistBuddy -c "Merge $w/icon.plist" "$1/Info.plist"
+}
 if [ "$ipa" = 1 ]; then
 	# Ninja: a flat iOS bundle, no signing step at all; any signature is removed below.
 	# shellcheck disable=SC2086
@@ -90,6 +99,7 @@ if [ "$ipa" = 1 ]; then
 	app=$out/nanpa2.app
 	rm -rf "$app" "$out/Payload"
 	cp -R "$out/build/nanpa2.app" "$app"
+	add_icon "$app" iphoneos
 	rm -rf "$app/_CodeSignature" "$app/embedded.mobileprovision"
 	codesign --remove-signature "$app/nanpa2" 2>/dev/null || true # the linker's ad-hoc signature
 	strip -x "$app/nanpa2"
@@ -114,6 +124,7 @@ else
 	cmake --build "$out/build" --target nanpa2
 	rm -rf "$out/nanpa2.app"
 	cp -R "$out/build/nanpa2.app" "$out/nanpa2.app"
+	add_icon "$out/nanpa2.app" iphonesimulator
 	codesign --force --sign - "$out/nanpa2.app"
 	echo "build_ios: $out/nanpa2.app (simulator, $arch, ad-hoc signed)"
 fi
