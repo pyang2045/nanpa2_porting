@@ -25,6 +25,8 @@
  * kept) into the state, segment bases excepted. */
 #define STATE_SAVE_SIZE 0xc00u
 void state_save_export(uint8_t out[STATE_SAVE_SIZE]);
+/* The image of a new game's start-up state: what an unused FLAG file holds. */
+void state_save_blank(uint8_t out[STATE_SAVE_SIZE]);
 void state_save_import(const uint8_t *in, size_t n);
 /* Hash of the whole of G (the data area, 0x431000-0x4c0000) with the fields that hold values of
  * the platform (handles, pixel pointers, the DirectDraw lock descriptor) zeroed first, so that

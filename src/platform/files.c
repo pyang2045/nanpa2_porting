@@ -42,7 +42,7 @@ static FILE *open_native(const char *path, const char *mode)
 		FILE *f = fopen(full, writing ? "wb" : "rb");
 		if (f || writing)
 			return f;
-		return fsys_open(p); /* initial FLAG files from data1.cab */
+		return fsys_open(p); /* the FLAG files of a copied install; none: the game generates a blank */
 	}
 	if (writing)
 		return NULL;

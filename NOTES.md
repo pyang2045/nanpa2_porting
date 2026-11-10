@@ -1450,3 +1450,16 @@ Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, RE
   master; Sharp equals nearest at 2x and 3x (`cmp`) and matches a numpy area-average reference to
   within 1 level at 2.25x, 4.27x and 3840x2160; ctest passes for the Metal and the
   `-DNANPA2_SDL_RENDERER=ON` build; `tools/build_ios.sh` (simulator) compiles.
+
+## 2026-11-10: blank saves are generated (FLAG0..6 no longer needed)
+
+`state_save_blank` (`state_view.c`) = `save_defaults` (split out of `state_defaults`: the start values of
+`G.save`) plus `vm_init` (0x406395), exported. The load op (04 21, native 0x407152, `ops_vm.c flag_load`)
+uses it when `game_file_read` finds neither a save in the save folder nor a file in the game folder;
+nothing is written to disk. Order stays save folder, game folder, generated. Comparison with the
+installer's FLAG0 (all seven identical) and the unreadable remainder: re-notes.md "Save files". README,
+game/README.md, CLAUDE.md, launch.c messages (including iOS) now call FLAG0..6 optional.
+Checks: ctest passes with the real game folder and with a folder without FLAGs; bot seed 7 / 25000
+frames (title, name entry, S1-S6, save of FLAG0 and FLAG6) records identical `li.screen`, regs, clock and
+rng checkpoints with and without the real FLAGs (only `li.save`, `li.files` and `raw.gdata` differ: the
+padding bytes and the file list); a bot run on the generated saves loads them from the title.
