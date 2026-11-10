@@ -39,6 +39,31 @@ tools/build.sh                 # build/nanpa2
 tools/build.sh --test --app    # plus ctest and build/同級生２.app
 ```
 
+### iPad / iPhone (iOS simulator verified, device untested)
+
+```sh
+tools/build_ios.sh                                  # build-ios/sim/nanpa2.app (simulator, ad-hoc signed)
+xcrun simctl boot "iPad Pro 11-inch (M4)" && xcrun simctl install booted build-ios/sim/nanpa2.app
+xcrun simctl launch booted local.nanpa2
+DEVELOPMENT_TEAM=ABCDE12345 tools/build_ios.sh --device   # a real device, signed with your team ID
+```
+
+Needs Xcode, CMake and Ninja. The script downloads the official SDL2 release source into `build-ios/`
+(gitignored) and builds it statically for the same SDK. A device build uses the Xcode generator and your
+Apple team ID (a free personal team works; set `NANPA2_APP_ID` to a bundle identifier of your own), then
+install `build-ios/device/Release-iphoneos/nanpa2.app` from Xcode or `xcrun devicectl device install app`.
+The app (display name 同級生２, landscape, full screen) holds none of the game. Copy your game folder (the CD
+contents plus FLAG0..FLAG6, with DATA inside) into the app's Documents, either as a folder named `game` or
+its contents directly: with Finder (iPad connected by USB, Files tab, drag onto the app) or in the Files app
+(On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. In the
+simulator: `xcrun simctl get_app_container booted local.nanpa2 data`, then copy into `Documents/game`.
+Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
+
+It presents through the same Metal CRT presenter as macOS (`NANPA2_SDL_RENDERER=ON` selects the
+SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left button held, two-finger tap =
+right click (cancel/menu), three-finger tap = CRT shader on/off (F12). Touch positions go through the
+presenter's letterbox. Going to the background pauses the music and the render loop.
+
 ### Linux (not built or run yet)
 
 ```sh

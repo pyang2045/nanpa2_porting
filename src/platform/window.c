@@ -12,6 +12,7 @@
 
 #include "hooks.h"
 #include "platform/present.h"
+#include "platform/sound.h"
 #include "game/startup.h"
 
 #define HWND_MAIN 0x00001000u
@@ -143,6 +144,158 @@ static int pause_inactive(void)
 	return on;
 }
 
+#ifdef __IPHONEOS__
+/* ---- touch (iOS/iPadOS) ----
+ * SDL's own touch-to-mouse events are off (win_open): a one-finger tap is a left click, a two-finger
+ * tap a right click (the game's cancel/menu button), a three-finger tap toggles the CRT shader (F12 on
+ * a keyboard); holding or dragging one finger keeps the left button down. The left press waits until
+ * the finger lifts, moves or is held, so that more fingers can still turn the touch into a right
+ * click. Finger positions are window points, mapped to the screen by the presenter's letterbox
+ * (mouse_lparam), like mouse events. */
+#define TAP_HOLD_MS 150  /* one finger held this long presses the left button */
+#define TAP_SLOP 12      /* ... or moved this far (window points) */
+#define TAP_MAX_MS 500   /* a multi-finger tap is shorter than this */
+#define CLICK_MS 100     /* a tap's button is held this long: the game polls the state */
+
+static struct {
+	int fingers, max_fingers, left_down;
+	SDL_FingerID primary;
+	int x, y, x0, y0;
+	uint32_t t0;
+} touch;
+static uint32_t up_msg, up_lparam, up_due; /* the delayed button release */
+static int in_background;
+
+static void touch_point(const SDL_TouchFingerEvent *f, int *x, int *y)
+{
+	SDL_Window *w = SDL_GetWindowFromID(f->windowID);
+	int ww = 1, wh = 1;
+	if (w)
+		SDL_GetWindowSize(w, &ww, &wh);
+	*x = (int)(f->x * (float)ww);
+	*y = (int)(f->y * (float)wh);
+}
+
+static void flush_up(void)
+{
+	if (up_msg) {
+		win_post_ext(up_msg, 0, up_lparam);
+		up_msg = 0;
+	}
+}
+
+static void click(uint32_t down, uint32_t up, int x, int y)
+{
+	flush_up();
+	uint32_t lp = mouse_lparam(x, y);
+	win_post_ext(WM_MOUSEMOVE, 0, lp);
+	win_post_ext(down, 0, lp);
+	up_msg = up;
+	up_lparam = lp;
+	up_due = SDL_GetTicks() + CLICK_MS;
+}
+
+static void touch_reset(void)
+{
+	if (touch.left_down)
+		win_post_ext(WM_LBUTTONUP, 0, mouse_lparam(touch.x, touch.y));
+	memset(&touch, 0, sizeof touch);
+}
+
+static void touch_press_left(void)
+{
+	flush_up();
+	win_post_ext(WM_LBUTTONDOWN, 0, mouse_lparam(touch.x, touch.y));
+	touch.left_down = 1;
+}
+
+static void touch_event(const SDL_TouchFingerEvent *f, int type)
+{
+	int x, y;
+	touch_point(f, &x, &y);
+	uint32_t now = SDL_GetTicks();
+	if (type == SDL_FINGERDOWN) {
+		if (touch.fingers == 0) {
+			memset(&touch, 0, sizeof touch);
+			touch.primary = f->fingerId;
+			touch.x = touch.x0 = x;
+			touch.y = touch.y0 = y;
+			touch.t0 = now;
+			flush_up();
+			win_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(x, y));
+		}
+		touch.fingers++;
+		if (touch.fingers > touch.max_fingers)
+			touch.max_fingers = touch.fingers;
+	} else if (type == SDL_FINGERMOTION) {
+		if (f->fingerId != touch.primary)
+			return;
+		touch.x = x;
+		touch.y = y;
+		win_post_ext(WM_MOUSEMOVE, 0, mouse_lparam(x, y));
+		int dx = x - touch.x0, dy = y - touch.y0;
+		if (touch.max_fingers == 1 && !touch.left_down && dx * dx + dy * dy > TAP_SLOP * TAP_SLOP)
+			touch_press_left();
+	} else if (type == SDL_FINGERUP) {
+		if (touch.fingers <= 0)
+			return;
+		if (f->fingerId == touch.primary) {
+			touch.x = x;
+			touch.y = y;
+		}
+		if (--touch.fingers > 0)
+			return;
+		/* all fingers are up: what was it? */
+		if (touch.left_down)
+			win_post_ext(WM_LBUTTONUP, 0, mouse_lparam(touch.x, touch.y));
+		else if (touch.max_fingers == 1)
+			click(WM_LBUTTONDOWN, WM_LBUTTONUP, touch.x, touch.y);
+		else if (now - touch.t0 < TAP_MAX_MS) {
+			if (touch.max_fingers == 2)
+				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
+			else
+				present_set_crt(!present_get_crt());
+		}
+		memset(&touch, 0, sizeof touch);
+	}
+}
+
+/* every pump: a held finger presses, a delayed release comes due */
+static void touch_tick(void)
+{
+	uint32_t now = SDL_GetTicks();
+	if (touch.fingers == 1 && touch.max_fingers == 1 && !touch.left_down && now - touch.t0 >= TAP_HOLD_MS)
+		touch_press_left();
+	if (up_msg && (int32_t)(now - up_due) >= 0)
+		flush_up();
+}
+
+/* SDL_APP_WILLENTERBACKGROUND must be handled at once (the OS stops graphics work when it returns),
+ * hence an event watch. The game timer needs nothing: it drops the ticks it missed. */
+static int lifecycle_watch(void *ud, SDL_Event *e)
+{
+	static int music_paused;
+	switch (e->type) {
+	case SDL_APP_WILLENTERBACKGROUND:
+		in_background = 1;
+		touch_reset();
+		if (!music_paused) {
+			sound_music_pause(1);
+			music_paused = 1;
+		}
+		break;
+	case SDL_APP_DIDENTERFOREGROUND:
+		in_background = 0;
+		if (music_paused) {
+			sound_music_pause(0);
+			music_paused = 0;
+		}
+		break;
+	}
+	return 0;
+}
+#endif
+
 /* Move SDL events into the native queue. */
 static void collect_events(void)
 {
@@ -207,7 +360,18 @@ static void collect_events(void)
 				win_post_ext(ev.type == SDL_KEYDOWN ? WM_KEYDOWN : WM_KEYUP, vk, 0);
 			break;
 		}
+#ifdef __IPHONEOS__
+		case SDL_FINGERDOWN:
+		case SDL_FINGERMOTION:
+		case SDL_FINGERUP:
+			touch_event(&ev.tfinger, ev.type);
+			break;
+#endif
 		case SDL_WINDOWEVENT:
+#ifdef __IPHONEOS__
+			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+				touch_reset();
+#endif
 			if (ev.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
 				win_post_ext(WM_ACTIVATEAPP, 1, 0);
 			else if (ev.window.event == SDL_WINDOWEVENT_FOCUS_LOST && pause_inactive())
@@ -217,6 +381,9 @@ static void collect_events(void)
 	}
 	if (cursor_check)
 		win_cursor_update();
+#ifdef __IPHONEOS__
+	touch_tick();
+#endif
 }
 
 static int pop_message(struct msg *m)
@@ -282,6 +449,12 @@ int win_pump(void)
 	/* PeekMessage on Windows 95 costs a 486 some hundreds of instructions;
 	 * charging it keeps the throttle from running the game's pump loops
 	 * (0x4075c6, 0x4074d5, 0x40609c) millions of times a second */
+#ifdef __IPHONEOS__
+	while (in_background) { /* no graphics work in the background (the OS suspends the process anyway) */
+		SDL_PumpEvents();
+		SDL_Delay(50);
+	}
+#endif
 	clock_add(PACE_PUMP_US);
 	hook_beat();
 	clock_throttle();
@@ -308,6 +481,12 @@ int win_pump(void)
 uint32_t win_open(const struct win_handlers *h)
 {
 	handlers = *h;
+#ifdef __IPHONEOS__
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0"); /* touch_event does it */
+	SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+	SDL_DisableScreenSaver(); /* the idle timer would dim the screen during long cutscenes */
+	SDL_AddEventWatch(lifecycle_watch, NULL);
+#endif
 	return HWND_MAIN;
 }
 

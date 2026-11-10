@@ -8,6 +8,9 @@
 /* *locked: the login session's screen is locked; *asleep: the main display
  * sleeps. 1 yes, 0 no, -1 unknown. */
 #ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_OSX
 void desktop_state(int *locked, int *asleep);
 #else
 static inline void desktop_state(int *locked, int *asleep)
