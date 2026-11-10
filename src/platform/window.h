@@ -46,6 +46,10 @@ void win_show(void);
 /* Queue a message from the game. WM_QUIT makes the pump return 0. */
 void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam);
 
+/* The last mouse position posted to the game (screen pixels, where the game draws its pointer sprite);
+ * 0 until there was one. */
+int win_mouse_pos(int *x, int *y);
+
 /* One round of the message loop: services the host (status file, the game clock, the timer,
  * the presenter, SDL events), then takes one message from the queue and gives it to the window
  * procedure. 0 when the game must end (WM_QUIT), else 1. */

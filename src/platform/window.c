@@ -32,8 +32,22 @@ static struct msg {
 } queue[QUEUE_LEN];
 static int q_head, q_count;
 
+static int mouse_known, mouse_px, mouse_py;
+
+int win_mouse_pos(int *x, int *y)
+{
+	*x = mouse_px;
+	*y = mouse_py;
+	return mouse_known;
+}
+
 void win_post(uint32_t msg, uint32_t wparam, uint32_t lparam)
 {
+	if (msg >= 0x200 && msg <= 0x208) { /* WM_MOUSEMOVE .. WM_RBUTTONDBLCLK: lparam is y << 16 | x */
+		mouse_known = 1;
+		mouse_px = (int16_t)(lparam & 0xffff);
+		mouse_py = (int16_t)(lparam >> 16);
+	}
 	/* coalesce mouse moves, as Windows does */
 	if (msg == WM_MOUSEMOVE && q_count) {
 		struct msg *last = &queue[(q_head + q_count - 1) % QUEUE_LEN];
@@ -151,7 +165,7 @@ static int pause_inactive(void)
 #ifdef SDL_PLATFORM_IOS
 /* ---- touch (iOS/iPadOS) ----
  * SDL's own touch-to-mouse events are off (win_open): a one-finger tap is a left click, a two-finger
- * tap a right click (the game's cancel/menu button), a three-finger tap toggles the CRT shader (F12 on
+ * tap a right click (the game's cancel/menu button), a four-finger tap the text layer (Shift+F12), a three-finger tap cycles the display modes (F12 on
  * a keyboard); holding or dragging one finger keeps the left button down. The left press waits until
  * the finger lifts, moves or is held, so that more fingers can still turn the touch into a right
  * click. Finger positions are window points, mapped to the screen by the presenter's letterbox
@@ -257,8 +271,10 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 		else if (now - touch.t0 < TAP_MAX_MS) {
 			if (touch.max_fingers == 2)
 				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
-			else
+			else if (touch.max_fingers == 3)
 				present_cycle_mode();
+			else
+				present_toggle_text(); /* four or more fingers */ /* not tested on a device: SDL's report of four fingers */
 		}
 		memset(&touch, 0, sizeof touch);
 	}

@@ -3,7 +3,10 @@
  * palette lookup happens in the fragment shader, which also simulates a CRT
  * monitor: barrel curvature with rounded corners, Gaussian scanlines whose
  * beam widens with brightness, an aperture-grille mask and a vignette. */
+#define PRESENT_TEXT_LAYER 1 /* this presenter draws the text layer (platform/textlayer.h) */
 #include "present_common.h"
+#include "platform/textlayer.h"
+#include "platform/window.h"
 
 #include <SDL3/SDL_metal.h>
 #import <TargetConditionals.h>
@@ -30,8 +33,10 @@ static SDL_MetalView view;
 static CAMetalLayer *layer;
 static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
-static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat;
-static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex, hd_tex;
+static id<MTLRenderPipelineState> pipe_lin, pipe_blur, pipe_crt, pipe_up, pipe_hd, pipe_flat, pipe_text_lin, pipe_text_enc;
+static id<MTLTexture> index_tex, pal_tex, rgb_tex, lin_tex, blur_tex, glow_tex, hd_tex, atlas_tex;
+static int text_ok; /* the text layer can be drawn (its pipelines and atlas exist) */
+static int capturing; /* present_capture: no time limit on rasterising glyphs */
 static int rgb_mode; /* the last frame came from present_frame_rgb */
 static id<MTLSamplerState> linear_sampler;
 static char name[128];
@@ -245,6 +250,32 @@ static NSString *const shader_src = @
 	"  float3 l = resample(lt, a, b, u.smooth);\n"
 	"  return float4(pow(saturate(l), 1.0 / GAMMA), 1.0);\n"
 	"}\n"
+	/* The text layer (platform/textlayer.h): opaque cells, each pixel mix(bg, fg, glyph coverage) in linear
+	 * light, drawn over the picture's raster; vs_text expands quad i of the buffer, fs_text reads the quad
+	 * again (flat index) for its colours and glyph rectangle. The viewport is the raster (a rectangle of
+	 * the drawable in Sharp and Smooth: the NDC are relative to it, the fragment's position is not, so the
+	 * quad's pixel is the fragment's minus the viewport's origin). `encode` is 1 on the drawable and 0 on
+	 * the half-float raster of CRT HD. */
+	"struct TQuad { float4 cell; float4 glyph; float4 atlas; float4 fg; float4 bg; };\n"
+	"struct TU { float2 origin; float2 raster; int encode; int pad0; int pad1; int pad2; };\n"
+	"struct TV { float4 pos [[position]]; uint qi [[flat]]; };\n"
+	"vertex TV vs_text(uint vid [[vertex_id]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]]) {\n"
+	"  uint qi = vid / 6, k = vid % 6;\n"
+	"  uint c = (k == 0 || k == 3) ? 0 : (k == 1) ? 1 : (k == 2 || k == 4) ? 2 : 3;\n"
+	"  float4 b = q[qi].cell;\n"
+	"  float2 p = float2((c == 1 || c == 2) ? b.z : b.x, (c >= 2) ? b.w : b.y);\n"
+	"  TV o; o.pos = float4(p.x / u.raster.x * 2.0 - 1.0, 1.0 - p.y / u.raster.y * 2.0, 0.0, 1.0); o.qi = qi;\n"
+	"  return o;\n"
+	"}\n"
+	"fragment float4 fs_text(TV in [[stage_in]], constant TQuad *q [[buffer(0)]], constant TU &u [[buffer(1)]],\n"
+	"                        texture2d<float> atlas [[texture(0)]]) {\n"
+	"  TQuad t = q[in.qi];\n"
+	"  float2 g = floor(in.pos.xy - u.origin) - t.glyph.xy;\n"
+	"  float cov = 0.0;\n"
+	"  if (all(g >= 0.0) && all(g < t.glyph.zw)) cov = atlas.read(uint2(t.atlas.xy + g)).r;\n"
+	"  float3 c = mix(t.bg.rgb, t.fg.rgb, cov);\n"
+	"  return float4(u.encode != 0 ? pow(saturate(c), 1.0 / GAMMA) : c, 1.0);\n"
+	"}\n"
 	/* CRT HD, second pass: fs_crt's tube on the virtual raster lt (any size
 	 * against the output: more taps when an output pixel spans several
 	 * virtual pixels). Beam, scanlines and grille work at the raster's line
@@ -386,8 +417,38 @@ int present_init(SDL_Window *win)
 	pipe_up = make_pipeline(lib, vs, @"fs_up", MTLPixelFormatRGBA16Float);
 	pipe_hd = make_pipeline(lib, vs, @"fs_hd", layer.pixelFormat);
 	pipe_flat = make_pipeline(lib, vs, @"fs_flat", layer.pixelFormat);
+	/* the text layer's pipelines and atlas: without them the layer is off and the picture still shows */
+	text_ok = 1;
+	for (int enc = 0; enc < 2; enc++) {
+		MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+		pd.vertexFunction = [lib newFunctionWithName:@"vs_text"];
+		pd.fragmentFunction = [lib newFunctionWithName:@"fs_text"];
+		pd.colorAttachments[0].pixelFormat = enc ? layer.pixelFormat : MTLPixelFormatRGBA16Float;
+		id<MTLRenderPipelineState> tp = [device newRenderPipelineStateWithDescriptor:pd error:&err];
+		if (!tp) {
+			SDL_Log("Metal pipeline text: %s", err.localizedDescription.UTF8String);
+			text_ok = 0;
+		}
+		if (enc)
+			pipe_text_enc = tp;
+		else
+			pipe_text_lin = tp;
+	}
 	if (!pipe_lin || !pipe_blur || !pipe_crt || !pipe_up || !pipe_hd || !pipe_flat)
 		return 0;
+	{
+		MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR8Unorm
+												   width:TL_ATLAS_W
+												  height:TL_ATLAS_H
+											       mipmapped:NO];
+		td.usage = MTLTextureUsageShaderRead;
+		td.storageMode = MTLStorageModePrivate;
+		atlas_tex = [device newTextureWithDescriptor:td];
+		if (!atlas_tex)
+			text_ok = 0;
+		if (!text_ok)
+			SDL_Log("text layer unavailable: the picture is shown with the game's own glyphs");
+	}
 
 	index_tex = make_texture(MTLPixelFormatR8Uint, SCREEN_W, SCREEN_H, MTLTextureUsageShaderRead);
 	pal_tex = make_texture(MTLPixelFormatBGRA8Unorm, 256, 1, MTLTextureUsageShaderRead);
@@ -430,6 +491,63 @@ static void blur_pass(id<MTLCommandBuffer> cb, id<MTLTexture> from, id<MTLTextur
 	[enc endEncoding];
 }
 
+/* The glyphs rasterised since the last frame go to the atlas texture: copied into a buffer and blitted by
+ * the command buffer, so that they arrive in the queue's order (frames still on their way read the atlas;
+ * a CPU write into the texture would race with them). */
+static void text_upload_atlas(id<MTLCommandBuffer> cb)
+{
+	int y0, y1;
+	const uint8_t *a = tl_atlas(&y0, &y1);
+	if (y1 <= y0)
+		return;
+	NSUInteger n = (NSUInteger)(y1 - y0) * TL_ATLAS_W;
+	id<MTLBuffer> stage = [device newBufferWithBytes:a + (size_t)y0 * TL_ATLAS_W
+						  length:n
+						 options:MTLResourceStorageModeShared];
+	if (!stage)
+		return;
+	id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+	[bl copyFromBuffer:stage
+		 sourceOffset:0
+	    sourceBytesPerRow:TL_ATLAS_W
+	  sourceBytesPerImage:n
+		   sourceSize:MTLSizeMake(TL_ATLAS_W, (NSUInteger)(y1 - y0), 1)
+		    toTexture:atlas_tex
+	     destinationSlice:0
+	     destinationLevel:0
+	    destinationOrigin:MTLOriginMake(0, (NSUInteger)y0, 0)];
+	[bl endEncoding];
+	tl_atlas_clean();
+}
+
+/* Draw the text layer's cells onto target: the raster is the rectangle (x, y, w, h) of it. encode: the
+ * target is the drawable (gamma encoded), else the linear half-float raster of CRT HD. */
+static void text_pass(id<MTLCommandBuffer> cb, id<MTLTexture> target, const struct tl_quad *tq, int ntq, int x, int y,
+		      int w, int h, int encode)
+{
+	id<MTLBuffer> buf = [device newBufferWithBytes:tq length:(NSUInteger)ntq * sizeof *tq
+						options:MTLResourceStorageModeShared];
+	if (!buf)
+		return;
+	MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+	rp.colorAttachments[0].texture = target;
+	rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+	rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+	id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+	[enc setRenderPipelineState:encode ? pipe_text_enc : pipe_text_lin];
+	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
+	struct { float origin[2], raster[2]; int32_t encode, pad[3]; } tu = {
+		{ (float)x, (float)y }, { (float)w, (float)h }, encode, { 0, 0, 0 }
+	};
+	[enc setVertexBuffer:buf offset:0 atIndex:0];
+	[enc setVertexBytes:&tu length:sizeof tu atIndex:1];
+	[enc setFragmentBuffer:buf offset:0 atIndex:0];
+	[enc setFragmentBytes:&tu length:sizeof tu atIndex:1];
+	[enc setFragmentTexture:atlas_tex atIndex:0];
+	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:(NSUInteger)ntq * 6];
+	[enc endEncoding];
+}
+
 /* Draw the screen into target (dw x dh), letterboxed. */
 static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int dh)
 {
@@ -438,6 +556,16 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	int mode = disp_mode;
 	int vh = disp_lines, vw = (disp_lines * 4 + 1) / 3;
 	struct uniforms u = { (float)w, (float)h, mode <= DISPLAY_CRT_480, rgb_mode, mode == DISPLAY_SMOOTH || (mode == DISPLAY_CRT_HD && disp_smooth), vw, vh, { 0, 0 } };
+	/* the text layer's cells at the raster's scale: CRT HD on the virtual raster, Sharp and Smooth on the
+	 * output; CRT 480 keeps the game's own glyphs */
+	const struct tl_quad *tq = NULL;
+	int ntq = 0;
+	if (text_ok && !rgb_mode && mode != DISPLAY_CRT_480) {
+		int rw = mode == DISPLAY_CRT_HD ? vw : w, rh = mode == DISPLAY_CRT_HD ? vh : h;
+		ntq = tl_layout((float)rw / SCREEN_W, (float)rh / SCREEN_H, capturing ? -1 : 4000, &tq);
+		if (ntq)
+			text_upload_atlas(cb);
+	}
 	id<MTLRenderCommandEncoder> enc = begin_pass(cb, lin_tex, pipe_lin);
 	[enc setFragmentTexture:index_tex atIndex:0];
 	[enc setFragmentTexture:pal_tex atIndex:1];
@@ -459,6 +587,8 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 		[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 		[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 		[enc endEncoding];
+		if (ntq)
+			text_pass(cb, hd_tex, tq, ntq, 0, 0, vw, vh, 0);
 	}
 	enc = begin_pass(cb, target, mode == DISPLAY_CRT_HD ? pipe_hd : mode == DISPLAY_CRT_480 ? pipe_crt : pipe_flat);
 	[enc setViewport:(MTLViewport){ x, y, w, h, 0, 1 }];
@@ -471,6 +601,8 @@ static void encode(id<MTLCommandBuffer> cb, id<MTLTexture> target, int dw, int d
 	[enc setFragmentBytes:&u length:sizeof u atIndex:0];
 	[enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[enc endEncoding];
+	if (ntq && (mode == DISPLAY_SHARP || mode == DISPLAY_SMOOTH))
+		text_pass(cb, target, tq, ntq, x, y, w, h, 1);
 }
 
 static void show(void);
@@ -539,6 +671,12 @@ void present_frame(const uint8_t *pixels, const uint32_t pal[256])
 			     withBytes:bgra
 			   bytesPerRow:sizeof bgra];
 		rgb_mode = 0;
+		if (text_ok && tl_get_mode() == TEXT_HIRES) {
+			int px = 0, py = 0, have = win_mouse_pos(&px, &py);
+			tl_validate(pixels, pal, have, px, py);
+		}
+		else
+			tl_clear();
 		present_note_in(present_luma_indexed(pixels, pal));
 		show();
 	}
@@ -557,6 +695,7 @@ void present_frame_rgb(const uint32_t *xrgb)
 			     withBytes:xrgb
 			   bytesPerRow:SCREEN_W * 4];
 		rgb_mode = 1;
+		tl_clear();
 		present_note_in(present_luma_rgb(xrgb));
 		show();
 	}
@@ -647,12 +786,28 @@ int present_capture(const char *bmp_path, int w, int h)
 		if (!t)
 			return 0;
 		id<MTLCommandBuffer> cb = [queue commandBuffer];
+		Uint64 tc0 = SDL_GetPerformanceCounter();
+		capturing = 1;
 		encode(cb, t, w, h);
+		capturing = 0;
 		id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
 		SYNC_FOR_CPU(bl, t);
 		[bl endEncoding];
 		[cb commit];
 		[cb waitUntilCompleted];
+		if (getenv("NANPA2_LOG_TEXT")) { /* dev: what the text layer did for this frame, and the frame's cost */
+			struct tl_stats ts;
+			tl_get_stats(&ts);
+			tl_print_diag();
+			fprintf(stderr, "text: %dx%d (text %s) entries %d valid %d shown %d waiting %d repaint %d glyphs %lu "
+				"resets %lu drawn %lu overlaps %lu validate %.2f ms layout %.2f ms raster %.2f ms\n",
+				w, h, tl_mode_name(tl_get_mode()), ts.entries, ts.valid, ts.shown, ts.waiting, ts.repaint,
+				ts.glyphs, ts.atlas_resets, ts.total_drawn, ts.total_overlaps, ts.validate_ms, ts.layout_ms,
+				ts.raster_ms);
+			fprintf(stderr, "capture %dx%d: encode and GPU %.2f ms (text %s)\n", w, h,
+				(double)(SDL_GetPerformanceCounter() - tc0) * 1000.0 / (double)SDL_GetPerformanceFrequency(),
+				tl_mode_name(tl_get_mode()));
+		}
 
 		uint32_t *buf = malloc((size_t)w * (size_t)h * 4);
 		if (!buf)
@@ -701,8 +856,8 @@ int present_get_fullscreen(void)
 
 void present_shutdown(void)
 {
-	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = nil;
-	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = hd_tex = nil;
+	pipe_lin = pipe_blur = pipe_crt = pipe_up = pipe_hd = pipe_flat = pipe_text_lin = pipe_text_enc = nil;
+	index_tex = pal_tex = rgb_tex = lin_tex = blur_tex = glow_tex = hd_tex = atlas_tex = nil;
 	linear_sampler = nil;
 	probe_tex = nil;
 	queue = nil;

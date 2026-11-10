@@ -23,6 +23,7 @@
 		444349B1974279F62BDED4DA /* state.c in Sources */ = {isa = PBXBuildFile; fileRef = 94EF4A595417682A02ED6683; };
 		4ADF065A2CAC30886F934261 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = E976B96BCEA821B0201CF3A8; };
 		4AF42D8FD0E162979DC7ED8B /* ops_sys.c in Sources */ = {isa = PBXBuildFile; fileRef = ECD43AE65A1818807C939012; };
+		52723FA14293EA2843A7D61E /* textlayer.c in Sources */ = {isa = PBXBuildFile; fileRef = D59C592107576C5DC7371549; settings = {COMPILER_FLAGS = "-O2"; }; };
 		567B0D9F79E07E85056AA6BB /* wipe.c in Sources */ = {isa = PBXBuildFile; fileRef = 0E209D83FB5C79430D7620CA; };
 		5709921C1427C06DD3121AA4 /* replay.c in Sources */ = {isa = PBXBuildFile; fileRef = 9FE35BEB72BDA2669DB97327; };
 		5C4FB9C82705721F7AC8CEA3 /* hash.c in Sources */ = {isa = PBXBuildFile; fileRef = 39C94BAD3708818DECCCA9B2; };
@@ -69,6 +70,7 @@
 		F256C2AB6A874884E12F6E01 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F295A3D5A73BD867EB5B24FE; };
 		F8EECB832FD96CE86BCD377F /* vm.c in Sources */ = {isa = PBXBuildFile; fileRef = 4D4AA122B437CDED73049EAF; };
 		FAA1F243C6AC2347F0C25F34 /* loop.c in Sources */ = {isa = PBXBuildFile; fileRef = 230028D9473E494C51CA2B20; };
+		FD9F17D2CA01D1E63E3E01D0 /* textraster.c in Sources */ = {isa = PBXBuildFile; fileRef = 0B230581DEFB149EF9E12D5C; settings = {COMPILER_FLAGS = "-O2"; }; };
 		FF467815F1A447E2601D2BED /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 59DAA59D477A91E75E0468AF; };
 		FFDDB70EF0539217C77BE3F7 /* expr.c in Sources */ = {isa = PBXBuildFile; fileRef = BDA38807E0FCAE2435A8D202; };
 /* End PBXBuildFile section */
@@ -78,6 +80,7 @@
 		04FFEC5471DB96D996507FAC /* launch.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = launch.h; sourceTree = "<group>"; };
 		08714CCE6047C07E588422A1 /* explore.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = explore.c; sourceTree = "<group>"; };
 		087A7B2E81B24EA08C80B9B4 /* dialog.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = dialog.h; sourceTree = "<group>"; };
+		0B230581DEFB149EF9E12D5C /* textraster.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = textraster.c; sourceTree = "<group>"; };
 		0DB7A7AB2C0559976E35B1DD /* lzh.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = lzh.h; sourceTree = "<group>"; };
 		0E209D83FB5C79430D7620CA /* wipe.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = wipe.c; sourceTree = "<group>"; };
 		11F18E971527B244BC072721 /* desktop.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = desktop.h; sourceTree = "<group>"; };
@@ -100,6 +103,7 @@
 		325F3E1475A3FC2AA267D120 /* clock.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = clock.h; sourceTree = "<group>"; };
 		34B7F3D6E5C124420CFF0259 /* ops_vm.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ops_vm.c; sourceTree = "<group>"; };
 		36B4B2B5AAC28EA46FDC1F3C /* clock.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = clock.c; sourceTree = "<group>"; };
+		380BEC2350990307DA2067C5 /* textlayer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = textlayer.h; sourceTree = "<group>"; };
 		39C94BAD3708818DECCCA9B2 /* hash.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = hash.c; sourceTree = "<group>"; };
 		3B161BB320277B5CA918E02F /* docs.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = docs.h; sourceTree = "<group>"; };
 		3B66E563A1BC99C4C15FF9F5 /* gp4.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = gp4.h; sourceTree = "<group>"; };
@@ -160,6 +164,7 @@
 		D0EF3986C3E39967B8426F28 /* file.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = file.c; sourceTree = "<group>"; };
 		D43AD2D896E359B2C69E3ED9 /* startup.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = startup.c; sourceTree = "<group>"; };
 		D43C3FBE201A94C9652B56C5 /* CoreMotion.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMotion.framework; path = System/Library/Frameworks/CoreMotion.framework; sourceTree = SDKROOT; };
+		D59C592107576C5DC7371549 /* textlayer.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = textlayer.c; sourceTree = "<group>"; };
 		D80F06BD7D53CCD136DE6836 /* launch.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = launch.c; sourceTree = "<group>"; };
 		DA1C5E2C5E37AE9C6457F757 /* CoreBluetooth.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreBluetooth.framework; path = System/Library/Frameworks/CoreBluetooth.framework; sourceTree = SDKROOT; };
 		DBC35A19481F63FFEBC59968 /* text.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = text.c; sourceTree = "<group>"; };
@@ -338,6 +343,9 @@
 				46BD7F7AE429D735E2F03EA7,
 				47011EA73A14C30A180885A1,
 				A443E3F442D93F1BB625DB5D,
+				D59C592107576C5DC7371549,
+				380BEC2350990307DA2067C5,
+				0B230581DEFB149EF9E12D5C,
 				AB30FD692CDE247EE0A965EB,
 				EDD4E72280B9E6104A839F15,
 			);
@@ -487,6 +495,8 @@
 				EBEC84278AC1E3BE7C78BCD8,
 				BE3A17E817F4008AAE822ED6,
 				92C7F450BD3364850225A50F,
+				52723FA14293EA2843A7D61E,
+				FD9F17D2CA01D1E63E3E01D0,
 				C4775E675E46839A088A94A3,
 				1931854A5F238B71ED1C5188,
 			);

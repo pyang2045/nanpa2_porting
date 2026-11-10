@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 
+#include "platform/textlayer.h"
+
 /* Find the font: font_path (may be NULL) or a candidate of the host. 0 if there is none (text
  * is then blank). */
 int text_init(const char *font_path);
@@ -24,5 +26,17 @@ uint32_t text_font_create(int height, int weight);
  * background first. */
 void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
 	       uint32_t bg_colour, int opaque);
+
+/* The game copied the cell of the last text_draw to (x, y) of the surface with the colour indices
+ * fg and bg (see platform/textlayer.h): the text layer follows what is on the screen. Touches
+ * nothing of the game. */
+void text_cell_placed(uint32_t surface, int x, int y, int n, uint8_t fg, uint8_t bg);
+
+/* An antialiased bitmap of the character the text layer recorded (textlayer.h, struct
+ * tl_glyph), `scale` output pixels per game pixel; the platform's, see text.c. */
+/* The font face number `face` text.c loaded: its file image and the face's offset in it (0: none). */
+int text_face_font(int face, const unsigned char **data, int *offset);
+uint8_t *text_hires_glyph(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x);
+void text_hires_free(uint8_t *bm);
 
 #endif

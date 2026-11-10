@@ -21,6 +21,7 @@ PROJ = os.path.join(ROOT, "ios", "nanpa2.xcodeproj")
 SOURCES = """
 main.c launch.c lzh.c gp4.c fsys.c iso.c trap.c hooks.c hash.c cinepak.c
 platform/files.c platform/window.c platform/clock.c platform/surface.c platform/text.c platform/logo.c
+platform/textlayer.c platform/textraster.c
 platform/sound.c platform/present_metal.m platform/dialog_sdl.c platform/docs_ios.c
 dev/dev.c dev/replay.c dev/explore.c dev/status.c
 game/ctl.c game/expr.c game/vm.c game/ops.c game/ops_sys.c game/ops_vm.c game/loop.c game/text.c
@@ -158,7 +159,11 @@ def bf(key, comment, d):
     return add("bf:" + key, comment, dict(d, isa="PBXBuildFile"), True)
 
 
-src_bfs = [bf("src:" + s, f"{os.path.basename(s)} in Sources", {"fileRef": refs[s]}) for s in sorted(SOURCES)]
+# the text layer's glyph rasteriser is compiled -O2 whatever the configuration (CMakeLists.txt does the same)
+OPT_SOURCES = ("platform/textlayer.c", "platform/textraster.c")
+src_bfs = [bf("src:" + s, f"{os.path.basename(s)} in Sources",
+              dict({"fileRef": refs[s]}, **({"settings": "@O2@"} if s in OPT_SOURCES else {})))
+           for s in sorted(SOURCES)]
 fw_build = []
 for n, weak, i in fw_refs:
     d = {"fileRef": i}
@@ -251,7 +256,10 @@ def render():
             c = f" /* {comment} */" if comment else ""
             if one:
                 weak = d.get("settings") == "@WEAK@"
-                s = flat({k: x for k, x in d.items() if x != "@WEAK@"})
+                opt = d.get("settings") == "@O2@"
+                s = flat({k: x for k, x in d.items() if x not in ("@WEAK@", "@O2@")})
+                if opt:
+                    s = s[:-1] + 'settings = {COMPILER_FLAGS = "-O2"; }; }'
                 if weak:
                     s = s[:-1] + "settings = {ATTRIBUTES = (Weak, ); }; }"
                 out += f"\t\t{i}{c} = {s};\n"

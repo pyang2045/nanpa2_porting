@@ -70,6 +70,8 @@ set(SOURCES
   src/platform/clock.c
   src/platform/surface.c
   src/platform/text.c
+  src/platform/textlayer.c
+  src/platform/textraster.c
   src/platform/logo.c
   src/cinepak.c
   src/platform/sound.c
@@ -96,6 +98,13 @@ else()
 endif()
 add_executable(nanpa2 ${SOURCES})
 target_include_directories(nanpa2 PRIVATE src third_party)
+# The default build is unoptimised (Debug); the text layer's glyph rasteriser (stb_truetype in textraster.c, run
+# for every new glyph at the display's resolution) is not fast enough that way: optimise these two files
+# whatever the build type. Neither takes part in the game's own computation (text.c, which makes the game's ink
+# masks, keeps the project's flags).
+if(NOT MSVC)
+  set_source_files_properties(src/platform/textraster.c src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
 target_link_libraries(nanpa2 PRIVATE SDL3::SDL3)
 # Windows (untested, tools/build_msys2.sh): a GUI program, so no console
 # window opens next to the game (set NANPA2_LOG_FILE for the log); SDL3's
@@ -144,6 +153,11 @@ target_include_directories(decode_all PRIVATE src)
 add_executable(iso_check tests/iso_check.c src/iso.c)
 target_include_directories(iso_check PRIVATE src)
 
+# The text layer's tracking and validation, with a stub rasteriser (tests/textlayer_test.c, no game data, no SDL).
+add_executable(textlayer_test tests/textlayer_test.c src/platform/textlayer.c)
+target_include_directories(textlayer_test PRIVATE src)
+target_link_libraries(textlayer_test PRIVATE m)
+
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
 # Exit 77 = skipped: the game checks passed but nobody could see the screen
@@ -154,6 +168,9 @@ enable_testing()
 add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+add_test(NAME textlayer COMMAND textlayer_test)
+set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
 
 # ISO image (tests/iso.py): every DATA/MUSIC/SPEECH file reads the same bytes from the CD image
 # as from the folder, decode_all agrees, and a recording made on the folder replays on the image.

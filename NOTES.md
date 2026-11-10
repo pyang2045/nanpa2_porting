@@ -1451,6 +1451,67 @@ Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, RE
   within 1 level at 2.25x, 4.27x and 3840x2160; ctest passes for the Metal and the
   `-DNANPA2_SDL_RENDERER=ON` build; `tools/build_ios.sh` (simulator) compiles.
 
+## 2026-11-10: high-resolution text layer
+
+Commits 784c29d (tracking, validation, glyph atlas, unit test), 57fbc1c (Metal presenter, `--text`/F11,
+preference, status, README), 65d5815 (Sharp/Smooth viewport fix on letterboxed outputs, strict validation
+with a pointer-sized overlay exception, iOS guard). Platform and presenter only; the one touch in `src/game/text.c` is a call
+after the cell copy of 0x401900 that tells the platform where the cell went (`text_cell_placed`).
+- Problem: 0x401900 copies an opaque N x N cell of 1-bit glyph (fg where the scratch pixel is set, bg
+  elsewhere) into the 640x480 screen; at 1280x960 and up the 1-pixel strokes smear. Design:
+  `textlayer.c` keeps a list of the cells drawn (code point, face, em, bold, the ink mask, fg/bg
+  indices, screen position; at most 4096, newer cells drop the older ones they cover, `surf_fill` drops,
+  `surf_blt_fast` moves entries inside the source rectangle). Per presented frame `tl_validate` compares
+  the frame the presenter was given with what each glyph drew: ink = fg index, rest = bg index. A cell
+  is shown only if it matches exactly, except that when all the differing pixels of the frame lie in
+  one 32x32 box (the game's pointer sprite) and a cell keeps 70% of its ink and half its area, the cell is
+  shown with those pixels repainted as plain pixels over the glyph (the repaint path ran only in
+  `tests/textlayer_test.c`: no game capture had the pointer over a cell); otherwise the low-res pixels
+  show through. Entries are never deleted by failing validation (a restored background brings them back).
+  Palette changes keep indices, so the text fades with the picture. Nothing in G, the screen surface, the
+  saves or the checkpoints changes (`replay_det`, `standalone` pass).
+- Measured: text is drawn to surface 0 only (the primary); no BltFast from the primary to another
+  surface occurs, 4-5 primary-to-primary ones do (handled); the wipe, swap, XOR and map code write the
+  screen directly (validation covers them); the cursor is drawn by raw writes (hence the repaint); the
+  letterbox shifts the pointer 40 lines (the screen row is taken from the pointer). The name-entry grid,
+  the grid is a picture, not 0x401900 text: it stays low-res (the title and the status numbers were not
+  checked). The ASCII cell is 16
+  wide but advances 8, so a half-width cell is tracked at its advance (no partial overlaps observed:
+  `overlaps 0` over the runs).
+- Rendering (`present_metal.m`): the glyph is the face's outline (stb_truetype, antialiased) at the
+  on-screen size, positioned where the bitmap one was (the strike's advance box centre and baseline for
+  glyphs that came from a bitmap strike, the outline's baseline otherwise; +0.25 game px down measured
+  with `NANPA2_LOG_TEXT=2`: box centres agree to 0.1-0.3 game px), GDI's bold as a horizontal widening
+  of 0.75 game px, coverage raised to the 0.8 power to match the bitmap weight (ink area vector/bitmap
+  about 0.75 before that). One opaque quad per cell, `mix(bg, fg, coverage)` in linear light: in CRT HD
+  into the half-float virtual raster between `fs_up` and `fs_hd` (same beam, grille, glow), in Sharp
+  and Smooth onto the drawable after `fs_flat` (gamma encoded in the shader; no blending, no extra
+  full-screen pass). CRT 480 and the SDL_Renderer presenter keep the game's glyphs. Glyph cache keyed by
+  (code point, face, font, em, bold, scale/64), 2048x2048 atlas, reset when full; at most 4 ms of
+  rasterising per frame (entries whose glyph is not ready stay low-res that frame).
+- Options: `--text hires|bitmap`, `NANPA2_TEXT_LAYER`, F11, a `text hires|bitmap` second line of
+  `display.txt` (same rule as the display mode). iOS: no gesture, the option and the preference only.
+  Dev: `NANPA2_SHOT_PRESENT=2` (also writes `bitmap_NNN.bmp`, the same frame without the layer),
+  `NANPA2_SHOT_SIZE=WxH`, `NANPA2_LOG_TEXT=1|2`, `NANPA2_TEXT_WEIGHT`, `NANPA2_TEXT_SMEAR`; the status
+  file has a `text` object.
+- Checks: with `--text bitmap` the presenter output is `cmp`-identical to master in CRT HD, CRT 480,
+  Sharp and Smooth for in-game frames (16 of 16) and through `--view-bmp` (16 of 16); ctest passes for the
+  Metal and the `-DNANPA2_SDL_RENDERER=ON` build (`smoke` skips here: the window is not visible);
+  `tests/textlayer_test.c` checks tracking, validation, repaint, blit and fill without game data.
+  GPU cost of a capture at 1280x960 / 3840x2160: +1.5 / +2-4 ms with text (CRT HD 7.5 vs 6 ms and 20 vs 17.5 ms;
+  these include the read-back). The glyph rasteriser takes about 0.05 ms a glyph at 2.25x.
+- Also checked: a replay recorded with the unchanged master binary (8000 frames of the exploration bot,
+  33 checkpoints including the screen hash, text drawn) replays on the new binary, whose `text.c` and
+  `textlayer.c` are built -O2; the iOS simulator build (`tools/build_ios.sh`) compiles; text in
+  CRT 480 captures is pixel-identical to `--text bitmap`.
+- Known gaps: the pointer over a cell that loses more than 30% of its ink falls back to the bitmap glyph
+  for that cell; no capture had text on screen during a dissolve (only the unit test covers the strict
+  rule), the fade captured had no text; F11 was not exercised live (same code path as F12; the game
+  never sees VK 0x7A); the first frames of a full page at 4K can mix vector and bitmap glyphs while the atlas
+  fills (4 ms budget); text moved by the game's raw copies (wipe, swap) stays bitmap until redrawn; the
+  presented frame on screen could not be checked live here (window not visible), only captured through
+  `present_capture`; the iOS build was not compiled.
+
 ## 2026-11-10: unsigned iOS IPA for sideloading
 
 Commit 0b1b767. `tools/build_ios.sh --ipa` builds iphoneos arm64 Release with the Ninja generator (a flat
@@ -1567,3 +1628,35 @@ MUSIC\38.MP3 into the dump; iPad Pro 11 simulator build runs from `Documents/NAN
 screen (the simulator screenshot shows it sideways, the portrait simulator with a landscape app). Commits:
 04227b0, c388082, 4376cf0, b8cfeb8. Not tested: Windows, Linux, `dialog_sdl.c`, a real iPad, the smoke test
 (window occluded here), real keyboard/mouse/touch through SDL3 (scripted runs bypass SDL events).
+
+## 2026-11-10: text layer, review fixes
+
+Commits 09b2057 and c64f788 (merges of master 72ba125 and a207063, the fixes on top). Supersedes the
+validation and F11 details of the entry above.
+- Validation: a cell is shown only on an exact match, except pixels inside the game pointer's 32x32 sprite
+  (the position comes from `win_mouse_pos`, the last mouse message posted to the game, with 8 px of slack):
+  those are repainted if the cell keeps 70% of its ink and half its area. Differences anywhere else (a wipe
+  band, a page rewritten by the raw copies of `screen.c`/`wipe.c` with a look-alike character) hide the
+  cell; no global box, so stale cells cannot keep other cells strict. Unit tests for both cases.
+- An empty vector glyph (no outline, allocation failure) leaves the bitmap glyph; the atlas (4096x2048)
+  resets at most once per 120 layouts and what does not fit waits (bitmap) instead of being rasterised and
+  uploaded every frame (unit test: 400 cells of 192 px, at most one reset in 20 frames). Stats are published
+  under a sequence number for the status thread; the font/face fields of the glyph key are 3 bits with a
+  static assert.
+- The rasteriser is `platform/textraster.c` (stb_truetype static there and in `text.c`); `-O2` only on it and
+  `textlayer.c` (CMake, and `COMPILER_FLAGS` in the Xcode project by `tools/gen_xcodeproj.py`); `text.c`,
+  which makes the game's ink masks, keeps the project's flags. A replay recorded on master a207063 (33
+  checkpoints with the screen hash) replays on this branch; `--text bitmap` presenter output is `cmp`-identical
+  to master in the four display modes (16 in-game frames, 16 viewer frames).
+- Toggle: Shift+F12 (F11 is macOS's Show Desktop), a four-finger tap on iOS (untested on a device). `present_init`
+  fails soft: without the text pipelines or atlas the layer is off. `textlayer.c` and its test use no SDL
+  (`clock_host_ns`); `NANPA2_SHOT_PRESENT=1` writes what it did before (`prev_NNN.bmp` only with `=2`).
+- Not verified live: the desktop was locked and the display asleep here (status `desktop locked 1 asleep 1`,
+  window occluded, `presented 0`), so the Metal frame path ran only through `present_capture`; the status file
+  showed the validation running live (`valid 5-7`, worst 0.06 ms).
+- Follow-ups (re-review): a full atlas is remembered (`atlas_full`), so frames before the next allowed reset
+  rasterise nothing (unit test counts rasteriser calls); the `-Wunused-function` noise of the static stb
+  copies in `text.c` and `textraster.c` is silenced around the stb include only (no warnings in the build);
+  `text_face_font` is declared in `text.h`; on iOS 3 fingers cycle the display modes and 4 or more toggle
+  the text layer, so no tap count does nothing. ctest 11/11 (with `iso`), `--text bitmap` identical to
+  master (32 of 32), iOS simulator build passes.

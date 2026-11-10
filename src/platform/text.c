@@ -11,6 +11,7 @@
  * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
 #include "platform/text.h"
 #include "platform/surface.h"
+#include "platform/textlayer.h"
 
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -18,7 +19,12 @@
 #include <string.h>
 
 #define STB_TRUETYPE_IMPLEMENTATION
+#define STBTT_STATIC
+/* static stb functions this file does not use */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include "stb_truetype.h"
+#pragma GCC diagnostic pop
 
 #ifdef _WIN32
 /* kernel32's MultiByteToWideChar (UINT, DWORD, LPCCH, int, LPWSTR, int),
@@ -51,8 +57,10 @@ __declspec(dllimport) int __stdcall MultiByteToWideChar(unsigned int cp, unsigne
 /* faces[0] is the font; faces[1] a fallback for the characters it lacks
  * (Apple LiSung has no kana and no ～, U+FF5E from Big5 A1E3) */
 #define MAX_FACES 2
+_Static_assert(MAX_FONTS <= TL_MAX_FONTS && MAX_FACES <= TL_MAX_FACES, "textlayer.c keys fonts and faces in 3 bits");
 static struct face {
 	stbtt_fontinfo info;
+	int off; /* of the face in data */
 	unsigned char *data;
 	size_t size;
 	uint32_t loc, dat; /* embedded bitmap location and data tables (offsets into data), 0: none */
@@ -159,6 +167,7 @@ static int load_font(const char *path)
 		return 0;
 	}
 	f->data = d;
+	f->off = off;
 	f->size = n;
 	snprintf(f->path, sizeof f->path, "%s", path);
 	f->loc = stbtt__find_table(d, (stbtt_uint32)off, "EBLC");
@@ -489,8 +498,11 @@ static int strike_for(int em)
 	return r ? r : find_strike((em + 7) & ~7);
 }
 
-void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
-	       uint32_t bg_colour, int opaque)
+/* What the last text_draw rendered, for the text layer (platform/textlayer.h). */
+static struct tl_glyph cap;
+
+static void text_draw_impl(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len,
+			   uint32_t fg_colour, uint32_t bg_colour, int opaque)
 {
 	int pitch, sw, sh;
 	uint8_t *pixels = surf_lock(surface, &pitch);
@@ -519,6 +531,15 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	 * for zero, so map any non-black colour to 0xff */
 	uint32_t fg = fg_colour ? 0xff : 0, bg = bg_colour ? 0xff : 0;
 	int cell_w = len > 1 ? em : (em + 1) / 2;
+	cap.cp = ch;
+	cap.face = (uint8_t)(F - faces);
+	cap.fi = (uint8_t)fi;
+	cap.len = (uint8_t)len;
+	cap.em = (uint8_t)em;
+	cap.bold = (uint8_t)bold;
+	cap.cell_w = (uint8_t)cell_w;
+	cap.base = (float)base;
+	cap.cx = cell_w / 2.0f;
 
 	if (opaque)
 		for (int yy = 0; yy < em; yy++)
@@ -534,6 +555,9 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	if (strike > 0 && sbit_glyph((uint32_t)strike, stbtt_FindGlyphIndex(&F->info, (int)ch), &sb) &&
 	    (len > 1 || sb.adv <= cell_w)) {
 		int sbase = (signed char)F->data[strike + 16]; /* hori.ascender */
+		cap.em = F->data[strike + 45];
+		cap.base = (float)sbase;
+		cap.cx = (float)((cell_w - sb.adv) / 2) + sb.adv / 2.0f; /* int division as below */
 		int gx = x + (cell_w - sb.adv) / 2 + sb.bx, gy = y + sbase - sb.by;
 		for (int yy = 0; yy < sb.h; yy++)
 			for (int xx = 0; xx < sb.w; xx++) {
@@ -564,6 +588,7 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	ink_mask(bm, gw, gh, em);
 	int gx = x + (cell_w - (int)(adv * sx + 0.5f)) / 2 + xo;
 	int gy = y + base + yo;
+	cap.cx = (float)((cell_w - (int)(adv * sx + 0.5f)) / 2) + (int)(adv * sx + 0.5f) / 2.0f;
 	for (int yy = 0; yy < gh; yy++)
 		for (int xx = 0; xx < gw; xx++) {
 			if (!bm[yy * gw + xx])
@@ -575,4 +600,46 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 			}
 		}
 	stbtt_FreeBitmap(bm, NULL);
+}
+
+void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
+	       uint32_t bg_colour, int opaque)
+{
+	memset(&cap, 0, sizeof cap);
+	text_draw_impl(surface, x, y, font, str, len, fg_colour, bg_colour, opaque);
+	/* the cell as the game is about to copy it: ink is a non-zero pixel */
+	int pitch, sw, sh;
+	if (!cap.cell_w || !surf_size(surface, &sw, &sh)) {
+		tl_glyph_drawn(&cap); /* nothing drawn: n is 0 */
+		return;
+	}
+	int n = (fonts[cap.fi].height + 7) & ~7;
+	if (n > 32 || x < 0 || y < 0 || x + n > sw || y + n > sh) {
+		memset(&cap, 0, sizeof cap);
+		tl_glyph_drawn(&cap);
+		return;
+	}
+	const uint8_t *px = surf_lock(surface, &pitch);
+	cap.n = (uint8_t)n;
+	for (int r = 0; r < n; r++)
+		for (int c = 0; c < n; c++)
+			if (px[(y + r) * pitch + x + c])
+				cap.mask[r] |= 1u << c;
+	tl_glyph_drawn(&cap);
+}
+
+/* The font face the text layer rasterises from (textraster.c): its file image and the offset of the face
+ * in it. 0 if there is no such face. */
+int text_face_font(int face, const unsigned char **data, int *offset)
+{
+	if (face < 0 || face >= nfaces)
+		return 0;
+	*data = faces[face].data;
+	*offset = faces[face].off;
+	return 1;
+}
+
+void text_cell_placed(uint32_t surface, int x, int y, int n, uint8_t fg, uint8_t bg)
+{
+	tl_cell_placed(surface, x, y, n, fg, bg);
 }
