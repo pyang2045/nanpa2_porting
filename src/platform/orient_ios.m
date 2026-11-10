@@ -8,8 +8,14 @@
  * the presenter then letterboxes and maps touch through the window rectangle, so nothing distorts.
  * Every orientation or size change is logged. */
 #import <UIKit/UIKit.h>
+
+/* Everything here uses iOS 26 scene-geometry API; orient_ios_init returns before touching it on older
+ * systems (the deployment target is 13), so the unguarded-availability warnings are silenced. */
+#pragma clang diagnostic ignored "-Wunguarded-availability-new"
 #include <SDL3/SDL.h>
 #include <objc/runtime.h>
+
+#include "orient_map.h"
 
 static SDL_Window *g_win;
 static BOOL g_lock;
@@ -75,12 +81,24 @@ static void notify_lock(void)
 		[vc performSelector:sel];
 }
 
-/* End of a flip: the scene reached the target or the timeout ran out; lock again. */
+/* The interface orientation the current device side calls for; 0 = no landscape side. */
+static int wanted(void)
+{
+	return orient_interface_for_device((int)UIDevice.currentDevice.orientation);
+}
+
+static int current(void)
+{
+	return (int)ui_window().windowScene.effectiveGeometry.interfaceOrientation;
+}
+
+/* End of a flip: the scene reached the wanted side (by our request or by itself) or the timeout ran out;
+ * lock again at whatever landscape side it is on. */
 static void flip_done(const char *why)
 {
 	g_flip = NO;
 	g_gen++;
-	g_lock = UIInterfaceOrientationIsLandscape(ui_window().windowScene.effectiveGeometry.interfaceOrientation);
+	g_lock = UIInterfaceOrientationIsLandscape((UIInterfaceOrientation)current());
 	notify_lock();
 	log_state(why);
 }
@@ -89,8 +107,8 @@ static void flip_poll(unsigned gen, int left)
 {
 	if (gen != g_gen || !g_flip)
 		return;
-	UIWindowScene *s = ui_window().windowScene;
-	if (s.effectiveGeometry.interfaceOrientation == g_target) {
+	int w = wanted();
+	if (w == 0 || current() == w) { /* arrived, or the device left the landscape sides: never fight the system */
 		flip_done("flip-reached");
 		return;
 	}
@@ -102,21 +120,33 @@ static void flip_poll(unsigned gen, int left)
 		       ^{ flip_poll(gen, left - 1); });
 }
 
-static void flip_start(unsigned gen, UIInterfaceOrientation target)
+/* After the debounce: the device is on a landscape side that differs from the interface. */
+static void flip_check(unsigned gen)
 {
 	if (gen != g_gen)
 		return; /* a newer device change superseded this one */
+	int t = wanted();
+	if (t == 0) { /* portrait, face up/down, unknown: never unlock; settle a flip in progress */
+		if (g_flip)
+			flip_poll(gen, 0);
+		return;
+	}
+	if (t == current()) {
+		if (g_flip)
+			flip_done("flip-moot"); /* the device came back to the side it was on */
+		return;
+	}
 	UIWindowScene *s = ui_window().windowScene;
-	if (!s || s.effectiveGeometry.interfaceOrientation == target)
+	if (!s)
 		return;
 	g_flip = YES;
-	g_target = target;
+	g_target = (UIInterfaceOrientation)t;
 	g_lock = NO;
 	notify_lock();
 	log_state("flip-unlock");
 	UIViewController *vc = ui_window().rootViewController;
 	[vc setNeedsUpdateOfSupportedInterfaceOrientations];
-	UIInterfaceOrientationMask m = target == UIInterfaceOrientationLandscapeLeft
+	UIInterfaceOrientationMask m = t == UIInterfaceOrientationLandscapeLeft
 					       ? UIInterfaceOrientationMaskLandscapeLeft
 					       : UIInterfaceOrientationMaskLandscapeRight;
 	UIWindowSceneGeometryPreferencesIOS *p =
@@ -125,26 +155,20 @@ static void flip_start(unsigned gen, UIInterfaceOrientation target)
 				   errorHandler:^(NSError *e) {
 					   SDL_Log("orient: flip request failed: %s", e.localizedDescription.UTF8String);
 				   }];
-	SDL_Log("orient[flip-request]: target=%ld", (long)target);
-	flip_poll(gen, 15); /* 1.5 s timeout */
+	SDL_Log("orient[flip-request]: target=%d", t);
+	flip_poll(gen, 40); /* 4 s: the system can take a while after the unlock */
 }
 
-/* Device turned: only the two landscape sides matter. Device LandscapeLeft = interface LandscapeRight. */
+/* Device turned: only the two landscape sides matter (orient_map.h). */
 static void device_changed(void)
 {
-	UIDeviceOrientation d = UIDevice.currentDevice.orientation;
-	if (d != UIDeviceOrientationLandscapeLeft && d != UIDeviceOrientationLandscapeRight) {
-		log_state("device-ignored"); /* portrait, face up/down, unknown: never unlock */
+	if (wanted() == 0) {
+		log_state("device-ignored");
 		return;
 	}
-	UIInterfaceOrientation t = d == UIDeviceOrientationLandscapeLeft ? UIInterfaceOrientationLandscapeRight
-									  : UIInterfaceOrientationLandscapeLeft;
 	unsigned gen = ++g_gen;
-	if (g_flip && t != g_target) {
-		g_flip = NO; /* quick back-and-forth: restart for the new side */
-	}
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC), dispatch_get_main_queue(),
-		       ^{ flip_start(gen, t); }); /* debounce 0.3 s */
+		       ^{ flip_check(gen); }); /* debounce 0.3 s */
 }
 
 static bool SDLCALL watch(void *ud, SDL_Event *e)
@@ -164,6 +188,10 @@ static bool SDLCALL watch(void *ud, SDL_Event *e)
 void orient_ios_init(SDL_Window *win)
 {
 	g_win = win;
+	if (@available(iOS 26.0, *)) {
+	} else {
+		return;
+	}
 	UIWindow *w = ui_window();
 	UIViewController *vc = w.rootViewController;
 	if (!vc)

@@ -12,6 +12,10 @@ orientation itself. `src/platform/orient_ios.m` adds the method to SDL's view co
 through the window rectangle, so a refused lock cannot distort. Device (iPadOS 27.2): locked=1 at launch.
 The lock then held one landscape side; the device turning to the other landscape side now unlocks, requests
 that interface orientation (0.3 s debounce, relock on arrival or after 1.5 s), portrait never unlocks.
+Device log showed the 3/4 raw values are equal between UIDeviceOrientation and UIInterfaceOrientation
+(device LandscapeLeft 3 = interface LandscapeRight 3), now `platform/orient_map.h` with a test; the flip
+recomputes its target from the live device side, waits 4 s, and accepts a system rotation instead of
+forcing the old target back. The scene-geometry calls run only on iOS 26+.
 
 ## 2026-11-03
 
