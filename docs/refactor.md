@@ -40,7 +40,7 @@ game's behaviour:
   into the VM), the status watchdog only reads, and presentation is not game state: nothing
   to do for them. The bot's own expression evaluation used to advance the instruction count
   (a replay has no bot, 77 instructions per menu of drift): it is now excluded
-  (62f125d).
+  (84f550a).
 
 **Recording** (`--record FILE` or `NANPA2_RECORD`): a text file. Header: `nanpa2-replay 1`,
 `virt_ips`, `cp_ticks`, and `saves N/HASH`, the FLAG files of the save folder at the start (a replay
@@ -99,7 +99,7 @@ left out must diverge (exit 3).
 
 ### The golden set
 
-Made on the pre-refactor code (b98343c plus the bot fix 62f125d and the R0 commit), headless,
+Made on the pre-refactor code (2fcd192 plus the bot fix 84f550a and the R0 commit), headless,
 `NANPA2_CPU_MIPS=0`, from copies of a save folder; kept outside the repository (they hold derived
 game state). Recording: `NANPA2_EXPLORE=SEED NANPA2_EXPLORE_FRAMES=N NANPA2_CP_TICKS=C
 nanpa2 --game game --record NAME.rec`; check: `nanpa2 --game game --replay NAME.rec` with the same
@@ -217,7 +217,7 @@ Nothing outside `src/game`, `src/hle` and `src/x86` names `G`.
 |---|---|
 | ctest `no_game_bytes`, `asset_only`, `wavcheck`, `selftest`, `start_trace`, `replay_det` | kept, pass (R2 removed `start_trace`) |
 | golden replays | the check for every chunk |
-| differential harness (`NANPA2_DIFF`, `diff_replay`, `NANPA2_DIFF_DIR`) | **frozen** at b98343c: it snapshots and compares `x86_mem` directly, which no longer holds aliased state, and the C is no longer meant to equal the lifted original. Not built into any test. |
+| differential harness (`NANPA2_DIFF`, `diff_replay`, `NANPA2_DIFF_DIR`) | **frozen** at 2fcd192: it snapshots and compares `x86_mem` directly, which no longer holds aliased state, and the C is no longer meant to equal the lifted original. Not built into any test. |
 | `NANPA2_FUZZ`, `map_fuzz.c`, `NANPA2_LOCKSTEP`, the recomp backend | **frozen**: they share the harness's direct memory access and need the exe; the sources stay for reference and compile, nothing exercises them. Revive by reading memory through `x86_read_virtual`. |
 | `tools/reimpl_status.py` | unchanged (counts what the exe's code still contributes: nothing) |
 
@@ -227,7 +227,7 @@ Nothing outside `src/game`, `src/hle` and `src/x86` names `G`.
 its `X86_COUNT` charges and `X86_POLL` backward-jump polls, now spelled `COST(n)` and `POLL(at)`
 (src/game/ctl.h): a plain cost counter that no longer depends on the CPU model. Changing them is R3.
 That is why `li.*`, `raw.icount` and `raw.data` of the golden replays stay equal through all of
-R2 (the goldens are in a scratch folder, recorded on d79f8e0: `golden_r2`).
+R2 (the goldens are in a scratch folder, recorded on a3b8f40: `golden_r2`).
 
 ### Control flow: direct style, the pump is a call
 
@@ -289,7 +289,7 @@ return -1 (the native `jmp 0x4060f9`) or the block result (the native `ret`).
 ### Verification of R2, and which raw keys change
 
 Every chunk was checked by the four goldens (`newgame` 271, `town` 301, `saveload` 33, `menu` 161
-checkpoints, recorded on d79f8e0 with the same inputs as the R1 goldens) with
+checkpoints, recorded on a3b8f40 with the same inputs as the R1 goldens) with
 `NANPA2_REPLAY_CHECK=li,raw.icount,raw.data`: all `li.*` keys, the instruction count and the whole
 data area equal at every checkpoint. `NANPA2_REPLAY_CHECK` now takes a comma-separated list of key
 prefixes (`li` is every `li.*`). Expected to change in R2, and not compared: `raw.cpu` (registers
@@ -297,7 +297,7 @@ are no longer the state), `raw.stack` (the emulated stack holds only HLE argumen
 `raw.heap` (same), and `raw.pg` follows `raw.data`. `raw.icount` and `raw.data` are equal because pacing
 and the data layout are unchanged; R3 changes the first, so after R3 the goldens are re-recorded.
 `NANPA2_HLETRACE=2` prefixes each HLE call with the instruction count: with equal pacing two builds
-give the same trace (checked on saveload and menu against d79f8e0 after dropping the lines of
+give the same trace (checked on saveload and menu against a3b8f40 after dropping the lines of
 calls that became direct C calls and the stack garbage that parameterless thunks print).
 
 ### Tooling after R2
@@ -374,12 +374,12 @@ input on a build with other timing).
 ### Measured before and after
 
 The game's own clock in ms (`NANPA2_TIMELOG=1`, one line per fade, wipe, character, step and file
-open; `tools/timing_stats.py`), the same scripted input on 90e7de9 and on the R3 build in deterministic
+open; `tools/timing_stats.py`), the same scripted input on 6c8ddf5 and on the R3 build in deterministic
 mode, which is real seconds at speed 1.0 (and checked in real time, below). The scenario is the load
 path of the saveload golden, `NANPA2_INPUT` events replayed to tick 794, then no button, or a button
 held from tick 800:
 
-| What | 90e7de9 | R3 |
+| What | 6c8ddf5 | R3 |
 |---|---|---|
 | palette fade (16 ticks) | 258-272 ms, median 267 | 258-272 ms, median 268 |
 | dissolve wipe, no button | 4094 and 4096 ms | 4094 and 4096 ms |
@@ -394,7 +394,7 @@ Title to prologue: the load path above (title to OPEN1) is the measurable one. A
 is the player's (the bot took 17296, 28551 and 20336 frames to reach S1.MES in three runs), so there is no
 fixed number to compare.
 
-In real time (non-deterministic, headless, the same script, host clock): 90e7de9 (its own 25 MIPS throttle)
+In real time (non-deterministic, headless, the same script, host clock): 6c8ddf5 (its own 25 MIPS throttle)
 had the first dissolve at 4098 ms and title to open1.mes at 2297 ms; R3 at `NANPA2_SPEED=1` 4094 ms and
 2312 ms, and 18.5 s of game time in 18.7 s (0.98x including the 0.2 s start-up). At `NANPA2_SPEED=4` the
 same script ran 18.4 s of game time in 4.9 s (3.78x, dissolve 1024 ms), at 8 in 2.6 s (7.11x: the host's
@@ -467,24 +467,24 @@ R4 removed the last of the model of the PC: the Win32, DirectDraw, DirectSound a
 (`hle_invoke`, `HLE()`, the import table and the COM vtables), the emulated stack, heap and 32-bit
 address space (`src/x86`), the aliases of `G`, and the checkpoint keys of the emulated machine. The
 game logic now calls a small platform API, and `G` is an ordinary C object. Commits (oldest first,
-on top of 5b37d43): 8123dcd (the checkpoint key `raw.gdata`), aee4867 (files and sound),
-b168ef3 (surfaces, text, window, timer: `hle_invoke` and the thunks go), 5d5612e (`src/x86`,
-the FLAG serializer, the dead parameters), f40feb6 (`src/hle` dissolved into `src/platform` and
-`src/dev`), b55d64f (comments, includes, build scripts), f1bd5f8 (self-test), and the documentation
+on top of 3854da5): 6240e2c (the checkpoint key `raw.gdata`), c6fd52a (files and sound),
+84593cd (surfaces, text, window, timer: `hle_invoke` and the thunks go), 1b224c3 (`src/x86`,
+the FLAG serializer, the dead parameters), f91f9b0 (`src/hle` dissolved into `src/platform` and
+`src/dev`), 7700509 (comments, includes, build scripts), 047ff8e (self-test), and the documentation
 commits after them.
 
 ### The checkpoint keys, and why the recordings were re-recorded first
 
 `raw.data` hashed the emulated data area, which held the surface handles, the DirectDraw lock
 descriptor and the locked pixel pointers: addresses of the emulated heap. Once surfaces are platform
-objects those words cannot keep their values, so before anything else changed (8123dcd, on the R3
+objects those words cannot keep their values, so before anything else changed (6240e2c, on the R3
 code) a new key was added beside the old ones: **`raw.gdata`**, the hash of the whole of `G` with the
 fields that hold platform values zeroed (`platform_fields[]` in `src/game/state_view.c`: `rt.surface`,
 `sc.scratch_surface`, `hwnd`, `hinstance`, `font`, `surface_desc`, `lock_ptr`, `surface_desc_rest`,
 `ddraw`, `palette_obj`, `timer_id`, and the three locked pointers of `map.v`; the pitches, the segment
 bases, the animation addresses and every other word stay in). That commit also made `--replay` with
 `--record` write the replayed messages, so a golden can be carried over to a new key set by replaying
-it. The procedure: replay the four `golden_r3` recordings on 5b37d43 + that commit, with
+it. The procedure: replay the four `golden_r3` recordings on 3854da5 + that commit, with
 `--record`: every old key matched (`replay: ok` for all four), the new recordings' messages equal the old
 ones and their `li.*` and `raw.clock` equal too (`replay_diff.py --li` says "identical" between a
 `golden_r3` and a `golden_r4` recording), and they carry `raw.gdata` as well. These are `golden_r4`
@@ -585,14 +585,14 @@ image, undefined). The op `04 21` loads and saves through them (`ops_vm.c`), and
   surfaces/text/window, `src/x86`, the directory move) and on the final commit twice (`fin1`, `fin2`), headless, scratch
   save folders.
 - **Saves are byte-compatible**: the replays of newgame and town write FLAG0 and FLAG6 during the run (Prologue
-  saves); the files the final build wrote are byte-identical (3072 bytes each, same `cksum`) to those 5b37d43 wrote for the
+  saves); the files the final build wrote are byte-identical (3072 bytes each, same `cksum`) to those 3854da5 wrote for the
   same recorded input, for all four goldens. The install's own `FLAG0..6` (copied; `game/` untouched) were loaded by a bot
-  run recorded on 5b37d43 (seed 41, 8000 frames: the title's Main item reads `flag6`, then OPEN1) and replayed on the
+  run recorded on 3854da5 (seed 41, 8000 frames: the title's Main item reads `flag6`, then OPEN1) and replayed on the
   final build: 33 checkpoints matched (`li.save`, `li.files`, `li.mes` included), all seven files unchanged. By
   construction the format is the old one (the layout asserts did not change) and the original's own load code is
   the format's definition, as before.
 - **Long run**: 300000 frames of the bot (seed 48, deterministic, speed 0, from the town saves): 4800.3 s of game time
-  in 45 s, TOWN.MES opened 7 times, 513 file opens, no trap and no warning; the 5b37d43 binary on the same run opens the
+  in 45 s, TOWN.MES opened 7 times, 513 file opens, no trap and no warning; the 3854da5 binary on the same run opens the
   same 513 files in the same order and writes identical FLAG0 and FLAG6.
 - **ctest**: selftest (now through the serializer), replay_det (5.6 s instead of about 35: the engine is faster
   without the emulated stack), wavcheck, no_game_bytes, asset_only (recordings of an asset run and a whole-exe run

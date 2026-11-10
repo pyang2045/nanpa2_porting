@@ -9,7 +9,7 @@ is ever portrait, `orient[portrait-recover]` requests landscape; `orient[iface-c
 device notification, to show whether the lock wins the race.
 
 ## 2026-11-10 (iPad: landscape lock)
-The Info.plist masks and SDL_HINT_ORIENTATIONS (b31db32) did not stop the iPad rotating to portrait.
+The Info.plist masks and SDL_HINT_ORIENTATIONS (28b2090) did not stop the iPad rotating to portrait.
 Apple (TN3192) deprecates UIRequiresFullScreen from iPadOS 26 and, from 27, ignores it; forum reports
 (developer.apple.com/forums/thread/811216, 801140) say iPadOS 26.x ignores the supported masks while the
 device rotation lock is off. The documented request is UIViewController.prefersInterfaceOrientationLocked
@@ -571,7 +571,7 @@ code change.
   (.text/.rdata/.data) and the import table were already loaded at run time
   (`x86_load_image`, `map_imports`); `hle_is_target` now derives the list from the code range
   and the overrides, so nothing generated is left in an interp build.
-- 5af0016: `src/x86/interp.c` + `interp_core.h`, a hand-written interpreter over the existing
+- 0c7645c: `src/x86/interp.c` + `interp_core.h`, a hand-written interpreter over the existing
   runtime (cpu, x86.h flag helpers, hle_call). It decodes from emulated memory with a decoded
   instruction cache (one entry per code byte), and keeps the recompile's pacing exactly:
   X86_POLL on taken direct backward branches into game code, one count per instruction plus
@@ -583,7 +583,7 @@ code change.
   journalled writes; pc, registers, flags, icount, poll countdown and every byte written by
   either side are compared at the next block, hle_call, x86_poll or return.
 - One override list: `src/hle/overrides.h` (X-macro), included by the interpreter and parsed
-  by recomp.py, also for the probes. 64d794d adds HLE_GAME_OVERRIDE and the oracle tag
+  by recomp.py, also for the probes. 7475a1b adds HLE_GAME_OVERRIDE and the oracle tag
   (X86_ORACLE_TAG, master's NANPA2_DIFF) on both backends.
 - The exe is checked by PE TimeDateStamp 0x39697c6a and SizeOfImage 0xc1000 (launch.c folder
   check and the loader); a missing one is reported as "inside data1.cab on the CD (an
@@ -593,7 +593,7 @@ code change.
 - Lockstep results (headless, scratch saves), no divergence in any run:
   explore seed 1 (60000 frames) 2.50 G instructions compared, seeds 2/3 (80000 frames,
   turbo 4) 2.91 G / 3.08 G, seeds 5/6 (300000 frames, turbo 8, through 40.MES, 41.MES and
-  TOWN.MES with about 21000 frames of town) 11.59 G / 11.04 G, seed 7 after 64d794d (same
+  TOWN.MES with about 21000 frames of town) 11.59 G / 11.04 G, seed 7 after 7475a1b (same
   settings, 72 MES files incl. TOWN.MES) 10.91 G; the save40 route 3.8 G (45.8 G in all)
   (it did not reach 40.MES: with the CD's FLAG6 the title leads to open.mes/name.mes, so
   the route needs a game-made FLAG6); selftest and the ctest `lockstep` run. 410-1815 block
@@ -601,12 +601,12 @@ code change.
   probe, mid-block). A planted bug (8-bit `test` computing flags at 32 bits) was caught at
   the 4th block (0x4020fa).
 - Interpreter alone: explore seed 4 (300000 frames, turbo 8) reached 70 MES files incl.
-  39.MES, and seed 8 after 64d794d 71, no trap; selftest (pump ECX), smoke and wavcheck
+  39.MES, and seed 8 after 7475a1b 71, no trap; selftest (pump ECX), smoke and wavcheck
   pass. Those cover what lockstep
   cannot: the interpreter's own HLE return path, polls, counting and probes.
 - Speed, NANPA2_CPU_MIPS=0, title screen, Release, Intel Mac: 150 M interpreted
   instructions per second outside HLE calls (113 before always_inline on the hot helpers,
-  64d794d), 6x the 25 MIPS pacing; x86_icount rate 569 MIPS (HLE charges included); the
+  7475a1b), 6x the 25 MIPS pacing; x86_icount rate 569 MIPS (HLE charges included); the
   recompile 1617 MIPS by the same icount measure.
 - ctest `no_game_bytes` (interp builds, tests/no_game_bytes.py): every 64-byte run of the
   exe's sections with at least 12 distinct byte values is looked for in the binary and every
@@ -616,17 +616,17 @@ code change.
   ramps (SDL3 in the .app matched a 16-bit ramp at .data+0x76c46). Left out: .rdata 33004,
   .data 5061, .text 0 of 171320 runs. Result: build/nanpa2 and build/同級生２.app (7 files),
   0 matches.
-- 65e8d9c: status_init set stage "running" before phase, so the writer thread could write
+- d36f062: status_init set stage "running" before phase, so the writer thread could write
   the early file (no "game" section) with stage running; smoke.py read one under load and
   failed with KeyError 'game' (2 of 6 smoke runs failed while four lockstep jobs ran; the
   second showed the KeyError, the first was not captured).
-- Build scripts (af109bf): no --backend means interp, no exe or capstone checks, and the game
+- Build scripts (dd12bf9): no --backend means interp, no exe or capstone checks, and the game
   folder only for --test; the "never share" notes apply to recomp only. README Build
   describes both backends (CLAUDE.md and bundle_macos.sh: see the merge below).
 
 ## 2026-11-08 (merge: interpreter backend with reimplementation stage 1)
 
-- Merge of master (b08febf) into the interpreter branch. The game overrides 0x4037fc,
+- Merge of master (e54bb89) into the interpreter branch. The game overrides 0x4037fc,
   0x4039f7 and 0x406455 are `HLE_GAME_OVERRIDE` lines in `src/hle/overrides.h`; recomp.py
   reads them with `read_hooks('GAME_OVERRIDE')` (its dict is gone), the interpreter includes
   the same file. `game_call` stays first after the thunks in `hle_call`. x86.h rd*/wr* carry
@@ -646,7 +646,7 @@ code change.
 
 ## 2026-11-08 (reimplementation stage 2: VM helpers, jump overrides, 12 opcode handlers)
 
-- ca615e6: the VM helpers in C (`src/game/vm.c`): block skip 0x4061d4, argument parser
+- b2113a7: the VM helpers in C (`src/game/vm.c`): block skip 0x4061d4, argument parser
   0x40741b with 0x4074a3, string argument 0x406dc4, VM init 0x406395, menu item 0x4068e1.
   Opcode handlers in C (`src/game/ops.c`): 0a 0x406491, 0b 0x4064b5, 0c 0x4064d9, 0d
   0x4064f8, 0e 0x406557, 12 0x40663e, 18 0x4069be, ext 11 0x406638, 12 0x40663b, 20
@@ -669,13 +669,13 @@ code change.
   (`diff_kept`, diff.h): the same sabotage gives 3745 mismatches, and a sabotaged string
   case of the argument parser gives 32. Stage 1's units write no globals except the flag
   write 0x406455, whose only callers (ops 0a/0b) are now in C and compared with it.
-- 5d177c6: merge of master b4dcf20 (interpreter backend). The overrides are lines in
+- 0c52664: merge of master 80532ee (interpreter backend). The overrides are lines in
   `src/hle/overrides.h`: `HLE_GAME_OVERRIDE` for the helpers, a new `HLE_GAME_JUMP` kind for
   the handlers (recomp.py `GAME_JUMP_OVERRIDES`; interpreter `OVR_JUMP`, with the oracle
   stop checked at each fetch while `x86_stop_esp` is set). Lockstep: `hle_jump` is an HLE
   check point, an oracle stop a return point. The C hit test fires probe 0x4071bb itself,
   so the exploration bot still gets the hotspot table.
-- fa0adfb: docs (reimpl.md, re-notes.md); reimpl_status.py counts the handlers.
+- 8e2b948: docs (reimpl.md, re-notes.md); reimpl_status.py counts the handlers.
 - Note: the entry checks for jump units (no calls, fallthrough or outside direct jumps)
   are in recomp.py's check_oracles, which the default interp build does not run: build
   the recomp backend once whenever an HLE_GAME_JUMP or HLE_GAME_OVERRIDE line is added.
@@ -705,21 +705,21 @@ code change.
 
 ## 2026-11-08 (reimplementation stage 3: the remaining opcode handlers, call exits, pacing)
 
-- 8f20643: 16 handlers around native subsystem routines (`src/game/ops_sys.c`): 17
+- 5aee585: 16 handlers around native subsystem routines (`src/game/ops_sys.c`): 17
   0x406b05, 19 0x407204, 1a 0x407096, ext 14 0x406842, 15 0x406916, 16 0x406f06, 17
   0x406b76, 18 0x406bcb, 19 0x406c20, 1a 0x406c85, 1b 0x406cea, 1c 0x406d8b, 1d 0x406e11,
   24 0x4073a5, 25 0x4073cd, 26 0x4073ee. The routine they call (blits, loads, slots, music,
   the map dispatcher 0x403a70) stays native. A `native` predicate leaves the timer-bound or
   message-pumping sub-ops to the original handler: 19 sub-op 4, 1a sub-op 4, 04 16 mode 3,
   04 26 sub-ops 5/7/12, and any sub-op given as an expression.
-- 7114ba0: call exits (`HLE_GAME_CALL_EXIT`). A handler that runs a block, a nested VM, a
+- 89fafe7: call exits (`HLE_GAME_CALL_EXIT`). A handler that runs a block, a nested VM, a
   wait or the pump pushes the return address and returns the callee; the code after the
   call is its own jump unit (`RESUME`, `stack_words`). The oracle also stops at any jump
   unit at the stop ESP and at a call exit's callee with ra on top (`x86_stop_at`); outputs
   are dead only below the exit ESP. Units: 0f 0x40659e/0x4065ae/0x4065ed, 11
   0x4065f6/0x4065fb, ext 10 0x40660c/0x40661e, 13 0x406658/0x40666b, 14 0x406a9a/0x406aa7,
   16 0x406aad.
-- 49e67a2: ext 13 0x406671 (menu loop, entry plus 22 pieces 0x4066b8-0x40683b), 15
+- 66bea8f: ext 13 0x406671 (menu loop, entry plus 22 pieces 0x4066b8-0x40683b), 15
   0x4069ce/0x4069f7 with the formatter 0x4069fd, ext 1e 0x406f7c, ext 1f
   0x406fcd/0x40704a, ext 21 0x4070d5. The harness needed three fixes for them:
   - HLE fread (0x412deb), the GP4 decompressor (0x4075f0) and sprintf wrote game memory
@@ -732,17 +732,17 @@ code change.
     (0x40705e) after a called file returns through 0f's `ret`. Poisoning all of ECX made
     the original copy run off memory (fault at 0x3fffffe). `diff_live_bits` keeps the
     upper half out of the poison and compares it.
-- 1baf7dc: pacing. The evaluator charges per token type as the native loop runs it (6 for
+- c0ce613: pacing. The evaluator charges per token type as the native loop runs it (6 for
   03, 14 a digit, 23 a register, 27 most operators, not 22 each), the block skip 4 a byte
   before the 01 and 6 inside. Over the runs below the C units' charges total 0.999-1.002
   of the original's (the argument parser was 135 against 99 per call).
-- 96708e9: docs/reimpl.md "Stage 3", re-notes.md opcode rows.
+- 5764203: docs/reimpl.md "Stage 3", re-notes.md opcode rows.
 - Not done: ext 20 0x4070bc (never reached, stays disabled); the VM loop 0x4060d4/0x4060f9
   (every iteration calls the native pump 0x401bf0 and animation step 0x403624, and text
   goes to 0x401900, so it is left for the text/anim stage). Menu pieces for inputs 2-5
   (0x40676f-0x40683b handled/waited) were never entered: the bot presses no arrow keys;
   they are the same code as inputs 0/1 with their own addresses.
-- Results on 1baf7dc (the code as committed), explore runs at NANPA2_TURBO=8 with the online diff and
+- Results on c0ce613 (the code as committed), explore runs at NANPA2_TURBO=8 with the online diff and
   poison; no trap, watchdog warning, stall or mismatch in any:
   - interp seed 31, 300000 frames: 65 MES, ends at S63.MES;
   - interp seed 33, 300000: 64 MES, OPEN1 at 284713;
@@ -761,13 +761,13 @@ code change.
 
 ## 2026-11-08 (reimplementation stage 4: the VM loop, text output, animation)
 
-- 5731507: the harness changes the VM loop needed. recomp.py sends a call to a jump unit
+- 5b2ef2f: the harness changes the VM loop needed. recomp.py sends a call to a jump unit
   and code that falls into one (0x4060d4 into 0x4060f9) through dispatch, and an oracle
   no longer stops at its own entry when that is an exit. `x86_stop_at` never stops at
   the first check. `x86_is_oracle_pc` accepts only a tagged game code address (the HLE
   COM thunk 0x71000244 has the tag bit too, and was taken for an original). A call unit's
   `native` predicate is honoured.
-- dce1208: `src/game/loop.c`, the VM loop as pieces split at its calls: entry 0x4060d4,
+- ab3ff7f: `src/game/loop.c`, the VM loop as pieces split at its calls: entry 0x4060d4,
   loop head 0x4060f9, 0x4060fe after the pump, 0x406124/0x406134 after the button tests,
   the fetch 0x40616e (probe kept), blocks 0x4061c2/0x4061cd/0x4061d3, text
   0x406315/0x406383, input test 0x4074d5/0x4074db, frame wait 0x4075c6/0x4075d7, click
@@ -779,11 +779,11 @@ code change.
   character with no delay ends its piece at the next piece (0x406383) with EDX live. A
   20000-frame run gave 4,421 mismatches in 0x406124/0x406134. A quit inside 0x4074db must
   set the flags before it unwinds.
-- 3556756: the fetch's dispatch tables held as 32-bit addresses were the exe's bytes at
+- 06bcf15: the fetch's dispatch tables held as 32-bit addresses were the exe's bytes at
   0x40620b/0x406262 (ctest no_game_bytes). They are now 16-bit offsets. diffcapture now
   checks op 0c 0x4064d9. 0x4037fc is no longer compared as a unit: the C handlers call it
   directly, and the bot's evaluation at the fetch probe now runs inside a compare.
-- ff7009c: docs/reimpl.md "Stage 4", re-notes.md (VM loop, text window, animation slots).
+- 2e969e7: docs/reimpl.md "Stage 4", re-notes.md (VM loop, text window, animation slots).
 - Under the diff the fetch probe fires twice per fetch (oracle, then C). This is harmless
   for the bot, whose state updates are idempotent.
 - Results, explore runs with the online diff and poison. None had a trap, watchdog warning
@@ -791,20 +791,20 @@ code change.
 
   | Build, commit | Seed (start) | Turbo | Frames | Reached | Mismatches |
   |---|---|---|---|---|---|
-  | interp dce1208 | 31 (new game) | 8 | 300000 | Prologue to S37 (40 MES) | 0 |
-  | interp dce1208 | 33 (new game) | 8 | 300000 | Prologue to S38 (42 MES) | 0 |
-  | interp dce1208 | 42 (seed 32's saves) | 2 | 300000 | Prologue, OPEN1 at 277010, 40.MES at 286513 (66 MES) | 0 |
-  | interp dce1208 | 43 (seed 32's saves) | 2 | 300000 | main game: 40.MES at 11355, 41, TOWN at 95486, ends at 35.MES (16 MES) | 0 |
+  | interp ab3ff7f | 31 (new game) | 8 | 300000 | Prologue to S37 (40 MES) | 0 |
+  | interp ab3ff7f | 33 (new game) | 8 | 300000 | Prologue to S38 (42 MES) | 0 |
+  | interp ab3ff7f | 42 (seed 32's saves) | 2 | 300000 | Prologue, OPEN1 at 277010, 40.MES at 286513 (66 MES) | 0 |
+  | interp ab3ff7f | 43 (seed 32's saves) | 2 | 300000 | main game: 40.MES at 11355, 41, TOWN at 95486, ends at 35.MES (16 MES) | 0 |
 
   Shorter runs:
 
   | Build, commit | Seed (start) | Turbo | Frames | Reached | Mismatches |
   |---|---|---|---|---|---|
-  | interp dce1208 | 42 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
-  | interp dce1208 | 43 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
-  | recomp dce1208 | 44 (seed 32's saves) | 8 | 150000 | 17 MES, ends at OPEN1 | 0 |
-  | recomp dce1208 | 45 (seed 32's saves) | 2 | 150000 | main game: 40.MES at 76691, TOWN at 121456, ends at 42.MES | 0 |
-  | interp 3556756 | 34 (new game) | 8 | 100000 | Prologue to S7 | 0 |
+  | interp ab3ff7f | 42 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
+  | interp ab3ff7f | 43 (seed 32's saves) | 8 | 300000 | OPEN1 only, two stall reports | 0 |
+  | recomp ab3ff7f | 44 (seed 32's saves) | 8 | 150000 | 17 MES, ends at OPEN1 | 0 |
+  | recomp ab3ff7f | 45 (seed 32's saves) | 2 | 150000 | main game: 40.MES at 76691, TOWN at 121456, ends at 42.MES | 0 |
+  | interp 06bcf15 | 34 (new game) | 8 | 100000 | Prologue to S7 | 0 |
 
   At turbo 8 with the diff, seeds 42 and 43 never left OPEN1. Stage 3's seed 43 did, so
   the main-game criterion is not met at turbo 8. The likely cause is the bot, not the C:
@@ -840,7 +840,7 @@ code change.
 - Lockstep, recomp, seed 9, 120000 frames: 167.6 M instructions compared, 0 dropped, no
   divergence. Stage 3 had 1.62 G; the loop is C now.
 - ctest: 9 of 9 on the interp build (no_game_bytes, diffcapture) and on the recomp build
-  (lockstep), on 3556756.
+  (lockstep), on 06bcf15.
 - reimpl_status: 12,902 of 25,597 bytes (50.4%, was 40.6%), 66 of 142 functions; game
   logic 9,106 bytes (35.6%, was 25.8%): 17 functions and 88 opcode handlers and pieces.
   Modules vm, anim, text and expr are at 100%. This is an upper bound, for two reasons:
@@ -857,10 +857,10 @@ code change.
 
 ## 2026-11-08 (reimplementation stage 5A: the town map)
 
-- 94b8a1c: `tools/liveness.py` `LIVENESS_ROOTS=hex,...` (roots for code whose caller is C now, so
+- ecc9c11: `tools/liveness.py` `LIVENESS_ROOTS=hex,...` (roots for code whose caller is C now, so
   `--after` still finds the call sites inside native code); `tools/reimpl_status.py` reads
   `HLE_GAME_DEAD` lines of overrides.h as barriers of the live walk.
-- 4e29bbf: the map module in C: `src/game/map.c`, `map_draw.c`, `map_move.c`, `map_path.c`,
+- 67086a2: the map module in C: `src/game/map.c`, `map_draw.c`, `map_move.c`, `map_path.c`,
   `map_sprite.c`.
   - Sub-ops 0, 1, 2, 3, 4, 6, 8, 9, 10, 11, 13-16, 30, 32 (0x403a87, 0x403ae9, 0x403b28, 0x403bd2,
     0x403d45, 0x4042e7, 0x404f8c, 0x40500e, 0x40502c, 0x405113, 0x4053a6, 0x4053de, 0x405415,
@@ -882,13 +882,13 @@ code change.
     1,505 bytes, plus 0x403a70 and 0x404410 which the fallback still runs. 0x40431b runs the
     original only when its sprite's step is kind 6 (`game_native_sprite_step` looks ahead in the
     script without writing).
-- 75ac4e9, 7a0009c: `NANPA2_FUZZ=N` (`src/game/map_fuzz.c`, driver in game.c): each of the first
+- a70d1b0, bf59a48: `NANPA2_FUZZ=N` (`src/game/map_fuzz.c`, driver in game.c): each of the first
   `NANPA2_FUZZ_CALLS` (30) compared calls of a map unit is compared N more times from random
   states (sprites, walls, view limits, walk grid, a 04 26 op's arguments written over the script,
   a cell with 0-3 sprite tiles), with the data memory, the locked screen, the stack and the CPU put
   back after each. `NANPA2_FUZZ_DUMP=1` prints the state of a mismatch, `NANPA2_FUZZ_TRACE=1`
   each state's seed.
-- a518ded, the bug the fuzzing found: the native right mover's edge test adds the sprite's
+- 4485d46, the bug the fuzzing found: the native right mover's edge test adds the sprite's
   height, not its width, to x before comparing with the map width (0x404cb8, and 0x4048d7 in the
   slide to the right). 55 mismatches in 600 states of 0x404c9f, a few more in 0x404731, 0x404937
   and the units calling the movers. No explore or route run puts a sprite whose width differs from
@@ -906,13 +906,13 @@ code change.
 
   | Build, commit | Run | Frames | Reached | Mismatches |
   |---|---|---|---|---|
-  | interp a518ded | route, turbo 2 | 14,000 | town, walks, right clicks, 33.MES | 0 |
-  | recomp a518ded | route, lockstep | 14,000 | the same | 0 (188.8 M instructions compared, no divergence) |
-  | interp a518ded | seed 64, F43 saves, turbo 2 | 300,000 | 16 MES, town at 49,773 | 0 |
-  | interp a518ded | seed 62, F43 saves, turbo 2 | 300,000 | 29 MES, town at 110,748 | 0 |
-  | interp a518ded | seed 63, F43 saves, turbo 2 | 300,000 | 25 MES, town at 28,321 | 0 |
-  | recomp a518ded | seed 64, F43 saves, turbo 2 | 300,000 | 18 MES, town at 36,252 | 0 |
-  | interp 7a0009c | route + fuzz, 6,000 states of each map unit | 14,000 | | 0 |
+  | interp 4485d46 | route, turbo 2 | 14,000 | town, walks, right clicks, 33.MES | 0 |
+  | recomp 4485d46 | route, lockstep | 14,000 | the same | 0 (188.8 M instructions compared, no divergence) |
+  | interp 4485d46 | seed 64, F43 saves, turbo 2 | 300,000 | 16 MES, town at 49,773 | 0 |
+  | interp 4485d46 | seed 62, F43 saves, turbo 2 | 300,000 | 29 MES, town at 110,748 | 0 |
+  | interp 4485d46 | seed 63, F43 saves, turbo 2 | 300,000 | 25 MES, town at 28,321 | 0 |
+  | recomp 4485d46 | seed 64, F43 saves, turbo 2 | 300,000 | 18 MES, town at 36,252 | 0 |
+  | interp bf59a48 | route + fuzz, 6,000 states of each map unit | 14,000 | | 0 |
 
   No trap or watchdog warning (the fuzz runs print stall warnings while the timer is held off).
   Compared calls of one run (seed 64, interp): fill grid 21,409, overlay sprites 21,409, redraw
@@ -931,15 +931,15 @@ code change.
   `quit` 10 s of game time after the town loads exits 0 with no trap on the interp build (quit at
   +10000, +10300 and +10650 ms), the recomp build, and the interp build under the diff (185 map
   frames compared, 0 mismatches).
-- ed79985: `NANPA2_DIFF_TRACE` is read once.
-- Sabotage (on 4e29bbf): `+ 2` for `+ 1` in the sprite tile number of 0x403bd2 gave 1,780
+- 04c98f9: `NANPA2_DIFF_TRACE` is read once.
+- Sabotage (on 67086a2): `+ 2` for `+ 1` in the sprite tile number of 0x403bd2 gave 1,780
   mismatches in 1,780 calls (and 1 in 0x4073ee); reverted. The fuzzing is the other sabotage
   test: it caught the right-mover quirk.
 - Pacing: the C units' charges total 1.0000-1.0007 of the original's per run (map units 1.0000
   over all four, 7.1e8 native instructions in seed 64); per unit: fill grid, redraw, cell draw,
   clear bit 3, area trigger and sprite step agree to 0.1; movers within 1-3 of 100-230, plan walk
   within 0.05%.
-- ctest 9 of 9 (smoke skipped: screen not visible) on the interp and the recomp build at 7a0009c
+- ctest 9 of 9 (smoke skipped: screen not visible) on the interp and the recomp build at bf59a48
   (no_game_bytes, diffcapture, diffreplay, lockstep).
 - reimpl_status: 21,145 of 25,597 bytes (82.6%, was 50.4%), 121 of 142 functions; game logic 17,349
   bytes (67.8%, was 35.6%): 31 functions and 88 opcode handlers and pieces. Map: 56 of 63 functions,
@@ -957,25 +957,25 @@ code change.
 
 Part of stage 5B by this branch (file, input and startup are a separate entry).
 
-- e1fc722, 597b4e4: the measurement. `NANPA2_NATIVE_REPORT=1` (interpreter) counts the
+- 9b6c91e, 00c72ab: the measurement. `NANPA2_NATIVE_REPORT=1` (interpreter) counts the
   instructions run in 0x401000-0x4077ac outside a differential oracle and prints them by
   function at exit; the status file has `native_game_insns`. `tools/reimpl_status.py` now counts
   as needed what the C calls through `game_ncall`/`ncall`/`blit`/`colour_rect` and the original
   bodies behind `native` predicates. Stage 4's 50.4% is 36.4% on the same code (19 functions
   that were counted as done still ran, plus the fallbacks).
-- 77ec0c5: the spin mechanism. The compare holds the timer off, so a C wait loop would hang
+- 6c85f82: the spin mechanism. The compare holds the timer off, so a C wait loop would hang
   under NANPA2_DIFF. A wait loop is a jump unit returning its own address while it waits
   (`SPIN`, `poll_self`); `game_jump` polls after the compare and the poison. 0x403510 (slot
   control) is a jump unit entered by op 1a's call exit 0x4070b6; sub-op 4 goes on in 0x4035b5.
-- d4a18a5: palette tables, upload, fade start (`src/game/screen.c`), op 04 16 mode 3 waits in
+- 2bd08e1: palette tables, upload, fade start (`src/game/screen.c`), op 04 16 mode 3 waits in
   the piece 0x406f41. Both fallbacks (1a sub-op 4, 04 16 3) are gone.
-- b3bb628, 7aa41a9: lock 0x401190, unlock 0x4012b0, cursor restore 0x4011f0 (units), cursor
+- 5a52da3, 8215dfb: lock 0x401190, unlock 0x4012b0, cursor restore 0x4011f0 (units), cursor
   draw 0x4012e0, show/hide/position 0x401c40/60/80, blits 0x401430, 0x4014f0, 0x401670, fill
   0x4017b0, XOR 0x401870, picture load 0x406e20.
-- d7e64a7, 252c690: fixes the long runs found: 0x401e10 must put its result in EAX (op 19 2
+- 8697117, de3cd24: fixes the long runs found: 0x401e10 must put its result in EAX (op 19 2
   stores it in S), the cursor position argument is at ESP + 4 (the write-back of y + 40 is
   compared), and the screen lock leaves ECX = 5 * pitch when the screen is shifted.
-- Results (interp NANPA2_DIFF=1 NANPA2_DIFF_POISON=1, build 252c690):
+- Results (interp NANPA2_DIFF=1 NANPA2_DIFF_POISON=1, build de3cd24):
 
   | Run | Turbo | Frames | Reached | Mismatches / traps |
   |---|---|---|---|---|
@@ -991,7 +991,7 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   native ones to the digits for lock/unlock/cursor restore, 0.1% for the rest.
   Units never run: swap 0x401670 (op 04 1a) and 04 18 ran 154 times; swap never; click path and
   ext 20 as before.
-- Native instructions, plain run seed 43 (saves32), 200000 frames, turbo 8, build 252c690: 50.45 M
+- Native instructions, plain run seed 43 (saves32), 200000 frames, turbo 8, build de3cd24: 50.45 M
   of 79.6 G charged (0.06%), 49.9 M of them the cursor redraw of the window procedure's
   WM_PAINT (0x402570 -> 0x4012e0, startup/input), then the window procedure 0.5 M, file load
   0.03 M, startup 0.001 M. Before this branch: 97 M in 5000 frames, 70% in the two spin loops.
@@ -1001,18 +1001,18 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 
 ## 2026-11-08 (reimplementation stage 5B, file + input + start-up part)
 
-- f9e5923: `src/game/file.c`: 0x401000 open, 0x401050 load, 0x401160 save as C and as units
+- 8ecc489: `src/game/file.c`: 0x401000 open, 0x401050 load, 0x401160 save as C and as units
   (CALL_SYS, scratch EAX ECX EDX). The C runtime replacement is called by address through
   `game_ncall`; the stack locals, the ECX/EDX effects (ECX = buf after a plain read, the path buffer
   after a retry) and the charges follow the native code. VM entry 102 against 103 instructions,
   as before. VM entry, ops 04 1c/1d/1e/1f/21 and the picture load call the C directly.
-- 466532a: `src/game/startup.c`: WinMain 0x402090 (jump unit, call exit 0x4021a3 around the
+- f9e7bf9: `src/game/startup.c`: WinMain 0x402090 (jump unit, call exit 0x4021a3 around the
   script VM, then the shutdown), CD search 0x402590, display/DirectDraw/fonts/timer init 0x402620,
   shutdown 0x402a20, window procedure 0x4021c0 (called unit, from the HLE pump) with WM_PAINT
   0x402570. `NANPA2_HLETRACE=1` logs the HLE calls. reimpl_status: 0x401fd0 (the logo's window
   procedure, installed only by the HLE logo player) is dead.
-- 895c230: merge of the screen part (the other agent's branch); the window procedure calls the C
-  cursor routines. 7f7610f: WaitForVerticalBlank (ddraw.c) does not run the timer while the
+- fed0e55: merge of the screen part (the other agent's branch); the window procedure calls the C
+  cursor routines. a976558: WaitForVerticalBlank (ddraw.c) does not run the timer while the
   harness holds it off.
 - Found by the long runs: the first 300k-frame runs gave 12 mismatches `[0x446292] want N got
   N-1` in the window procedure: its repaint waits for the vertical blank, which runs the host
@@ -1036,7 +1036,7 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   their callers: 04 1c, 1d, 1e, 1f, 21 and the VM entry), WinMain's two pieces (above).
 - ctest 9/9 on interp and on recomp builds.
 - Results (interp builds poison + diff, headless; recomp one diff run, one lockstep run), all on
-  7f7610f: 0 mismatches, no trap, no watchdog warning, exit 0:
+  a976558: 0 mismatches, no trap, no watchdog warning, exit 0:
 
   | Build | Seed (start) | Turbo | Frames | Reached |
   |---|---|---|---|---|
@@ -1059,14 +1059,14 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 
 ## 2026-11-09 (stage 5B file + input + start-up, on top of stage 5A)
 
-- 60e7123: merge of master 6d90a58 (stage 5A, the town map). Conflicts only in includes, CMake
+- 3d6b2fb: merge of master d688cb1 (stage 5A, the town map). Conflicts only in includes, CMake
   sources, game.c (`uncompared()` beside `fuzz_unit`, both apply) and the docs. The logo window
   procedure 0x401fd0 moved from reimpl_status `DEAD_ENTRIES` to `HLE_GAME_DEAD` in overrides.h.
   No units.c rows needed changing: the 5B rows use the shared macros, which carry `eax_live`.
 - reimpl_status on the merge: 22388 of 25597 bytes (87.5%), 126 of 142 functions; reimplemented
   game logic 18592 bytes (72.6%); startup and file 100%, input 93.3% (0x40609c left).
 - ctest 9/9 on interp and recomp builds (smoke skipped, screen not visible).
-- Runs on 60e7123 (interp: diff + poison + native report; recomp: one diff run, one lockstep
+- Runs on 3d6b2fb (interp: diff + poison + native report; recomp: one diff run, one lockstep
   run), all 0 mismatches, no trap, no watchdog warning, exit 0:
 
   | Build | Seed (start) | Turbo | Frames | Reached | Native game insns |
@@ -1096,10 +1096,10 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 
 ## 2026-11-09 (reimplementation stage 6: the last native game code)
 
-- 146ef80: the dissolve wipe 0x401a50 (op 19 sub-op 4) as C pieces (`src/game/wipe.c`, written by a
+- 69cc8ac: the dissolve wipe 0x401a50 (op 19 sub-op 4) as C pieces (`src/game/wipe.c`, written by a
   helper): set-up and passes, the rest after the pump (return 0x401b90), the frame at the native
   stack addresses, 166,485 native instructions charged exactly, op 19's native fallback removed.
-- d5eb14f, 169d988, caf1e5a, 8fe7cce, bbe9b18: the 04 26 pump chain (`src/game/map_pump.c`): the
+- d3901df, ab5de77, 0d580f0, 7522480, c7a8298: the 04 26 pump chain (`src/game/map_pump.c`): the
   handler 0x4073ee, the pump 0x40609c/0x4060a2 and every pump site's return address (0x40448b,
   0x4044a9, 0x4044b7, 0x4045eb, 0x4051e3, 0x40520f, 0x405233, 0x405273, 0x40539f, 0x40559d) are jump
   units joined by call exits; the handler's tail is 0x407410. Replaces 0x403a70, 0x403e30, 0x4042f7,
@@ -1123,7 +1123,7 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
   0x40431b, 0x4042f7, 0x403d45, 0x40500e, 0x4073ee, 0x403a70, 0x405597, 0x406f7c 81, 0x407204, 0x40638d);
   after **0** in 0 functions, also for seed 42 (plain, 300k frames, reaches TOWN at frame 26678 and
   stays in it). reimpl_status: 25,597 of 25,597 bytes, 142 of 142 functions (was 22,388, 126).
-- Verification on bbe9b18 (diff + poison, headless; units compared, mismatches, charge = C insns over
+- Verification on c7a8298 (diff + poison, headless; units compared, mismatches, charge = C insns over
   native over all compared units; interp unless noted):
 
   | Run | Frames | Reached | Mismatches | Charge |
@@ -1138,13 +1138,13 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 
   The fuzz (`NANPA2_FUZZ`) compared each pump site's piece 2900 times, the handler 3000 (op 7 included)
   and ext 20 3000 states, all equal. The click handler path under NANPA2_CLICKTEST (seed 31, 20000
-  frames): 159 handler runs, 0 mismatches. Earlier runs on d5eb14f/169d988 (before the tail piece
+  frames): 159 handler runs, 0 mismatches. Earlier runs on d3901df/ab5de77 (before the tail piece
   moved): seeds 42 and 43 reached the town, 0 mismatches after the fix. Watchdog warnings (main thread
   stalled over 3 s in one compare: the wipe's first piece, a fuzz state) occurred in the seed 42/43 runs
   (1 and 3) and the fuzz routes (29), never a trap or a mismatch; none in the others.
 - Sabotage: the event check's mouse test off by one (`+ 0x61` for `+ 0x60` in `game_ev_pumped_b`,
   0x405273): the route with the fuzz reported `diff MISMATCH 00405273 map_event_pumped_b` (reverted).
-  The wipe: see 146ef80's helper (a source column off by one at pixel 100: 5 mismatches in
+  The wipe: see 69cc8ac's helper (a source column off by one at pixel 100: 5 mismatches in
   `wipe_pumped`).
 - ctest 10/10 on the interp and the recomp builds (smoke skipped, screen not visible), including
   `no_game_bytes` and the new `start_trace`.
@@ -1156,7 +1156,7 @@ Part of stage 5B by this branch (file, input and startup are a separate entry).
 
 ## 2026-11-09 (nanpa2.dat: running without nanpa2.exe)
 
-- 9355a78: after stage 6 no native game instruction runs, but the interp build still loaded the
+- 1184d87: after stage 6 no native game instruction runs, but the interp build still loaded the
   whole nanpa2.exe because the C reads the exe's initialized data at its native addresses. A
   local asset `nanpa2.dat` now holds that data and no code: `src/x86/asset.c` (format and writer
   and loader; the source holds two address ranges, 0x400000-0x401000 and 0x41b000-0x4ab000, no
@@ -1209,7 +1209,7 @@ free-standing engine in stages (R1 state into structs, R2 ordinary calls, R3 rea
 R4 direct platform calls); the byte-for-byte differential harness stops applying, so replay is
 the check.
 
-- 9bb18d5 (R0): `NANPA2_DETERMINISTIC=1`, `--record FILE`, `--replay FILE` (src/hle/replay.c).
+- 922ccb1 (R0): `NANPA2_DETERMINISTIC=1`, `--record FILE`, `--replay FILE` (src/hle/replay.c).
   The game clock is `x86_icount / 25000` ms (25 MIPS, turbo and the throttle cannot change it),
   scripts and the bot run at every pump, outside messages are stamped (tick, pump of the tick).
   Checkpoints every N ticks hash the screen, palette, the 0xc00 save image, MES files and opens,
@@ -1218,13 +1218,13 @@ the check.
   tools/replay_diff.py compares two recordings; ctest `replay_det` (records at test time twice,
   replays, two tampered recordings must diverge). Two recordings of the same input were identical
   files at once, at 25 MIPS and unthrottled.
-- 62f125d: the bot's expression evaluation (x86_call 0x4037fc) advanced `x86_icount`, 77
+- 84f550a: the bot's expression evaluation (x86_call 0x4037fc) advanced `x86_icount`, 77
   instructions a menu: a replay (no bot) drifted. Found by replaying a recorded menu run.
 - Golden set (pre-refactor build, scratchpad, not committed): newgame (seed 31, 270000 frames,
   271 checkpoints, Prologue to OPEN1), town (saves32, seed 43, 300000 frames, 301, TOWN at frame
   263535), saveload (seed 41, a title load to OPEN1, 33), menu (seed 44, 40000 frames, 161).
   Each replays identically on the pre-refactor build (twice) and with `--exe`.
-- bef599a (R1): `x86_alias` (src/x86/x86.c) backs a range of the data area with a C
+- 7622f22 (R1): `x86_alias` (src/x86/x86.c) backs a range of the data area with a C
   object, so converted and unconverted code, the HLE layer and the script VM see the same bytes;
   src/game/state.h structs `save_image` (0xc00, the FLAG file layout, static-asserted offsets),
   `vm_rt`, `screen_state`, `anim_state`; the 0x4452xx text window, VM flags, registers, flags,
@@ -1241,7 +1241,7 @@ the check.
 
 ## 2026-11-09 (refactor R1 finished: all game state in one C object)
 
-Details: docs/refactor.md "R1", re-notes.md "The data area as one object". ae7b33c: the one object, the data check, replay_det with it. 2852980: palettes, cursor bitmap, map variables, history by field; docs.
+Details: docs/refactor.md "R1", re-notes.md "The data area as one object". 1d21595: the one object, the data check, replay_det with it. a042fe1: palettes, cursor bitmap, map variables, history by field; docs.
 
 - `struct game_state G` is now the whole mutable data area 0x431000-0x4c0000 in native layout,
   one alias (`x86_alias`, fast path in `x86_ptr`): the script image, segment 1 (map), the picture
@@ -1263,20 +1263,20 @@ Details: docs/refactor.md "R1", re-notes.md "The data area as one object". ae7b3
 
 ## 2026-11-09 (refactor R2: ordinary C calls instead of register and stack conventions)
 
-Design and details: docs/refactor.md "R2". Commits (oldest first): 3a21c09 (frozen differential
-machinery, recomp backend and lockstep removed), 775b2fe (`src/game/ctl.h`: COST/POLL, pump, quit,
-catch, `hle_invoke`), c69faf3 (graphics leaves typed, direct wipe and fade wait), 343e003 (the script VM
-in direct style: loop, blocks, text, waits, menus, control ops), f77e95d (town map: typed views, direct
-pump chain), 7cc8086 + 1253106 (expressions, files, animation slots, start-up as typed C, `game_main`),
-merges 14548f9, 3c2e74e, cd7056b, 2e9567e (the subsystem ops direct; interpreter, unit table, piece
-dispatch removed), 7a0501b (docs, build scripts, tests).
+Design and details: docs/refactor.md "R2". Commits (oldest first): e069183 (frozen differential
+machinery, recomp backend and lockstep removed), 233f494 (`src/game/ctl.h`: COST/POLL, pump, quit,
+catch, `hle_invoke`), c2a687b (graphics leaves typed, direct wipe and fade wait), 2f9e596 (the script VM
+in direct style: loop, blocks, text, waits, menus, control ops), 5ec4899 (town map: typed views, direct
+pump chain), 309a103 + a5ce196 (expressions, files, animation slots, start-up as typed C, `game_main`),
+merges 2327622, c20794c, 3da6fc5, 91f812e (the subsystem ops direct; interpreter, unit table, piece
+dispatch removed), f88475c (docs, build scripts, tests).
 
 - Control flow: a wait is a C loop that calls `ctl_pump()`; WM_QUIT, the end of the script and opcodes that
   end the VM unwind with `ctl_quit()` (longjmp to the one `ctl_catch`); a script restart longjmps to the top
   of the VM loop. Chosen over a state machine (rewrites the pieces into states) and a coroutine or thread
   (platform-specific, and SDL wants events on the main thread).
 - Pacing unchanged: every `X86_COUNT`/`X86_POLL` kept (as `COST`/`POLL`) in the same order relative to
-  the pump and the HLE calls. All four golden replays (re-recorded on d79f8e0 into `golden_r2`) match every
+  the pump and the HLE calls. All four golden replays (re-recorded on a3b8f40 into `golden_r2`) match every
   `li.*` key plus `raw.icount` and `raw.data` after every chunk; `raw.cpu/stack/heap` change by design.
 - The native-address dispatch is gone: `game_units`, `hle_jump`, `overrides.h`, the x86 interpreter and
   decoder. Nothing executes native game code. Removed with them: `NANPA2_DIFF`, fuzz, lockstep, the recomp
@@ -1284,17 +1284,17 @@ dispatch removed), 7a0501b (docs, build scripts, tests).
 - Still on the CPU model: `hle_invoke` and the emulated stack frames for the HLE thunks (R4), the aliased
   address space, `top_esp` (dead, kept for `raw.data`), the instruction counter (R3).
 - Tools: `NANPA2_REPLAY_CHECK` takes key prefixes; `NANPA2_HLETRACE=2` prints the instruction count per HLE
-  call (equal traces <=> equal pacing and platform traffic; saveload and menu identical to d79f8e0 once
+  call (equal traces <=> equal pacing and platform traffic; saveload and menu identical to a3b8f40 once
   the calls that became direct C and the stack garbage of parameterless thunks are dropped).
 - Found on the way: the exploration-free replay is the only check that catches a charge off by one
   (a missing 3-instruction native prologue in `game_main` showed up at checkpoint 0 as raw.icount -3).
 
 ## 2026-11-09 (refactor R3: real-time pacing, no instruction charges)
 
-Design, derivation and numbers: docs/refactor.md "R3". Commits (oldest first): c772d12 (`NANPA2_TIMELOG`
-probes, to measure), 4aae940 (the time model: `src/game/pace.h`, `src/hle/clock.c`; `COST`/`POLL` and
+Design, derivation and numbers: docs/refactor.md "R3". Commits (oldest first): 6f445bb (`NANPA2_TIMELOG`
+probes, to measure), c54b9d3 (the time model: `src/game/pace.h`, `src/hle/clock.c`; `COST`/`POLL` and
 about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing after the pump removed),
-1cf2240 (docs, `replay_diff.py --sequence`, `NANPA2_REPLAY_CHECK=none`, `replay_det` checks the clock).
+7845323 (docs, `replay_diff.py --sequence`, `NANPA2_REPLAY_CHECK=none`, `replay_det` checks the clock).
 
 - Measured first: a profiling build attributed every old charge to its function while the four
   golden_r2 runs replayed. 89 % of the game time is the pump spinning on the 16 ms timer (a wait), 3 %
@@ -1311,13 +1311,13 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
 - Found on the way: two waits spin without a pump on a flag the timer callback sets (the animation slot
   wait 0x4035b5 and the fade wait 0x406f41); their only timer came from the polls, so removing `POLL`
   hung the first run at frame 0. Each round now passes `PACE_SPIN_US`.
-- Same scripted input, 90e7de9 against R3 (deterministic, game ms = real ms at speed 1.0): fade 258-272
+- Same scripted input, 6c8ddf5 against R3 (deterministic, game ms = real ms at speed 1.0): fade 258-272
   against 258-272, dissolve 4094/4096 against 4094/4096, with a button held 949 against 957, a step of
   the player 48 against 48, the load scenario to its first wipe 12811 against 12798 (the table is in
-  docs/refactor.md). Real-time headless runs of the same script (host clock): 90e7de9 dissolve 4098 ms, title to open1.mes
+  docs/refactor.md). Real-time headless runs of the same script (host clock): 6c8ddf5 dissolve 4098 ms, title to open1.mes
   2297 ms; R3 at speed 1 4094 and 2312 ms, 18.5 s of game time in 18.7 s; at speed 4 3.78x, at 8 7.11x,
   no warnings. No save image is comparable across the builds (see docs/refactor.md).
-- Goldens re-recorded on 4aae940 into `golden_r3` (kept outside the repository): newgame seed 31, saveload
+- Goldens re-recorded on c54b9d3 into `golden_r3` (kept outside the repository): newgame seed 31, saveload
   seed 41, town seed 48 (330000 frames; the old seed no longer reaches the town), menu seed 46 (S46-S53).
   Each replays twice with every checkpoint matching (`li.*`, `raw.clock`, `raw.data`, `raw.heap`,
   `raw.stack`), identical re-recordings, 0 unaliased ranges.
@@ -1332,33 +1332,33 @@ about 900 charge sites, `x86_icount`, `top_esp` writes, the ECX/EDX zeroing afte
 
 ## 2026-11-09 (refactor R4: a free-standing C engine, no emulated PC)
 
-- 8123dcd: the checkpoint key `raw.gdata` (hash of `G` with the platform's handles, lock descriptor and locked
+- 6240e2c: the checkpoint key `raw.gdata` (hash of `G` with the platform's handles, lock descriptor and locked
   pixel pointers zeroed), added on the R3 code; `--replay` with `--record` writes the replayed messages. The
   four `golden_r3` recordings replayed on it with every old key matched and re-recorded as `golden_r4`
   (messages, `li.*` and `raw.clock` equal to the old ones, plus `raw.gdata`): the new definition proven
   before anything changed.
-- aee4867: files and sound are direct calls. `src/platform/files.[ch]` keeps `crt.c`'s path rules;
+- c6fd52a: files and sound are direct calls. `src/platform/files.[ch]` keeps `crt.c`'s path rules;
   `file.c` is plain C (same open attempts in the same order, the decompressor input length of the native
   block `((size + 8 + 15) & ~15) - 8` for the pacing charge). Found: 0x401050 tests the name against "FLAG"
   (0x431058), not "DATA" (re-notes.md "Findings of R4").
-- b168ef3: DirectDraw, GDI text, Win32 and the 16 ms timer are platform calls (`platform/surface.h`,
+- 84593cd: DirectDraw, GDI text, Win32 and the 16 ms timer are platform calls (`platform/surface.h`,
   `text.h`, `window.h`); `hle_invoke`, the thunks and the COM objects are gone; the timer tick (0x4028c0) is
   `src/game/timer.c`. The primary surface keeps the handle value of the emulated heap (register S).
-- 5d5612e: `src/x86` removed: `G` is initialised from the asset image (`src/asset.c`) and stands alone;
+- 1b224c3: `src/x86` removed: `G` is initialised from the asset image (`src/asset.c`) and stands alone;
   `game/gmem.h` indexes it by G addresses (the original's numbering) and traps outside it; `src/trap.c`
   (`game_trap`: the native address, the frame and script). FLAG files go through `state_save_export/import`
   (the segment bases are not taken from a file). Dead `native_pc`/`exit_pc`/`loop_pc` parameters and
   `unused_top_esp` removed. `raw.cpu/data/heap/stack/pg` and `NANPA2_DATA_CHECK` retired.
-- f40feb6, b55d64f, f1bd5f8, and the documentation commits: `src/hle` dissolved into `src/platform` and
+- f91f9b0, 7700509, 047ff8e, and the documentation commits: `src/hle` dissolved into `src/platform` and
   `src/dev`; build scripts without the recomp/capstone leftovers (`tools/build.sh`, `build_msys2.sh`);
   `NANPA2_LOAD_EXE=1` for the exe-whole data; self-test through the serializer.
 - Removed: `src/x86/` (x86.c, x86.h), `src/hle/` crt.c, ddraw.c, hle.c, hle.h and the import/COM tables of
   win32.c; src went from 15412 to 14226 lines (+1872/-3058 over the stage), no file of the game folder touched.
 - Checks: the four `golden_r4` replays match on every chunk and twice on the final build (271/331/33/161
   checkpoints, `li.*`, `raw.clock`, `raw.gdata`); the FLAG0 and FLAG6 the final build wrote in all four runs
-  are byte-identical to 5b37d43's; the install's own FLAG files (copied) loaded in a bot run recorded on
-  5b37d43 and replayed on the final build (33 checkpoints); a plain 300000-frame run of seed 48 from the
-  town saves: 4800.3 s of game time in 45 s, TOWN.MES 7 times, 513 file opens identical to 5b37d43's, 0 traps or
+  are byte-identical to 3854da5's; the install's own FLAG files (copied) loaded in a bot run recorded on
+  3854da5 and replayed on the final build (33 checkpoints); a plain 300000-frame run of seed 48 from the
+  town saves: 4800.3 s of game time in 45 s, TOWN.MES 7 times, 513 file opens identical to 3854da5's, 0 traps or
   warnings; ctest 7 of 7 (smoke skipped; replay_det 5.6 s instead of 35).
 - Portability: 64-bit little-endian assumed and checked at build time; strict-width syntax pass over every
   source (details in docs/refactor.md "Portability audit"). Linux and Windows builds are still untested.
@@ -1442,7 +1442,7 @@ the state) and `rclick` events in `NANPA2_INPUT` (now also log `RP`, keyed by th
 
 ## 2026-11-10 (iOS / iPadOS build)
 
-- `tools/build_ios.sh` (0f76dfc): downloads SDL2 2.32.10 into the gitignored `build-ios/`, builds it
+- `tools/build_ios.sh` (8c93355): downloads SDL2 2.32.10 into the gitignored `build-ios/`, builds it
   statically for the iOS simulator (host architecture) or device, then the app (CMake `NANPA2_IOS`, plist
   `cmake/Info.ios.plist.in`: landscape, full screen, `UIFileSharingEnabled`, `LSSupportsOpeningDocumentsInPlace`).
   `--device` uses the Xcode generator and `DEVELOPMENT_TEAM`; untested here (no signing).
@@ -1462,7 +1462,7 @@ the state) and `rclick` events in `NANPA2_INPUT` (now also log `RP`, keyed by th
 
 ## 2026-11-10: display modes (CRT HD, CRT 480, Sharp, Smooth)
 
-Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, README). Presenter only
+Commits 30c82c3 (shaders), 1d06a66 (modes, options, preference, SDL fallback, README). Presenter only
 (`src/platform/present*.{h,m,c}`, `window.c` gesture, `main.c` options).
 - `present_metal.m`: new passes `fs_up` (640x480 linear picture onto the virtual raster, area-averaged
   or Catmull-Rom, half float) and `fs_hd` (the `fs_crt` tube model on that raster: beam sigma, scanline
@@ -1481,8 +1481,8 @@ Commits 394553f (shaders), 7d26e4d (modes, options, preference, SDL fallback, RE
 
 ## 2026-11-10: high-resolution text layer
 
-Commits 784c29d (tracking, validation, glyph atlas, unit test), 57fbc1c (Metal presenter, `--text`/F11,
-preference, status, README), 65d5815 (Sharp/Smooth viewport fix on letterboxed outputs, strict validation
+Commits 9b78d0b (tracking, validation, glyph atlas, unit test), f2b46aa (Metal presenter, `--text`/F11,
+preference, status, README), bb804a0 (Sharp/Smooth viewport fix on letterboxed outputs, strict validation
 with a pointer-sized overlay exception, iOS guard). Platform and presenter only; the one touch in `src/game/text.c` is a call
 after the cell copy of 0x401900 that tells the platform where the cell went (`text_cell_placed`).
 - Problem: 0x401900 copies an opaque N x N cell of 1-bit glyph (fg where the scratch pixel is set, bg
@@ -1542,7 +1542,7 @@ after the cell copy of 0x401900 that tells the platform where the cell went (`te
 
 ## 2026-11-10: unsigned iOS IPA for sideloading
 
-Commit 0b1b767. `tools/build_ios.sh --ipa` builds iphoneos arm64 Release with the Ninja generator (a flat
+Commit 2ad24f1. `tools/build_ios.sh --ipa` builds iphoneos arm64 Release with the Ninja generator (a flat
 bundle, no signing step), removes any signature, `_CodeSignature` and `embedded.mobileprovision`, strips
 the binary and packs `build-ios/nanpa2.ipa` (`ditto --norsrc --noextattr`, `Payload/` at the root, no
 `__MACOSX`). About 640 KB. `cmake/Info.ios.plist.in` gained `CFBundleSupportedPlatforms`,
@@ -1575,8 +1575,8 @@ viewer and `decode_all`). The game's callers read whole files, so the FILE view 
 and the logo use `fsys_read` directly. `launch.c`: a `.iso` is accepted wherever a folder is (`--game`,
 `NANPA2_GAME_DIR`, remembered, picked), the search looks for `*.iso` next to the executable, in `game/` and,
 on iOS, in Documents; the macOS picker also lets a file be chosen. FLAG lookups simply find nothing in the
-image, so `flag_load` generates the blank save (2eb9b57). Format: re-notes.md "ISO image". Commits: 049543a
-(reader, launch, tests), docs commit after the merge of master (16839a1).
+image, so `flag_load` generates the blank save (b48ef62). Format: re-notes.md "ISO image". Commits: 1dcfea8
+(reader, launch, tests), docs commit after the merge of master (c991ce4).
 Checks: `decode_all NANPA2.iso` ok 705 bad 0; `iso_check` 12357 files (662 MB) identical, whole and through the
 stream, 8 s cold; ctest `iso` (set `NANPA2_ISO` or `-DNANPA2_ISO=`): a folder recording replays on the image
 with all checkpoints and the same fopen/music/voice sequence (2500 and 60000 frames); newgame from the image
@@ -1614,8 +1614,8 @@ Metal shader and fails without the separate Metal Toolchain download. Instead `t
 release tarball (pinned SHA-256), builds static SDL2+SDL2main with CMake/Ninja for iphoneos arm64 and
 simulator arm64+x86_64, and packs the gitignored `ios/third_party/SDL2.xcframework` (one dependency entry; the
 version is a parameter). `tools/build_ios.sh` is a wrapper over `xcodebuild` (simulator, `--device`, `--ipa`).
-ctest `xcodeproj` (tests/xcodeproj.py) fails when CMake compiles a source the project does not. Commits: 88720ad
-(project, scripts), 7b3381c (merge of master and the CMake removal, drift test, docs).
+ctest `xcodeproj` (tests/xcodeproj.py) fails when CMake compiles a source the project does not. Commits: d65768c
+(project, scripts), 0678d4e (merge of master and the CMake removal, drift test, docs).
 Checked: simulator build, iPad Pro 11 simulator from `Documents/NANPA2.iso`, name-entry screen, log
 `Renderer: Metal`, app uninstalled; `--ipa`: Payload/ + Assets.car, arm64, unsigned, all Info.plist keys and
 `CFBundleIconName`, no `/Users/` strings, no_game_bytes clean; `--device` without a team stops with a message,
@@ -1654,12 +1654,12 @@ SDL2 build and on SDL3 are byte-identical (5742 lines, 240 checkpoints) and repl
 `-DNANPA2_SDL_RENDERER=ON`; `NANPA2_AUDIO_DUMP` of a 1200-frame bot run is bit-identical, and a longer run plays
 MUSIC\38.MP3 into the dump; iPad Pro 11 simulator build runs from `Documents/NANPA2.iso` to the name-entry
 screen (the simulator screenshot shows it sideways, the portrait simulator with a landscape app). Commits:
-04227b0, c388082, 4376cf0, b8cfeb8. Not tested: Windows, Linux, `dialog_sdl.c`, a real iPad, the smoke test
+399b6c0, 0f6cde4, b573596, 2aa3e98. Not tested: Windows, Linux, `dialog_sdl.c`, a real iPad, the smoke test
 (window occluded here), real keyboard/mouse/touch through SDL3 (scripted runs bypass SDL events).
 
 ## 2026-11-10: text layer, review fixes
 
-Commits 09b2057 and c64f788 (merges of master 72ba125 and a207063, the fixes on top). Supersedes the
+Commits 1ec0866 and ded71c6 (merges of master 12a314b and b9ae2d9, the fixes on top). Supersedes the
 validation and F11 details of the entry above.
 - Validation: a cell is shown only on an exact match, except pixels inside the game pointer's 32x32 sprite
   (the position comes from `win_mouse_pos`, the last mouse message posted to the game, with 8 px of slack):
@@ -1673,7 +1673,7 @@ validation and F11 details of the entry above.
   static assert.
 - The rasteriser is `platform/textraster.c` (stb_truetype static there and in `text.c`); `-O2` only on it and
   `textlayer.c` (CMake, and `COMPILER_FLAGS` in the Xcode project by `tools/gen_xcodeproj.py`); `text.c`,
-  which makes the game's ink masks, keeps the project's flags. A replay recorded on master a207063 (33
+  which makes the game's ink masks, keeps the project's flags. A replay recorded on master b9ae2d9 (33
   checkpoints with the screen hash) replays on this branch; `--text bitmap` presenter output is `cmp`-identical
   to master in the four display modes (16 in-game frames, 16 viewer frames).
 - Toggle: Shift+F12 (F11 is macOS's Show Desktop), a four-finger tap on iOS (untested on a device). `present_init`
@@ -1692,7 +1692,7 @@ validation and F11 details of the entry above.
 ## 2026-11-10 (iOS: text was blank)
 
 - On a real iPad every dialogue line was blank (`no CJK font found`): iOS has none of the macOS/Linux font
-  file paths, and the simulator run had stopped at name entry, a picture. Commit acd06f5. iOS simulator: Songti TC via CoreText (the system request resolved at once), and a Documents font, both show dialogue.
+  file paths, and the simulator run had stopped at name entry, a picture. Commit 8d7d134. iOS simulator: Songti TC via CoreText (the system request resolved at once), and a Documents font, both show dialogue.
 - `text_init` order: `--font`; a user font in the app's Documents (`platform/text.c` `load_user_font`: any
   `.ttf/.ttc/.otf` in Documents, `Documents/game`, `Documents/fonts`; `mingliu.ttc` first, which gives the
   original look and its 15 px strike); the existing file paths (unchanged, so macOS picks the same fonts and
@@ -1722,7 +1722,7 @@ validation and F11 details of the entry above.
 ## 2026-11-10 (hi-res text always on, CRT text at output resolution)
 
 - Report from a real iPad Pro 13" M4: blurry text. Its `display.txt` held `text bitmap` (most likely an
-  accidental four-finger tap, which toggled the layer). Commit 4503e69: the layer is always on. Removed
+  accidental four-finger tap, which toggled the layer). Commit 782d6dc: the layer is always on. Removed
   Shift+F12, the four-finger tap (3 or more fingers now cycle the display modes), `tl_toggle`/`tl_on_change`,
   and the `text` line of `display.txt` (not written; an old line is read and ignored). `--text bitmap` /
   `NANPA2_TEXT_LAYER` stay as a developer/test switch (CLAUDE.md dev hooks).
@@ -1749,7 +1749,7 @@ validation and F11 details of the entry above.
 
 ## 2026-11-10 (start save: skip the Prologue)
 
-- A plain first launch plays the Prologue offline (96f45f7, `src/dev/startsave.c`): the dev hooks are swapped for
+- A plain first launch plays the Prologue offline (4ffdaf1, `src/dev/startsave.c`): the dev hooks are swapped for
   the run (deterministic clock, bot as the only input), `platform/offline.h` switches off presenting, sound and the
   logo, ignores host input but quit, and jumps the virtual clock to the next 16 ms tick after 16 idle pumps in a row
   (the VM pumps once per opcode, 0x4060f9; its input polls are hundreds of pumps per tick; a count-based wait is
@@ -1773,7 +1773,7 @@ validation and F11 details of the entry above.
 
 ## 2026-11-10 (README restructured for outside readers)
 
-- Commit 3ee8e46: README.md reorganised in the usual open-source order (overview and legal note, status, features,
+- Commit 603652b: README.md reorganised in the usual open-source order (overview and legal note, status, features,
   requirements, getting the game data, per-platform Running for macOS, iPad / iPhone, Linux and Windows, controls,
   option table, save and log locations, troubleshooting, then Development material, platforms and credits). Headings
   that other files cite ("Start save", "Diagnosing a running instance", "Platforms", "iPad / iPhone", "Sideloading")
