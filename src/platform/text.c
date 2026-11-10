@@ -14,6 +14,10 @@
 #include "platform/textlayer.h"
 
 #include <SDL3/SDL.h>
+#include "platform/docs.h"
+#ifdef __APPLE__
+#include "platform/font_apple.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,7 +73,12 @@ static struct face {
 	int strike[MAX_FONTS]; /* BitmapSize record (offset into data), 0: none, -1: not looked up */
 } faces[MAX_FACES];
 static int nfaces;
-static int raster_threshold, no_strikes;
+static int raster_threshold, no_strikes, font_missing;
+
+int text_font_missing(void)
+{
+	return font_missing;
+}
 
 static struct {
 	int height; /* em height in pixels (CreateFontA with negative height) */
@@ -117,6 +126,8 @@ static void face_name(const stbtt_fontinfo *fi, char *out, int n)
 	out[k] = 0;
 }
 
+static int load_font_data(const char *path, void *d, size_t n);
+
 /* Load the font file path as faces[nfaces]. */
 static int load_font(const char *path)
 {
@@ -129,6 +140,12 @@ static int load_font(const char *path)
 	void *d = SDL_LoadFile(path, &n);
 	if (!d)
 		return 0;
+	return load_font_data(path, d, n);
+}
+
+/* faces[nfaces] from the font file image d (SDL_malloc'd; taken over), named path in the log. */
+static int load_font_data(const char *path, void *d, size_t n)
+{
 	/* Of the faces that cover Traditional-only characters (時 張 麼 聲 噹),
 	 * take a Traditional Chinese one ("TC" or "HK" in the name: SC faces
 	 * cover them too, with mainland glyph forms elsewhere) of regular weight
@@ -214,10 +231,80 @@ static int load_asset_font(const char *name)
 }
 #endif
 
+#ifdef __APPLE__
+/* The system faces through CoreText, after every file path (macOS has the files; iOS only this). */
+static int load_coretext(void)
+{
+	if (nfaces >= MAX_FACES)
+		return 0;
+	int tier = nfaces ? 1 : 0;
+	for (int i = 0, n = font_apple_count(tier); i < n; i++) {
+		char label[96];
+		size_t size;
+		snprintf(label, sizeof label, "CoreText:%s", font_apple_name(tier, i));
+		int dup = 0;
+		for (int k = 0; k < nfaces; k++)
+			dup |= !strcmp(faces[k].path, label);
+		void *d = dup ? NULL : font_apple_load(tier, i, &size, label, sizeof label);
+		if (d && load_font_data(label, d, size))
+			return 1;
+	}
+	return 0;
+}
+#endif
+
+/* A user-supplied font in the app's Documents (iOS file sharing): .ttf/.ttc/.otf in Documents,
+ * Documents/game or Documents/fonts, mingliu.ttc by name first (the original look, 15 px strike). */
+#ifdef _WIN32
+static int load_user_font(void)
+{
+	return 0;
+}
+#else
+static int load_user_font(void)
+{
+	const char *docs = docs_dir();
+	if (!docs)
+		return 0;
+	static const char *const sub[] = { "", "/game", "/fonts", NULL };
+	char found[1024] = "";
+	int rank = 99;
+	for (int s = 0; sub[s]; s++) {
+		char dirp[1024];
+		snprintf(dirp, sizeof dirp, "%s%s", docs, sub[s]);
+		DIR *dir = opendir(dirp);
+		if (!dir)
+			continue;
+		struct dirent *e;
+		while ((e = readdir(dir))) {
+			size_t l = strlen(e->d_name);
+			if (e->d_name[0] == '.' || l < 5)
+				continue;
+			const char *x = e->d_name + l - 4;
+			if (SDL_strcasecmp(x, ".ttf") && SDL_strcasecmp(x, ".ttc") && SDL_strcasecmp(x, ".otf"))
+				continue;
+			int r = !SDL_strcasecmp(e->d_name, "mingliu.ttc") ? 0 :
+				!SDL_strcasecmp(e->d_name, "mingliu.ttf") ? 1 : 2;
+			char cand[1024];
+			if (r < rank && snprintf(cand, sizeof cand, "%s/%s", dirp, e->d_name) < (int)sizeof cand) {
+				memcpy(found, cand, sizeof found);
+				rank = r;
+			}
+		}
+		closedir(dir);
+	}
+	if (rank == 99 || !load_font(found))
+		return 0;
+	SDL_Log("Font: user-supplied %s", found);
+	return 1;
+}
+#endif
+
 /* The first loadable candidate not loaded yet. */
 static int load_candidate(void)
 {
-	for (int i = 0; font_candidates[i]; i++) {
+	const char *mode = getenv("NANPA2_TEXT"); /* "coretext": skip the file paths (tests the iOS route) */
+	for (int i = 0; font_candidates[i] && !(mode && strstr(mode, "coretext")); i++) {
 		if (font_candidates[i][0] == '@') {
 #ifndef _WIN32
 			if (load_asset_font(font_candidates[i] + 1))
@@ -228,7 +315,11 @@ static int load_candidate(void)
 		if (load_font(font_candidates[i]))
 			return 1;
 	}
+#ifdef __APPLE__
+	return load_coretext();
+#else
 	return 0;
+#endif
 }
 
 int text_init(const char *font_path)
@@ -236,8 +327,9 @@ int text_init(const char *font_path)
 	const char *mode = getenv("NANPA2_TEXT");
 	raster_threshold = mode && strstr(mode, "threshold");
 	no_strikes = mode && strstr(mode, "outline");
-	if (!(font_path && load_font(font_path)) && !load_candidate()) {
-		SDL_Log("no CJK font found; text will be blank (use --font)");
+	if (!(font_path && load_font(font_path)) && !load_user_font() && !load_candidate()) {
+		SDL_Log("WARNING: no CJK font found; text will be blank (use --font, or on iOS put a .ttf/.ttc in Documents)");
+		font_missing = 1;
 		return 0;
 	}
 	load_candidate(); /* the fallback */

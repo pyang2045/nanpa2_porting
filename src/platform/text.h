@@ -18,6 +18,9 @@
  * is then blank). */
 int text_init(const char *font_path);
 
+/* 1 once text_init found no font at all (the status file warns: every character is blank). */
+int text_font_missing(void);
+
 /* A font of em height `height` (negative: character height as in GDI) and weight; a handle */
 uint32_t text_font_create(int height, int weight);
 
