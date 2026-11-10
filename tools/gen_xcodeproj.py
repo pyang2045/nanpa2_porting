@@ -21,7 +21,7 @@ PROJ = os.path.join(ROOT, "ios", "nanpa2.xcodeproj")
 SOURCES = """
 main.c launch.c lzh.c gp4.c fsys.c iso.c trap.c hooks.c hash.c cinepak.c
 platform/files.c platform/window.c platform/clock.c platform/surface.c platform/text.c platform/logo.c
-platform/textlayer.c platform/textraster.c
+platform/textlayer.c platform/textraster.c platform/font_apple.c
 platform/sound.c platform/present_metal.m platform/dialog_sdl.c platform/docs_ios.c
 dev/dev.c dev/replay.c dev/explore.c dev/status.c
 game/ctl.c game/expr.c game/vm.c game/ops.c game/ops_sys.c game/ops_vm.c game/loop.c game/text.c
@@ -40,7 +40,7 @@ SDL_XCF = "third_party/SDL3.xcframework"  # built by tools/fetch_sdl.sh, gitigno
 
 # (name, weak): what SDL's iOS build needs (sdl3-config --static-libs) plus ours.
 FRAMEWORKS = [("AudioToolbox", 0), ("AVFoundation", 0), ("CoreAudio", 0), ("CoreBluetooth", 0),
-              ("CoreFoundation", 0), ("CoreGraphics", 0), ("CoreHaptics", 1), ("CoreMotion", 0),
+              ("CoreFoundation", 0), ("CoreGraphics", 0), ("CoreHaptics", 1), ("CoreMotion", 0), ("CoreText", 0),
               ("CoreVideo", 0), ("Foundation", 0), ("GameController", 1), ("Metal", 0),
               ("OpenGLES", 0), ("QuartzCore", 0), ("UIKit", 0)]
 

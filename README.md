@@ -97,7 +97,11 @@ its contents directly: with Finder (iPad connected by USB, Files tab, drag onto 
 (On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. In the
 simulator: `xcrun simctl get_app_container booted local.nanpa2 data`, then copy into `Documents/game`.
 A `.iso` of the CD dropped into Documents (any name, after `Documents/game` and `Documents` itself) works
-instead of a folder. Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
+instead of a folder. Text needs a CJK font. The app first uses a `.ttf`/`.ttc`/`.otf` you put in Documents (or
+`Documents/game`, `Documents/fonts`): if you own Windows' MingLiU, copy `mingliu.ttc` (C:\Windows\Fonts) there for the
+exact original look, bitmap strikes included. Without one it asks iOS for Songti TC (a downloadable system font,
+Settings > General > Fonts; the first launch needs the network and may show PingFang TC until it arrives), and
+otherwise draws with PingFang TC. The log names the font chosen. Saves and the log (`nanpa2.log`) are in the app's Library/Application Support.
 
 It presents through the same Metal CRT presenter as macOS (`NANPA2_SDL_RENDERER=ON` selects the
 SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left button held, two-finger tap =

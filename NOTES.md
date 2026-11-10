@@ -1660,3 +1660,22 @@ validation and F11 details of the entry above.
   `text_face_font` is declared in `text.h`; on iOS 3 fingers cycle the display modes and 4 or more toggle
   the text layer, so no tap count does nothing. ctest 11/11 (with `iso`), `--text bitmap` identical to
   master (32 of 32), iOS simulator build passes.
+
+## 2026-11-10 (iOS: text was blank)
+
+- On a real iPad every dialogue line was blank (`no CJK font found`): iOS has none of the macOS/Linux font
+  file paths, and the simulator run had stopped at name entry, a picture. Commit acd06f5. iOS simulator: Songti TC via CoreText (the system request resolved at once), and a Documents font, both show dialogue.
+- `text_init` order: `--font`; a user font in the app's Documents (`platform/text.c` `load_user_font`: any
+  `.ttf/.ttc/.otf` in Documents, `Documents/game`, `Documents/fonts`; `mingliu.ttc` first, which gives the
+  original look and its 15 px strike); the existing file paths (unchanged, so macOS picks the same fonts and
+  glyphs); then CoreText (`platform/font_apple.c`): Songti TC, LiSong Pro, Apple LiSung, STSongti-TC-Regular,
+  PingFang TC. The fallback for kana and the full-width tilde is the next of Songti TC, PingFang TC that
+  covers the traditional-only probe characters (Hiragino lacks them, so it is not listed).
+- The bytes: the font's own file when `kCTFontURLAttribute` opens, else an sfnt rebuilt from
+  `CTFontCopyAvailableTables`/`CTFontCopyTable` (header, sorted directory, checksums; 4-byte aligned).
+  On iOS the Songti family is a downloadable system font: if it is not installed, one request through
+  `CTFontDescriptorMatchFontDescriptorsWithProgressHandler` waits at most 5 s per run (the download goes on
+  in the background; PingFang TC serves meanwhile).
+- No font at all: `WARNING: no CJK font found` in the log and in the status file (`text_font_missing()`,
+  watchdog key `font`). `NANPA2_TEXT=coretext[,tables]` skips the file paths / forces the rebuilt sfnt, to
+  test the iOS route on macOS. `font_apple.c` is in CMake (APPLE, CoreText linked) and in `gen_xcodeproj.py`.

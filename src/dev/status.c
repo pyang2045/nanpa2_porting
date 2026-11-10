@@ -36,6 +36,7 @@
 #include "platform/window.h"
 #include "platform/desktop.h"
 #include "platform/present.h"
+#include "platform/text.h"
 #include "platform/textlayer.h"
 #include "game/state.h"
 
@@ -173,6 +174,8 @@ static void watchdog(const struct snap *s, uint32_t now, uint32_t frame, uint32_
 	warning[0] = warning_key[0] = 0;
 	if (up < WATCH_MS)
 		return;
+	if (text_font_missing())
+		warn("font", "no CJK font found: all text is blank (iOS: put a .ttf/.ttc into Documents)");
 	if (now - s->tick > WATCH_MAIN_MS) {
 		warn("main", "main thread stalled for %u ms (worst nextDrawable wait %.0f ms)",
 		     now - s->tick, ps->worst_wait_ms);
