@@ -70,7 +70,7 @@ The save files (`FLAGn`, 0xc00 bytes) are `G.save` in the original's byte layout
 through `state_save_export/import` (`state_view.c`); `docs/refactor.md` lists the fields. The engine assumes a
 64-bit little-endian host.
 
-Dev hooks: `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
+Dev hooks: `--text bitmap` / `NANPA2_TEXT_LAYER=bitmap` (developer/test only: the game's own glyphs without the hi-res text layer; the byte-identity tests use it; hi-res is always on otherwise and not a user option; `NANPA2_LOG_TEXT=1` logs the text scale), `NANPA2_IMAGE_TRACE=FILE` (which bytes of the PE image a run touched, written at exit;
 `docs/reimpl.md` "The asset"), `NANPA2_LOG=1` (imports, fopen, missing glyphs), `NANPA2_SHOT_DIR` +
 `NANPA2_SHOT_SCHEDULE=start,interval,count`, `NANPA2_INPUT="click,MS,X,Y;key,MS,VK;quit,MS"`
 (screen coordinates). `--view NAME --crt-shot OUT.bmp` captures presenter output.

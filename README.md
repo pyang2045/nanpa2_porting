@@ -105,7 +105,7 @@ otherwise draws with PingFang TC. The log names the font chosen. Saves and the l
 
 It presents through the same Metal CRT presenter as macOS (`NANPA2_SDL_RENDERER=ON` selects the
 SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left button held, two-finger tap =
-right click (cancel/menu), three-finger tap = next display mode (F12). Touch positions go through the
+right click (cancel/menu), a tap of three or more fingers = next display mode (F12; iPadOS claims some four-finger gestures, so they count as three). Touch positions go through the
 presenter's letterbox. Going to the background pauses the music and the render loop.
 
 ### Linux (not built or run yet)
@@ -225,12 +225,12 @@ and Sharp/Smooth with an integer-scaled copy scaled linearly.
 The game draws its text as the 2000 original did, one 1-bit glyph at a time into the 640x480 screen,
 and at a window of 1280x960 or more those one-pixel strokes are smeared. The text layer draws the same
 characters as antialiased vector text at the display's real resolution, over the scaled picture. It is
-on by default (**Shift+F12** toggles it, a four-finger tap on iOS; F11 is macOS's Show Desktop): `--text hires|bitmap` (or `NANPA2_TEXT_LAYER`), remembered with the display mode on a second
-line of `display.txt` (`text hires`; the same rule: plain launches only). Not to be confused with the
-debugging variable `NANPA2_TEXT=threshold|outline`, which changes how the bitmap glyphs are made.
+always on, in every display mode and on every device with the Metal presenter; there is no switch (a `text`
+line in an old `display.txt` is ignored). Not to be confused with the debugging variable
+`NANPA2_TEXT=threshold|outline`, which changes how the bitmap glyphs are made.
 
 - It never touches the game: the screen surface, the game state, the saves and the replay hashes are
-  unchanged (`--text bitmap` presents byte-identical frames). The platform records each cell the game
+  unchanged. The platform records each cell the game
   drew (character, font, size, colours, the ink mask); at each frame the presenter checks the cell
   against the screen, and shows the vector glyph only where the pixels still are exactly what the glyph
   drew. A cell that was drawn over, erased, scrolled or wiped fails the check and the picture shows
@@ -239,13 +239,16 @@ debugging variable `NANPA2_TEXT=threshold|outline`, which changes how the bitmap
   game's mouse pointer is a 32x32 sprite drawn into the screen) and the cell keeps most of its ink, the
   cells touching it are shown with those pixels repainted over the vector glyph as they are.
 - Glyphs come from the same font as the bitmap ones (the strokes widened a little to match their
-  weight, fallback face for kana), rasterised at the on-screen size into a glyph atlas, and composited
-  in linear light as opaque cells: CRT HD draws them into the virtual raster before the tube model (so
-  they get the same beam, grille and glow), Sharp and Smooth draw them on the output. CRT 480 always
-  shows the game's own glyphs (it is the period-correct mode). The text drawn into the picture files
-  themselves (the name-entry grid) is not text the game draws and stays as it is.
-- The Metal presenter implements it; the SDL_Renderer presenter accepts the option and the key and shows the
-  game's glyphs.
+  weight, fallback face for kana), rasterised into a glyph atlas at the output's real scale (viewport
+  pixels per game pixel: 4.3 on a 2752x2064 iPad Pro 13" drawable). Sharp and Smooth draw them as opaque
+  cells in linear light on the output. The CRT modes (HD and 480) draw them after the tube pass, in output
+  pixels, not through the virtual raster, so they are as sharp as the screen: the game's own glyph is
+  first replaced by its cell's background in the 640x480 picture the tube draws, and the vector glyph is
+  blended over the tube's result by its coverage with the tube's light (glow, damper wires, vignette, glass,
+  rounded edge) but without scanlines or grille on the strokes. The face is flat and the picture maps
+  linearly into the letterbox, so the glyphs land where the bitmap ones were. The text drawn into the picture
+  files themselves (the name-entry grid) is not text the game draws and stays as it is.
+- The Metal presenter implements it; the SDL_Renderer presenter shows the game's glyphs (no-op).
 - `NANPA2_LOG_TEXT=1` (with a `--crt-shot` or `NANPA2_SHOT_PRESENT` capture) prints what the layer did,
   `=2` also how well the vector glyphs line up with the bitmap ones; the status file has a `text` object
   with the counts and timings.
