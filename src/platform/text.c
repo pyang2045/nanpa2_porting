@@ -20,7 +20,11 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
+/* static stb functions this file does not use */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include "stb_truetype.h"
+#pragma GCC diagnostic pop
 
 #ifdef _WIN32
 /* kernel32's MultiByteToWideChar (UINT, DWORD, LPCCH, int, LPWSTR, int),

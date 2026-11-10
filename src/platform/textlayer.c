@@ -300,6 +300,7 @@ struct slot {
 static struct slot slots[NSLOT];
 static int nslots;
 static unsigned long atlas_resets, glyph_count;
+static int atlas_full; /* the atlas had no room: no rasterising until it is reset */
 static unsigned long layouts, layouts_at_reset; /* tl_layout calls with something to draw; at the last reset */
 #define RESET_GAP 120 /* frames between atlas resets: a working set that does not fit stays partly bitmap
 		       * instead of being rasterised and uploaded again every frame */
@@ -331,6 +332,7 @@ static void atlas_reset(void)
 	memset(slots, 0, sizeof slots);
 	nslots = 0;
 	pack_x = pack_y = pack_h = 0;
+	atlas_full = 0;
 	atlas_resets++;
 }
 
@@ -377,6 +379,10 @@ static struct slot *glyph_slot(const struct tl_glyph *g, int sq, uint64_t deadli
 		return s;
 	if (deadline && clock_host_ns() > deadline)
 		return NULL;
+	if (atlas_full) { /* wait for the next reset instead of rasterising what cannot be kept */
+		*full = 1;
+		return NULL;
+	}
 	uint64_t t0 = clock_host_ns();
 	int w = 0, h = 0, xo = 0, yo = 0;
 	float pen = 0;
@@ -388,12 +394,14 @@ static struct slot *glyph_slot(const struct tl_glyph *g, int sq, uint64_t deadli
 	}
 	if (bm && !atlas_alloc(w, h, &ax, &ay)) {
 		text_hires_free(bm);
+		atlas_full = 1;
 		*full = 1;
 		return NULL;
 	}
 	if (nslots >= NSLOT * 3 / 4) {
 		if (bm)
 			text_hires_free(bm);
+		atlas_full = 1;
 		*full = 1;
 		return NULL;
 	}

@@ -9,10 +9,11 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
+/* static stb functions this file does not use */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include "stb_truetype.h"
-
-/* the faces text.c loaded, set up here once */
-int text_face_font(int face, const unsigned char **data, int *offset);
+#pragma GCC diagnostic pop
 
 static const stbtt_fontinfo *face_info(int face)
 {

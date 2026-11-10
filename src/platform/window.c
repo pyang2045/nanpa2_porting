@@ -273,8 +273,8 @@ static void touch_event(const SDL_TouchFingerEvent *f, int type)
 				click(WM_RBUTTONDOWN, WM_RBUTTONUP, touch.x0, touch.y0);
 			else if (touch.max_fingers == 3)
 				present_cycle_mode();
-			else if (touch.max_fingers == 4)
-				present_toggle_text(); /* not tested on a device: SDL's report of four fingers */
+			else
+				present_toggle_text(); /* four or more fingers */ /* not tested on a device: SDL's report of four fingers */
 		}
 		memset(&touch, 0, sizeof touch);
 	}

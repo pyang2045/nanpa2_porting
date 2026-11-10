@@ -34,6 +34,8 @@ void text_cell_placed(uint32_t surface, int x, int y, int n, uint8_t fg, uint8_t
 
 /* An antialiased bitmap of the character the text layer recorded (textlayer.h, struct
  * tl_glyph), `scale` output pixels per game pixel; the platform's, see text.c. */
+/* The font face number `face` text.c loaded: its file image and the face's offset in it (0: none). */
+int text_face_font(int face, const unsigned char **data, int *offset);
 uint8_t *text_hires_glyph(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x);
 void text_hires_free(uint8_t *bm);
 

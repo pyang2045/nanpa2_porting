@@ -22,6 +22,7 @@ uint64_t clock_host_ns(void)
 	return (uint64_t)t.tv_sec * 1000000000ull + (uint64_t)t.tv_nsec;
 }
 
+static int g_calls;  /* rasteriser calls */
 static int g_empty;   /* the stub rasteriser finds no outline */
 static int g_big = 1; /* glyph size factor, to make the atlas fill */
 static int g_ptr, g_px, g_py; /* the pointer the validation is told of */
@@ -37,6 +38,7 @@ int surf_size(uint32_t s, int *w, int *h)
 uint8_t *text_hires_glyph(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x)
 {
 	(void)g;
+	g_calls++;
 	if (g_empty)
 		return NULL;
 	*w = *h = (int)(8 * scale) * g_big;
@@ -319,6 +321,13 @@ int main(void)
 		CHECK(b.shown + b.waiting == cells, "shown %d + waiting %d = %d cells", b.shown, b.waiting, cells);
 		CHECK(b.waiting > 0 && b.shown > 0, "partly shown: %d / %d", b.shown, b.waiting);
 		CHECK(b.glyphs - a.glyphs < (unsigned long)cells, "no re-rasterising every frame: %lu", b.glyphs - a.glyphs);
+		/* a full atlas is remembered: frames before the next reset rasterise nothing */
+		int calls = g_calls;
+		for (int f = 0; f < 10; f++) {
+			tl_validate(frame, pal, 0, 0, 0);
+			tl_layout(6.0f, 6.0f, -1, &q);
+		}
+		CHECK(g_calls == calls, "rasteriser calls while the atlas is full: %d", g_calls - calls);
 		g_big = 1;
 	}
 

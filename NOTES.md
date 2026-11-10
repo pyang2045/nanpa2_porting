@@ -1654,3 +1654,9 @@ validation and F11 details of the entry above.
 - Not verified live: the desktop was locked and the display asleep here (status `desktop locked 1 asleep 1`,
   window occluded, `presented 0`), so the Metal frame path ran only through `present_capture`; the status file
   showed the validation running live (`valid 5-7`, worst 0.06 ms).
+- Follow-ups (re-review): a full atlas is remembered (`atlas_full`), so frames before the next allowed reset
+  rasterise nothing (unit test counts rasteriser calls); the `-Wunused-function` noise of the static stb
+  copies in `text.c` and `textraster.c` is silenced around the stb include only (no warnings in the build);
+  `text_face_font` is declared in `text.h`; on iOS 3 fingers cycle the display modes and 4 or more toggle
+  the text layer, so no tap count does nothing. ctest 11/11 (with `iso`), `--text bitmap` identical to
+  master (32 of 32), iOS simulator build passes.
