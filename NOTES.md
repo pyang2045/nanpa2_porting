@@ -1778,3 +1778,17 @@ validation and F11 details of the entry above.
   that other files cite ("Start save", "Diagnosing a running instance", "Platforms", "iPad / iPhone", "Sideloading")
   are unchanged. macOS is stated as Homebrew SDL3; the iPad reset popup is documented as shown at every launch
   (Continue after 5 s, Remove asks to confirm). Linux and Windows are marked untested as before.
+
+## 2026-11-10: public-release audit
+
+Audit of the tracked tree and all history before making the repository public. Tree: no game data, ISO, decomp output,
+FLAG files, screenshots or Big5 tables; `game/README.md` is a placeholder; the only binary is the generated app icon
+(`ios/Assets.xcassets/.../AppIcon-1024.png`, title text on blue, no game art); no home paths, team IDs (the pbxproj
+`DEVELOPMENT_TEAM` is empty, `tests/xcodeproj.py` enforces it), UDIDs or secrets. Bundle id `local.nanpa2` is generic.
+`.claude/` is gitignored and was never tracked. History: no game blobs (largest blob is `stb_truetype.h`); the one finding
+is 4 merge commits (b25f7f2, cd901fa, f2cbffa, 83e67cb) authored/committed as a different name with a second noreply address.
+CLAUDE.md: the game-data rule was reworded (never commit/upload/publish; copying the user's own files to the user's own
+devices on request is allowed); `.gitignore` gained `*.ipa`, `*.xcarchive`, signing files, `DerivedData/`. No LICENSE
+file yet (the owner chose MIT; see the LICENSE entry below).
+
+LICENSE added (MIT, 2026 pyang2045) with a scope note: code and docs only; the game is not included and not covered; third_party/ and SDL3 keep their own licenses.

@@ -18,3 +18,10 @@ tools/.venv/
 ios/third_party/
 xcuserdata/
 *.xcuserstate
+# iOS builds, packages, signing material
+*.ipa
+*.xcarchive
+*.mobileprovision
+*.p12
+*.cer
+DerivedData/
