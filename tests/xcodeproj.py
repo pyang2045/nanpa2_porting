@@ -18,7 +18,7 @@ fail = []
 # CMake sources that the iOS build does not compile (desktop presenters and dialogs)
 IOS_EXCLUDE = {"src/platform/present_sdl.c", "src/platform/desktop_macos.c", "src/platform/dialog_macos.m"}
 # compiled by iOS only (CMake never sees them)
-IOS_ONLY = {"src/platform/docs_ios.c", "src/platform/dialog_ios.m"}
+IOS_ONLY = {"src/platform/docs_ios.c", "src/platform/dialog_ios.m", "src/platform/orient_ios.m"}
 
 cmake = open(os.path.join(root, "CMakeLists.txt"), encoding="utf-8").read()
 cm = set(re.findall(r"src/[A-Za-z0-9_/]+\.(?:c|m)\b", cmake))

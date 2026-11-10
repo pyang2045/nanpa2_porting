@@ -489,6 +489,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "video init failed: %s\n", SDL_GetError());
 		return 1;
 	}
+#ifdef SDL_PLATFORM_IOS
+	{ extern void orient_ios_init(SDL_Window *); orient_ios_init(win); } /* platform/orient_ios.m */
+#endif
 	status_stage("game_init");
 	SDL_Log("Renderer: %s", present_name());
 	/* A binary started from a terminal is not activated by macOS 14+, so its

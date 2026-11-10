@@ -163,6 +163,10 @@ add_executable(textlayer_test tests/textlayer_test.c src/platform/textlayer.c)
 target_include_directories(textlayer_test PRIVATE src)
 target_link_libraries(textlayer_test PRIVATE m)
 
+# The iOS device -> interface landscape mapping (tests/orient_map_test.c, pure).
+add_executable(orient_map_test tests/orient_map_test.c)
+target_include_directories(orient_map_test PRIVATE src)
+
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
 # Exit 77 = skipped: the game checks passed but nobody could see the screen
@@ -174,6 +178,8 @@ add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 
+add_test(NAME orient_map COMMAND orient_map_test)
+set_tests_properties(orient_map PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "orient_map test: ok")
 add_test(NAME textlayer COMMAND textlayer_test)
 set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
 

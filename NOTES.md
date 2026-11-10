@@ -1,5 +1,32 @@
 # NOTES
 
+## 2026-11-10 (iPad: landscape, system-driven flip, supersedes the flip notes below)
+iPadOS 27.2 accepts `requestGeometryUpdate` for an orientation but acts on it only at the next device
+orientation event, so forcing the 180 degree flip after unlocking was always late. The flip state machine
+is removed: unlocked while the device is on a landscape side (the system flips at once), locked as soon as
+the device notification reports portrait/upside-down, unlocked again on a landscape side. If the interface
+is ever portrait, `orient[portrait-recover]` requests landscape; `orient[iface-change]` logs ms since the
+device notification, to show whether the lock wins the race.
+
+## 2026-11-10 (iPad: landscape lock)
+The Info.plist masks and SDL_HINT_ORIENTATIONS (b31db32) did not stop the iPad rotating to portrait.
+Apple (TN3192) deprecates UIRequiresFullScreen from iPadOS 26 and, from 27, ignores it; forum reports
+(developer.apple.com/forums/thread/811216, 801140) say iPadOS 26.x ignores the supported masks while the
+device rotation lock is off. The documented request is UIViewController.prefersInterfaceOrientationLocked
+plus setNeedsUpdateOfPrefersInterfaceOrientationLocked, with UIWindowScene requestGeometryUpdate for the
+orientation itself. `src/platform/orient_ios.m` adds the method to SDL's view controller class at runtime
+(no SDL fork), asks the scene for landscape, locks once landscape, and logs every orientation/size change
+(`orient[...]` lines in nanpa2.log). The lock is only a request; the presenter letterboxes and maps touch
+through the window rectangle, so a refused lock cannot distort. Device (iPadOS 27.2): locked=1 at launch.
+The lock then held one landscape side; the device turning to the other landscape side now unlocks, requests
+that interface orientation (0.3 s debounce, relock on arrival or after 1.5 s), portrait never unlocks.
+Device log showed the 3/4 raw values are equal between UIDeviceOrientation and UIInterfaceOrientation
+(device LandscapeLeft 3 = interface LandscapeRight 3), now `platform/orient_map.h` with a test; the flip
+recomputes its target from the live device side, waits 4 s, and accepts a system rotation instead of
+forcing the old target back. The scene-geometry calls run only on iOS 26+.
+The geometry request is sent only once the scene reports itself unlocked (or after 0.75 s), and re-sent every
+150 ms until the interface matches (a request sent in the unlock's own turn was dropped); errors are logged.
+
 ## 2026-11-03
 
 - Disc identified: Taiwan Traditional Chinese 同級生２, `nanpa2.exe` linked 2000-07-10. Plain
