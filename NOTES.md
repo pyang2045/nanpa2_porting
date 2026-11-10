@@ -10,6 +10,8 @@ orientation itself. `src/platform/orient_ios.m` adds the method to SDL's view co
 (no SDL fork), asks the scene for landscape, locks once landscape, and logs every orientation/size change
 (`orient[...]` lines in nanpa2.log). The lock is only a request; the presenter letterboxes and maps touch
 through the window rectangle, so a refused lock cannot distort. Device (iPadOS 27.2): locked=1 at launch.
+The lock then held one landscape side; the device turning to the other landscape side now unlocks, requests
+that interface orientation (0.3 s debounce, relock on arrival or after 1.5 s), portrait never unlocks.
 
 ## 2026-11-03
 
