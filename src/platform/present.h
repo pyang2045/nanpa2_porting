@@ -30,7 +30,7 @@ int present_window_to_screen(int wx, int wy, int *sx, int *sy);
  * present_window_to_screen, for warping the mouse (SetCursorPos). */
 void present_screen_to_window(int sx, int sy, int *wx, int *wy);
 
-/* Port hotkeys: F12 toggles the CRT simulation, Alt+Enter (and Cmd+F on
+/* Port hotkeys: F12 cycles the display modes, F11 the text layer (platform/textlayer.h), Alt+Enter (and Cmd+F on
  * macOS) toggles fullscreen. Returns 1 if the key event (down, up or
  * repeat) belongs to one of them, so the caller does not pass it on. */
 int present_hotkey(const SDL_KeyboardEvent *key);

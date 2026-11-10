@@ -1,9 +1,9 @@
 /* Developer hooks for scripted, headless testing (environment variables):
  *   NANPA2_SHOT_DIR=dir NANPA2_SHOT_SCHEDULE=start_ms,interval_ms,count
  *       save the screen as dir/shot_NNN.bmp on that schedule
- *   NANPA2_SHOT_PRESENT=1
+ *   NANPA2_SHOT_PRESENT=1 (2: also dir/bitmap_NNN.bmp, the same frame without the text layer)
  *       also save what the presenter draws (CRT included) at the window's
- *       drawable size as dir/present_NNN.bmp
+ *       drawable size (NANPA2_SHOT_SIZE=WxH: at that size) as dir/present_NNN.bmp
  *   NANPA2_INPUT="click,MS,X,Y;rclick,MS,X,Y;move,MS,X,Y;key,MS,VK;quit,MS"
  *       timed input in 640x480 screen coordinates, MS after start; clicks and
  *       keys are held for HOLD_MS
@@ -32,6 +32,7 @@
 #include "game/state_view.h"
 #include "platform/window.h"
 #include "platform/present.h"
+#include "platform/textlayer.h"
 #include "dev/replay.h"
 #include "dev/status.h"
 #include "hooks.h"
@@ -136,9 +137,11 @@ static void save_frame(const uint8_t *frame, const uint32_t pal[256], const char
 	SDL_FreeSurface(s);
 }
 
-void dev_frame(const uint8_t *frame, const uint32_t pal[256])
+static void dev_frame_impl(const uint8_t *frame, const uint32_t pal[256], const uint8_t *prev, const uint32_t *prevpal, int have_prev)
 {
 	char path[1024];
+	const uint8_t *prev_frame = prev;
+	const uint32_t *prev_pal = prevpal;
 	if (!shot_dir)
 		return;
 	if (ev_shot_pending) {
@@ -154,10 +157,39 @@ void dev_frame(const uint8_t *frame, const uint32_t pal[256])
 	snprintf(path, sizeof path, "%s/shot_%03u.bmp", shot_dir, shot_done);
 	save_frame(frame, pal, path);
 	if (getenv("NANPA2_SHOT_PRESENT")) {
+		int cw = 0, ch = 0;
+		if (getenv("NANPA2_SHOT_SIZE"))
+			sscanf(getenv("NANPA2_SHOT_SIZE"), "%dx%d", &cw, &ch);
+		if (have_prev) {
+			snprintf(path, sizeof path, "%s/prev_%03u.bmp", shot_dir, shot_done);
+			save_frame(prev_frame, prev_pal, path);
+		}
 		snprintf(path, sizeof path, "%s/present_%03u.bmp", shot_dir, shot_done);
-		present_capture(path, 0, 0);
+		present_capture(path, cw, ch);
+		if (!strcmp(getenv("NANPA2_SHOT_PRESENT"), "2")) {
+			/* the same frame once more with the game's own glyphs, for comparing */
+			int saved = tl_get_mode();
+			tl_set_mode(TEXT_BITMAP);
+			snprintf(path, sizeof path, "%s/bitmap_%03u.bmp", shot_dir, shot_done);
+			present_capture(path, cw, ch);
+			tl_set_mode(saved);
+		}
 	}
 	shot_done++;
+}
+
+void dev_frame(const uint8_t *frame, const uint32_t pal[256])
+{
+	/* the frame the presenter holds while this one is on its way is what present_capture shows */
+	static uint8_t prev_frame[SCREEN_W * SCREEN_H];
+	static uint32_t prev_pal[256];
+	static int have_prev;
+	dev_frame_impl(frame, pal, prev_frame, prev_pal, have_prev);
+	if (shot_dir) {
+		memcpy(prev_frame, frame, sizeof prev_frame);
+		memcpy(prev_pal, pal, sizeof prev_pal);
+		have_prev = 1;
+	}
 }
 
 static int log_on(void)

@@ -2,6 +2,7 @@
 #define NANPA2_PRESENT_COMMON_H
 
 #include "present.h"
+#include "platform/textlayer.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -214,19 +215,25 @@ static inline void present_common_tick(void)
 	}
 }
 
+/* the window title carries a note for two seconds (the mode's name after F12, the text layer's after F11) */
+static void present_title_note(const char *note)
+{
+	if (!disp_win)
+		return;
+	if (!disp_title_until)
+		snprintf(disp_title, sizeof disp_title, "%s", SDL_GetWindowTitle(disp_win));
+	char t[200];
+	snprintf(t, sizeof t, "%s - %s", disp_title, note);
+	SDL_SetWindowTitle(disp_win, t);
+	disp_title_until = SDL_GetTicks() + 2000;
+	if (!disp_title_until)
+		disp_title_until = 1;
+}
+
 void present_cycle_mode(void)
 {
 	disp_mode = (disp_mode + 1) % DISPLAY_MODES;
-	if (disp_win) {
-		if (!disp_title_until)
-			snprintf(disp_title, sizeof disp_title, "%s", SDL_GetWindowTitle(disp_win));
-		char t[200];
-		snprintf(t, sizeof t, "%s - %s", disp_title, disp_names[disp_mode]);
-		SDL_SetWindowTitle(disp_win, t);
-		disp_title_until = SDL_GetTicks() + 2000;
-		if (!disp_title_until)
-			disp_title_until = 1;
-	}
+	present_title_note(disp_names[disp_mode]);
 	if (disp_cb)
 		disp_cb(disp_mode);
 }
@@ -298,7 +305,7 @@ static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent
 	SDL_Keycode sym = k->keysym.sym;
 	Uint16 mod = k->keysym.mod;
 	if (k->type == SDL_KEYUP) {
-		if (sym == SDLK_F12)
+		if (sym == SDLK_F12 || sym == SDLK_F11)
 			return 1;
 		if (held && sym == held) {
 			held = 0;
@@ -309,6 +316,20 @@ static inline int present_common_hotkey(SDL_Window *win, const SDL_KeyboardEvent
 	if (sym == SDLK_F12) {
 		if (!k->repeat)
 			present_cycle_mode();
+		return 1;
+	}
+	if (sym == SDLK_F11) { /* the text layer: hi-res vector text or the game's own bitmap glyphs */
+		if (!k->repeat) {
+			tl_toggle();
+			char note[64];
+#ifdef PRESENT_TEXT_LAYER
+			snprintf(note, sizeof note, "text: %s", tl_mode_name(tl_get_mode()));
+#else
+			/* this renderer draws the game's own glyphs only (present_sdl.c) */
+			snprintf(note, sizeof note, "text: %s (hires needs the Metal renderer)", tl_mode_name(tl_get_mode()));
+#endif
+			present_title_note(note);
+		}
 		return 1;
 	}
 	int alt_enter = (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && (mod & KMOD_ALT);

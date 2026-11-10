@@ -182,6 +182,20 @@ covers 13457 of 13752 CP950 codes; the missing ones are kana, a few symbols and 
 Bold, 3 SC Light, 4 STSong, 5 TC Light, 6 SC Regular, 7 TC Regular; faces 1-7 cover the
 Traditional-only probe characters.
 
+What the screen holds after 0x401900 (measured for the text layer, `src/platform/textlayer.c`, scripted
+runs of the exploration bot through the dialogue and the menus): the cell goes to surface 0, which is
+the primary, only (no run drew text to an off-screen surface and blitted it); with letterbox set
+the pointer 0x401190 returns is 40 lines down, so a cell's screen y is
+y + 40. The mouse pointer (0x4012e0) is drawn into the screen surface by raw writes and taken off before
+every lock, so a cell under it differs from the glyph's by the arrow's pixels until it moves. Of the
+surface operations only BltFast (0x401430) and the fill (0x4017b0) go through the platform API; the
+dissolve wipe, the swap, the XOR rectangle and the map redraw write the screen directly. BltFast from
+the primary to the primary happens (4 or 5 times in the first 20000 frames), from the primary to another
+surface never. The ASCII cell is 16 wide but advances 8: the next cell covers its right half (the
+tracked width of a half-width cell is therefore its advance). The name-entry grid, the title and the
+status numbers are in the pictures (NAME.GP4, FONT.GP4), not drawn by 0x401900: a name-entry run
+drew no text cell at all.
+
 ## Input (WndProc 0x4021c0)
 
 Button/key state byte `0x445d8f`, set on WM_KEYDOWN/WM_*BUTTONDOWN and cleared on the

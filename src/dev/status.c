@@ -36,6 +36,7 @@
 #include "platform/window.h"
 #include "platform/desktop.h"
 #include "platform/present.h"
+#include "platform/textlayer.h"
 #include "game/state.h"
 
 #ifdef _WIN32
@@ -282,6 +283,8 @@ static void write_status(void)
 		last_key[0] = 0; /* a cause that clears and comes back is logged again */
 
 	const struct present_stats *ps = &s.ps;
+	struct tl_stats ts;
+	tl_get_stats(&ts);
 	char voice[64], vq[160], wq[600], started[32];
 	int music = sound_status(voice, sizeof voice);
 	json_str(vq, sizeof vq, voice);
@@ -303,6 +306,10 @@ static void write_status(void)
 		"\"last_wait_ms\": %.1f, \"worst_wait_ms\": %.1f, \"since_present_ms\": %d, "
 		"\"luma_in\": %d, \"luma_shown\": %d, \"black_ms\": %u, "
 		"\"probe\": {\"count\": %lu, \"luma\": %d, \"luma_src\": %d, \"age_ms\": %d, \"nonblack_age_ms\": %d}},\n"
+		"  \"text\": {\"mode\": \"%s\", \"entries\": %d, \"valid\": %d, \"shown\": %d, \"waiting\": %d, "
+		"\"repaint\": %d, \"drawn\": %lu, \"glyphs_rasterised\": %lu, \"atlas_resets\": %lu, "
+		"\"validate_ms\": %.3f, \"worst_validate_ms\": %.3f, \"layout_ms\": %.3f, \"worst_layout_ms\": %.3f, "
+		"\"mean_layout_ms\": %.3f},\n"
 		"  \"game\": {\"frame\": %u, \"frame_still_ms\": %u, \"active_4ac4ec\": %u, \"timer\": %d, "
 		"\"speed\": %.2f, \"main_age_ms\": %u},\n"
 		"  \"logo\": %d, \"music\": %d, \"voice\": \"%s\",\n"
@@ -318,7 +325,10 @@ static void write_status(void)
 		ps->skip_size, ps->last_wait_ms, ps->worst_wait_ms,
 		ps->last_present ? (int)(now - ps->last_present) : -1, ps->luma_in, ps->luma_shown, black,
 		ps->probes, ps->luma_probe, ps->luma_probe_src, ps->last_probe ? (int)(now - ps->last_probe) : -1,
-		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1, frame,
+		ps->last_probe_nonblack ? (int)(now - ps->last_probe_nonblack) : -1,
+		tl_mode_name(tl_get_mode()), ts.entries, ts.valid, ts.shown, ts.waiting, ts.repaint, ts.total_drawn,
+		ts.glyphs, ts.atlas_resets, ts.validate_ms, ts.worst_validate_ms, ts.layout_ms, ts.worst_layout_ms,
+		ts.layout_calls ? ts.layout_total_ms / (double)ts.layout_calls : 0.0, frame,
 		now - last_frame_change, active, win_timer_running(), speed, now - s.tick,
 		SDL_AtomicGet(&logo), music, vq, "null", wq, warning_key, warnings, warned);
 	write_json(buf);
