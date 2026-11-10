@@ -188,6 +188,7 @@ project_common = {
     "CLANG_ENABLE_MODULES": "NO",
     "CLANG_ENABLE_OBJC_ARC": "YES",
     "GCC_C_LANGUAGE_STANDARD": "c11",
+    "GCC_WARN_64_TO_32_BIT_CONVERSION": "NO",  # CMake does not enable it either
     "IPHONEOS_DEPLOYMENT_TARGET": "13.0",
     "SDKROOT": "iphoneos",
     "SUPPORTED_PLATFORMS": "iphoneos iphonesimulator",
