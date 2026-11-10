@@ -1769,3 +1769,12 @@ validation and F11 details of the entry above.
 - iOS popup (`dialog_ios.m`, `dialog_saves_popup`): launches with saves ask whether to remove them; Continue is
   default and taken after 5 s, Remove asks again, Delete removes FLAG0..6 and writes `startsave-off`. Checked in the
   simulator with `SIMCTL_CHILD_NANPA2_RESET_POPUP`.
+
+## 2026-11-10 (README restructured for outside readers)
+
+- Commit 3ee8e46: README.md reorganised in the usual open-source order (overview and legal note, status, features,
+  requirements, getting the game data, per-platform Running for macOS, iPad / iPhone, Linux and Windows, controls,
+  option table, save and log locations, troubleshooting, then Development material, platforms and credits). Headings
+  that other files cite ("Start save", "Diagnosing a running instance", "Platforms", "iPad / iPhone", "Sideloading")
+  are unchanged. macOS is stated as Homebrew SDL3; the iPad reset popup is documented as shown at every launch
+  (Continue after 5 s, Remove asks to confirm). Linux and Windows are marked untested as before.
