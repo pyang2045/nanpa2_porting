@@ -1,43 +1,125 @@
 # 同級生２ native port
 
-A from-scratch reimplementation of the engine of 同級生２ (Doukyuusei 2), Taiwan Traditional
-Chinese Windows release (`nanpa2.exe`, 2000), on SDL3, so it runs natively on macOS (Metal),
-Linux and Windows. It needs your own copy of the game CD; no game data is in this repository.
+A native, from-scratch reimplementation of the engine of 同級生２ (Doukyuusei 2, ELF), Taiwan
+Traditional Chinese Windows release (`nanpa2.exe`, 2000), written in C on SDL3. It runs on macOS
+(Metal), iPad / iPhone and, untested so far, Linux and Windows. The game's own data files are read
+unchanged; no x86 code runs and nothing emulates the PC the game was written for.
+
+**You need your own copy of the game.** This repository contains no game data, text or images, and
+the program and app bundles hold none either (ctest `no_game_bytes` checks). Supply the contents of
+your 同級生２ (Taiwan release) CD, or an ISO image of it (`NANPA2.iso`). `nanpa2.exe` itself is not
+needed.
 
 ## Status
 
 Playable from boot through the full Prologue and into the first town. Working: boot, the
 `LOGO.AVI` intro (off by default, `--logo`), name entry, the full Prologue, OPEN1 and walking around the town, save and
 load, MP3 music and Chinese voice, the Metal FD Trinitron CRT shader (window and fullscreen), pacing
-at the original 486 speed (`--speed`), and a macOS `.app` bundle. See `NOTES.md` for the dated log.
+at the original 486 speed (`--speed`), a macOS `.app` bundle and an iPad / iPhone app. See `NOTES.md` for the dated log.
 
 Tested: an exploration bot has reached 140 of the 470 MES script files, and it found the
 script op 0x1f trap (fixed in e3635ff).
 
 Not verified yet: endings, most character routes, and the SPECIAL, TRAVEL and TENNIS parts.
 
-## Build
+| Platform | State |
+|---|---|
+| macOS | built and run (Metal presenter) |
+| iPad / iPhone | iOS simulator verified; a real device untested |
+| Linux | meant to build with SDL3; not built or run yet |
+| Windows | MSYS2 MinGW-w64 script provided; not built or run yet |
 
-The engine is plain C on SDL3: the game logic (`src/game`) runs on its own state and calls a small platform
-API (`src/platform`: files, surfaces, text, window, sound); no instruction of `nanpa2.exe` runs and
-nothing emulates the PC it was written for (see "Architecture"). Nothing is read from the exe: the start
-values of the game state are defined in code (see "Game data"). The build needs a C11 compiler, CMake, Ninja
-and SDL3 (Python 3 for the tests), nothing else, and the binary and `.app` hold nothing of the game (ctest
-`no_game_bytes`): this is the build to share, like xsystem4, the player supplies the game files. The engine
-assumes a 64-bit little-endian host (`src/game/state.h` refuses to build otherwise); the game state and the
-save files have a fixed-width layout, with no dependence on the size of `long` or of a pointer.
+## Features
 
-The scripts check the tools, name the packages when something is missing (they never run `sudo`), and pass
-`--game-dir`, `--build-dir`, `--release` (default) or `--debug` and `--test` (ctest) through to CMake.
-Re-running reuses the build folder.
+- Reads the CD contents as a folder, or straight from a `.iso` (ISO 9660, read-only, nothing extracted).
+- Four display modes, cycled with F12: **CRT HD** (default, a flat Trinitron at ~1080 lines),
+  **CRT 480**, **Sharp** and **Smooth** (see "Display").
+- Hi-res text layer: the game's text redrawn as antialiased vector glyphs at the display's real
+  resolution, over the 640x480 picture (see "Text layer").
+- Original game speed (the 486-class PC of the Taiwan release), adjustable with `--speed`.
+- Save files byte-compatible with the original's `FLAG0`..`FLAG6`; blank saves are generated, so
+  nothing from an installed game is required.
+- Start save: the first launch plays the Prologue offline so the title offers Main at once
+  (see "Start save").
+- MP3 music and voice, the publisher's `LOGO.AVI` movie (optional), keyboard, mouse and touch.
+- A live status file and a watchdog for diagnosing a black or frozen window (see "Troubleshooting").
+
+## Requirements
+
+- The game data (below).
+- A 64-bit little-endian host (`src/game/state.h` refuses to build otherwise).
+- To build: a C11 compiler, CMake, Ninja and SDL3; Python 3 for the tests. Nothing else.
+- A font with Traditional Chinese glyphs (see "Text font"): macOS and Linux find one on the system,
+  Windows uses MingLiU from `C:\Windows\Fonts`, `--font PATH` names any TrueType file.
+
+## Getting the game data
+
+Two forms are accepted, both read in place:
+
+1. **A folder** with the CD contents: `DATA/`, `MUSIC/`, `SPEECH/`, `LOGO.AVI`. The save files
+   `FLAG0`..`FLAG6` of an installed game are optional (a blank save is generated when a slot has none;
+   the ones from an install are used if present). The repository has a placeholder `game/` folder
+   (`game/README.md`): put the contents there; it is gitignored and never committed.
+2. **A `.iso`** of the CD (ISO 9660, 2048-byte sectors; `DATA/01.GP4` must be in it), any file name,
+   for example `NANPA2.iso`. Saves always go to the save folder, never into the image. Supported on
+   macOS, iOS and Linux; on Windows the reader is compiled but untested.
+   `NANPA2_ISO=... ctest -R iso` checks every file against an extracted folder.
+
+Neither `nanpa2.exe` nor any file made from it is needed: the engine defines the start values of its
+game state in code (`src/game/state.c`). A `nanpa2.dat` or `nanpa2.exe` left in the folder is ignored.
+
+### How the game is found
+
+With `--game PATH` (folder or `.iso`) that is used. Without it, in this order: `NANPA2_GAME_DIR`; the
+folder remembered from an earlier choice (`game-folder.txt` in the save folder); next to the
+executable or the `.app`, or in a `game` folder there (also a few levels up, so `build/nanpa2` and
+`build/同級生２.app` find the repository's `game/`), including a `*.iso` there; `./game`. If none of
+them has `DATA/`, a folder picker opens (macOS: choose the folder or the `.iso`; elsewhere SDL's
+folder dialog, untested, folders only) and the choice is remembered. A folder that is not the game shows
+a message box. Delete `game-folder.txt` to get the picker again.
+
+## Running
 
 ### macOS (verified)
 
 ```sh
-brew install sdl3 cmake ninja python
+brew install sdl3 cmake ninja python   # SDL3 from Homebrew
 tools/build.sh                 # build/nanpa2
 tools/build.sh --test --app    # plus ctest and build/同級生２.app
+./build/nanpa2 --game game                 # play from a folder
+./build/nanpa2 --game NANPA2.iso           # or straight from the CD image
 ```
+
+Or by hand: `cmake -S . -B build -G Ninja && ninja -C build`. The scripts check the tools, name the
+packages when something is missing (they never run `sudo`), and pass `--game-dir`, `--build-dir`,
+`--release` (default) or `--debug` and `--test` (ctest) through to CMake. Re-running reuses the build folder.
+
+The `.app` bundle (target `nanpa2_app`, or configure with `-DNANPA2_APP_BUNDLE=ON`):
+
+```sh
+ninja -C build nanpa2_app
+open build/同級生２.app             # or double-click it in Finder; it can be moved anywhere
+```
+
+`build/同級生２.app` holds the binary and the SDL libraries it needs, so it runs without
+Homebrew's paths: `tools/bundle_macos.sh` copies Homebrew's libSDL3 into `Contents/Frameworks`, rewrites the load paths to
+`@executable_path`/`@loader_path` and signs everything ad hoc. It needs the macOS
+version Homebrew's SDL3 bottle supports or later (`LSMinimumSystemVersion` is taken from the
+libraries). It contains no game data and nothing of `nanpa2.exe`
+(ctest `no_game_bytes` scans it). On the first start choose the game folder (or `.iso`) in the picker,
+or put the app next to a `game` folder or a `.iso`; the choice is remembered.
+
+Started from Finder there is no terminal, so the log (stdout, stderr, `SDL_Log`) goes to
+`nanpa2.log` in the save folder, and the previous run's to `nanpa2.previous.log`:
+
+```sh
+cat ~/Library/Application\ Support/nanpa2/nanpa2/nanpa2.log
+```
+
+To try the app without touching your saves: `open -n build/同級生２.app --env NANPA2_SAVE_DIR=/tmp/x
+--env NANPA2_GAME_DIR=$PWD/game`. The window is raised at startup and the game keeps running (music
+too) when it is in the background; `--pause-inactive` restores the original behaviour of stopping it
+while the window has no focus.
 
 ### iPad / iPhone (iOS simulator verified, device untested)
 
@@ -94,7 +176,8 @@ or `xcrun devicectl device install app`.
 The app (display name 同級生２, landscape, full screen) holds none of the game. Copy your game folder (the CD
 contents, with DATA inside; FLAG0..FLAG6 of an installed game are optional) into the app's Documents, either as a folder named `game` or
 its contents directly: with Finder (iPad connected by USB, Files tab, drag onto the app) or in the Files app
-(On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. In the
+(On My iPad > 同級生２). Without it the app shows a bilingual message; relaunch after copying. At every launch a popup
+offers to remove your saves and start over; leave it alone (Continue is taken after 5 s) to keep playing, see "Start save". In the
 simulator: `xcrun simctl get_app_container booted local.nanpa2 data`, then copy into `Documents/game`.
 A `.iso` of the CD dropped into Documents (any name, after `Documents/game` and `Documents` itself) works
 instead of a folder. Text needs a CJK font. The app first uses a `.ttf`/`.ttc`/`.otf` you put in Documents (or
@@ -108,35 +191,85 @@ SDL_Renderer one). Touch: one-finger tap = left click, hold or drag = left butto
 right click (cancel/menu), a tap of three or more fingers = next display mode (F12; iPadOS claims some four-finger gestures, so they count as three). Touch positions go through the
 presenter's letterbox. Going to the background pauses the music and the render loop.
 
+
 ### Linux (not built or run yet)
 
 ```sh
 sudo apt install build-essential cmake ninja-build pkg-config libsdl3-dev python3   # Debian 13 / Ubuntu 25.04+
 # Fedora: sudo dnf install gcc cmake ninja-build pkgconf-pkg-config SDL3-devel python3
 # older distributions: build SDL3 from source (https://libsdl.org, the release tarball, cmake --install to /usr/local)
-tools/build.sh --test
+tools/build.sh --test           # or: cmake -S . -B build -G Ninja && ninja -C build
+./build/nanpa2 --game /path/to/game      # a folder or a .iso
 ```
+
+The presenter is SDL_Renderer (no Metal). Fonts come from `/usr/share/fonts` or `--font PATH`. See
+"Platforms" for the known unchecked points.
 
 ### Windows (not built or run yet)
 
-In an MSYS2 MINGW64 shell (MinGW-w64 GCC; MSVC is unchecked, see Platforms):
+In an MSYS2 MINGW64 shell (MinGW-w64 GCC; MSVC is unchecked, see "Platforms"):
 
 ```sh
 pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja \
   mingw-w64-x86_64-pkgconf mingw-w64-x86_64-sdl3 mingw-w64-x86_64-python
 tools/build_msys2.sh --test
+build/dist/nanpa2-port.exe --game C:/path/to/game
 ```
 
 It builds `nanpa2-port.exe` (a GUI program, so no console; set `NANPA2_LOG_FILE` for the
 log), named so it never replaces the game's own `nanpa2.exe`, and copies it with `SDL3.dll`
-and the MinGW runtime DLLs into `build/dist`.
+and the MinGW runtime DLLs into `build/dist`. Pass `--game`, or put a `game` folder or `.iso` next to the exe.
 
-### By hand
+## Playing
 
-```sh
-cmake -S . -B build -G Ninja   # -DNANPA2_GAME_DIR=game for the tests
-ninja -C build
-```
+### Controls
+
+- The mouse (on iPad, touch) drives the game. Keys the game reads: Enter, Space, Esc, arrow keys, Ctrl,
+  Insert, End, F1 and the letter and digit keys.
+- **F12** cycles the display modes (CRT HD, CRT 480, Sharp, Smooth); the name shows in the window title
+  for two seconds. **Alt+Enter** toggles fullscreen (on macOS also Cmd+F).
+- iPad / iPhone: one-finger tap = left click, hold or drag = left button held, two-finger tap = right
+  click (cancel/menu), a tap with three or more fingers = F12.
+- A key or click skips the `LOGO.AVI` movie when it plays (`--logo`).
+
+### Command-line options
+
+| Option | Effect |
+|---|---|
+| `--game PATH` (`NANPA2_GAME_DIR`) | game folder or `.iso` |
+| `--display hd\|480\|sharp\|smooth` (`NANPA2_DISPLAY`) | display mode; `--no-crt` = `sharp` |
+| `--crt-lines N`, `--crt-scaler sharp\|smooth` | CRT HD raster height (600..1600, default 1080) and scaler |
+| `--window WxH`, `--fullscreen` | initial window size (points); start fullscreen |
+| `--speed X` (`NANPA2_SPEED`) | 1.0 = original speed, 2.0 twice as fast, 0 as fast as the host can |
+| `--font PATH` | a TrueType file or collection for the text (e.g. a copy of `mingliu.ttc`) |
+| `--logo` (`NANPA2_LOGO=1`) | play the publisher movie `LOGO.AVI` (skipped by default) |
+| `--pause-inactive` | stop the game while the window is in the background |
+| `--no-start-save` (`NANPA2_NO_START_SAVE=1`) | do not play the Prologue offline on a first launch |
+| `--make-start-save` | write the start save headless and exit |
+| `--view [NAME]`, `--shot OUT.bmp` | picture viewer (Left/Right, Esc); headless screenshot |
+| `NANPA2_SAVE_DIR` | move the save folder (saves, `game-folder.txt`, `display.txt`, log) |
+| `NANPA2_LOG_FILE=PATH` | send the log to a file |
+| `NANPA2_LOG=1` | log imports, file opens, missing glyphs |
+| `NANPA2_HEADLESS=1` | no window (SDL dummy video driver), for scripted runs |
+
+Development hooks (`--record`/`--replay`, `--deterministic`, `--text bitmap`, `NANPA2_INPUT`,
+`NANPA2_EXPLORE`, screenshots, ...) are listed in `CLAUDE.md` and under "Recording and replay".
+
+### Saves and logs
+
+The save folder is SDL's pref path for `nanpa2/nanpa2`, or `NANPA2_SAVE_DIR`:
+
+| Platform | Save folder |
+|---|---|
+| macOS | `~/Library/Application Support/nanpa2/nanpa2/` |
+| iOS / iPadOS | the app's `Library/Application Support` (inside its container) |
+| Linux | `~/.local/share/nanpa2/nanpa2/` (SDL's pref path; unchecked) |
+| Windows | `%APPDATA%\nanpa2\nanpa2\` (SDL's pref path; unchecked) |
+
+It holds `flag0`..`flag6` (lower case, 0xc00 bytes each, the original's layout), `game-folder.txt` (the
+remembered game folder), `display.txt` (the last display mode), `startsave-off` if you made it, and,
+for Finder / iOS launches (no console), `nanpa2.log` and `nanpa2.previous.log`. The status file is
+`$TMPDIR/nanpa2-status-<pid>.json` (`%TEMP%` on Windows).
 
 ## Start save (skip the Prologue)
 
@@ -157,70 +290,16 @@ file `startsave-off` in the save folder (or use `--no-start-save` / `NANPA2_NO_S
 `startsave-off` to bring the start save back.
 
 - `nanpa2 --make-start-save` makes it headless into the save folder and exits (tests).
-- On iOS a launch with saves present first asks (「刪除存檔並重新開始（可自訂名字）？」, Continue by default,
-  taken by itself after 5 s) whether to remove them; Remove asks once more, Delete removes FLAG0..6 of the save
+- On iPad / iPhone a popup at every launch asks whether to remove the saves and start over (to set your
+  own hero name; 「刪除存檔並重新開始（可自訂名字）？」). Continue is the default and is taken by itself after
+  5 s; Remove asks for a second confirmation, and Delete removes FLAG0..6 of the save
   folder only and writes `startsave-off`. `NANPA2_RESET_POPUP=continue|remove-cancel|remove-delete` (with
   `SIMCTL_CHILD_` on the simulator) answers by itself for tests. It is skipped while `startsave-off` exists.
 - Only plain interactive launches do any of this (not scripted, headless, replay, record, deterministic,
   exploration, view or shot runs).
 
-## Architecture
 
-```
-src/game/      the game: script VM, opcodes, expressions, text, animation, town map, palette and
-               fades, picture loading, start-up. It works on one state object G (state.h), the
-               original's data area in its own layout, and calls only the platform API below.
-src/platform/  the platform API and its host implementation (SDL3): files.h (the game's DOS paths on
-               the host, FLAG files in the save folder), surface.h (8-bit surfaces by handle, blits,
-               palette, the screen), text.h (Big5 glyphs), textlayer.h (hi-res text over the
-               presented screen), window.h (WM_* messages, the 16 ms timer,
-               the cursor), sound.h (music, voices), logo, clock (pacing), present (Metal or SDL_Renderer)
-src/dev/       dev tools: record and replay (state checkpoints), the exploration bot, scripted input,
-               the live status file
-src/           trap.c, lzh.c and gp4.c (GP4/ANI pictures), fsys.c, launch.c, main.c
-```
-
-The refactor that led here (the original code run in an interpreter, then reimplemented in C on an
-emulated PC, then freed of it step by step) is in `docs/refactor.md`, stage by stage, with the
-architecture summary and how the save files stay byte-compatible.
-
-## Game data
-
-Copy the CD contents into `game/`. The save files `FLAG0`..`FLAG6` are optional (the engine generates a
-blank save when a slot has none; the ones from an installed game are used if present). See `game/README.md`.
-
-Neither `nanpa2.exe` nor any file made from it is needed: the engine reimplements the game code in C and
-defines the start values of its game state in code (`src/game/state.c`). (Earlier versions cut a
-`nanpa2.dat` from the exe at the first launch; a `nanpa2.dat` or `nanpa2.exe` left in the folder is
-ignored. The ctest `standalone` runs the game with neither.)
-
-## Run
-
-```sh
-./build/nanpa2 --game game        # play
-./build/nanpa2 --game NANPA2.iso  # play straight from the CD image, nothing extracted
-./build/nanpa2 --view             # picture viewer: Left/Right, Esc
-```
-
-At launch the game shows two openings: `LOGO.AVI`, the Taiwan publisher's movie (15 seconds), then ELF's own animated logo (`start.mes`), followed by the title. The port
-skips the publisher movie by default, from the binary and from the `.app`; `--logo` (or
-`NANPA2_LOGO=1`) plays it, and a key or click skips it as in the original. `--no-logo` is
-still accepted.
-
-Without `--game` the game folder is looked up in this order: `NANPA2_GAME_DIR`; the folder
-remembered from an earlier choice; next to the executable or the `.app`, or in a `game` folder
-there (a few levels up, so `build/nanpa2` and `build/同級生２.app` find the repository's
-`game/`); `./game`. If none of them has `DATA/`, a folder picker opens
-(macOS) and the choice is remembered in `game-folder.txt` in the save folder
-(`~/Library/Application Support/nanpa2/nanpa2/` on macOS, next to the `flag*` save files;
-`NANPA2_SAVE_DIR` moves both). A folder that is not the game shows a message box.
-
-**From the CD image.** `--game`, `NANPA2_GAME_DIR`, the picker (macOS: choose the `.iso` file) and the
-remembered path all accept a `.iso` of the CD (ISO 9660, 2048-byte sectors, read-only; `DATA/01.GP4` must be
-in it). Automatic search also looks for a `*.iso` next to the executable or `.app` and in a `game` folder
-there. Saves always go to the save folder, never into the image. Supported on macOS, iOS and Linux; the
-Windows (MSYS2) build compiles the reader but ISO mode is untested there (files are staged through a temp
-file). `NANPA2_ISO=... ctest -R iso` checks every file against the extracted folder.
+## Display, text and speed
 
 ### Display
 
@@ -290,24 +369,6 @@ docs/refactor.md "R3"; a dissolve is 4.1 s, 1.1 s with a button held). `--speed 
 runs). `NANPA2_TURBO=N` is the old name of `NANPA2_SPEED=N`; `--cpu-mips` is gone. `NANPA2_TIMELOG=1`
 prints a line per fade, wipe, text character, player step and file open with the game time in ms.
 
-### Recording and replay (development)
-
-```sh
-./build/nanpa2 --game game --record play.rec        # play (or script) and record
-./build/nanpa2 --game game --replay play.rec        # replay, compare every checkpoint
-tools/replay_diff.py a.rec b.rec                    # compare two recordings
-tools/replay_diff.py --sequence a.rec b.rec          # by content, for runs with different pacing
-```
-
-`--record FILE` (`NANPA2_RECORD`) and `--replay FILE` (`NANPA2_REPLAY`) switch on the
-deterministic mode (`--deterministic`, `NANPA2_DETERMINISTIC=1`): the game clock follows the
-virtual time of the pacing model (below) instead of the host's, so two runs of the same input are identical. A
-recording holds the input messages by game tick and a hash of the game state every
-`NANPA2_CP_TICKS` ticks (250); a replay needs the save folder as it was at the start and stops
-at the first checkpoint that differs (exit code 3, naming the key). `NANPA2_REPLAY_CHECK=li`
-compares only the layout independent keys. Recordings hold derived game state: keep them out of
-the repository. Details: docs/refactor.md.
-
 ### Text font
 
 The game draws its text in MingLiU (細明體) at 15, 24 and 32 pixels. The port reads a font
@@ -319,37 +380,16 @@ choice; a second font fills in characters the first lacks (LiSung has no kana or
 `NANPA2_TEXT=outline` ignores bitmaps and `NANPA2_TEXT=threshold` restores the old plain
 outline threshold, for comparison.
 
-### macOS app (local use only)
 
-```sh
-ninja -C build nanpa2_app          # or configure with -DNANPA2_APP_BUNDLE=ON
-open build/同級生２.app             # or double-click it in Finder; it can be moved anywhere
-```
+## Troubleshooting
 
-`build/同級生２.app` holds the binary and the SDL libraries it needs, so it runs without
-Homebrew's paths: `tools/bundle_macos.sh` copies Homebrew's libSDL3 into `Contents/Frameworks`, rewrites the load paths to
-`@executable_path`/`@loader_path` and signs everything ad hoc. It runs on the macOS version
-the libraries were built for and later (`LSMinimumSystemVersion` is taken from them; with
-current Homebrew bottles that is macOS 26). It contains no game data and nothing of `nanpa2.exe`
-(ctest `no_game_bytes` scans it). On
-the first start choose the game folder in the picker (or put the app next to a `game`
-folder).
-
-Started from Finder there is no terminal, so the log (stdout, stderr, `SDL_Log`) goes to
-`nanpa2.log` in the save folder, and the previous run's to `nanpa2.previous.log`:
-
-```sh
-cat ~/Library/Application\ Support/nanpa2/nanpa2/nanpa2.log
-```
-
-`NANPA2_LOG_FILE=PATH` sends the log to a file from any launch. To try the app without
-touching your saves: `open -n build/同級生２.app --env NANPA2_SAVE_DIR=/tmp/x --env
-NANPA2_GAME_DIR=$PWD/game`. To get the picker again, delete `game-folder.txt`. A launch from
-Finder also writes the status file (below); `$TMPDIR` is the same for Finder and Terminal.
-
-The window is raised at startup and the game keeps running (music too) when it is in the
-background; `--pause-inactive` restores the original behaviour of stopping it while the
-window has no focus.
+- **The game is not found / a picker opens each time:** see "How the game is found"; the choice is
+  kept in `game-folder.txt` in the save folder.
+- **No text or boxes instead of Chinese:** the port needs a CJK font; pass `--font PATH` (see "Text font").
+  The `Font:` line of the log names the choice.
+- **Black or frozen window:** read the status file (below) first: `warning`, `mode`, `present`, `game`.
+- **Nothing visible from Finder / on iPad:** read `nanpa2.log` in the save folder.
+- **Start over:** delete `flag0`..`flag6` in the save folder (see "Start save").
 
 ### Diagnosing a running instance
 
@@ -387,6 +427,65 @@ Tests while the screen is locked: use headless. A windowed launch can then hang 
 (SDL_Init's display link or CAMetalLayer `setDevice`, waiting in `IOServiceOpen` in process
 state U, unkillable until the unlock); the status file shows the stage.
 
+
+## Development
+
+The engine is plain C on SDL3: the game logic (`src/game`) runs on its own state and calls a small platform
+API (`src/platform`: files, surfaces, text, window, sound); no instruction of `nanpa2.exe` runs and
+nothing emulates the PC it was written for (see "Architecture"). Nothing is read from the exe: the start
+values of the game state are defined in code. The build needs a C11 compiler, CMake, Ninja
+and SDL3 (Python 3 for the tests), nothing else, and the binary and `.app` hold nothing of the game (ctest
+`no_game_bytes`): this is the build to share, like xsystem4, the player supplies the game files. The engine
+assumes a 64-bit little-endian host; the game state and the save files have a fixed-width layout, with no
+dependence on the size of `long` or of a pointer.
+
+```sh
+cmake -S . -B build -G Ninja   # -DNANPA2_GAME_DIR=game for the tests
+ninja -C build
+ctest --test-dir build --output-on-failure
+```
+
+Further reading: `CLAUDE.md` (layout, hard rules, dev hooks), `NOTES.md` (dated status log), `re-notes.md`
+(reverse-engineered formats and native addresses), `docs/refactor.md` and `docs/reimpl.md`.
+
+## Architecture
+
+```
+src/game/      the game: script VM, opcodes, expressions, text, animation, town map, palette and
+               fades, picture loading, start-up. It works on one state object G (state.h), the
+               original's data area in its own layout, and calls only the platform API below.
+src/platform/  the platform API and its host implementation (SDL3): files.h (the game's DOS paths on
+               the host, FLAG files in the save folder), surface.h (8-bit surfaces by handle, blits,
+               palette, the screen), text.h (Big5 glyphs), textlayer.h (hi-res text over the
+               presented screen), window.h (WM_* messages, the 16 ms timer,
+               the cursor), sound.h (music, voices), logo, clock (pacing), present (Metal or SDL_Renderer)
+src/dev/       dev tools: record and replay (state checkpoints), the exploration bot, scripted input,
+               the live status file
+src/           trap.c, lzh.c and gp4.c (GP4/ANI pictures), fsys.c, launch.c, main.c
+```
+
+The refactor that led here (the original code run in an interpreter, then reimplemented in C on an
+emulated PC, then freed of it step by step) is in `docs/refactor.md`, stage by stage, with the
+architecture summary and how the save files stay byte-compatible.
+
+### Recording and replay (development)
+
+```sh
+./build/nanpa2 --game game --record play.rec        # play (or script) and record
+./build/nanpa2 --game game --replay play.rec        # replay, compare every checkpoint
+tools/replay_diff.py a.rec b.rec                    # compare two recordings
+tools/replay_diff.py --sequence a.rec b.rec          # by content, for runs with different pacing
+```
+
+`--record FILE` (`NANPA2_RECORD`) and `--replay FILE` (`NANPA2_REPLAY`) switch on the
+deterministic mode (`--deterministic`, `NANPA2_DETERMINISTIC=1`): the game clock follows the
+virtual time of the pacing model (below) instead of the host's, so two runs of the same input are identical. A
+recording holds the input messages by game tick and a hash of the game state every
+`NANPA2_CP_TICKS` ticks (250); a replay needs the save folder as it was at the start and stops
+at the first checkpoint that differs (exit code 3, naming the key). `NANPA2_REPLAY_CHECK=li`
+compares only the layout independent keys. Recordings hold derived game state: keep them out of
+the repository. Details: docs/refactor.md.
+
 ### Smoke test
 
 ```sh
@@ -411,7 +510,7 @@ and the test never waits on a process it cannot kill. Set the game folder with
 
 ## Platforms
 
-macOS (Intel, macOS 26; Metal, and SDL_Renderer with `-DNANPA2_SDL_RENDERER=ON`) is the only
+macOS (Homebrew SDL3; Metal, and SDL_Renderer with `-DNANPA2_SDL_RENDERER=ON`) is the only
 platform built and run so far. The code is meant to build on Linux and Windows with SDL3,
 but neither has been built or run. Known points:
 
@@ -431,3 +530,14 @@ but neither has been built or run. Known points:
   opens; the log goes to `NANPA2_LOG_FILE`.
 - Both: the presenter is `src/platform/present_sdl.c` (SDL_Renderer); the status file works,
   the smoke test's desktop checks are macOS only.
+
+
+## Credits and licenses
+
+- The game, 同級生２, is by ELF. All rights to the game
+  belong to their owners. This project is an unofficial reimplementation and distributes none of it.
+- [SDL3](https://libsdl.org) (zlib license), linked dynamically (bundled in the macOS `.app`; built as a
+  static xcframework for iOS).
+- `third_party/stb_truetype.h` (Sean Barrett; public domain / MIT) and `third_party/minimp3.h`,
+  `minimp3_ex.h` (lieff; CC0 / public domain).
+- The reverse engineering used Ghidra (not included).
