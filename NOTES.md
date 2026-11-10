@@ -448,7 +448,8 @@ code change.
 
 ## 2026-11-08 (opening: publisher movie skipped by default)
 
-- The game shows two openings at launch: `LOGO.AVI`, the Taiwan publisher's movie (451 frames, 15 s; native 0x401e20, one caller, WinMain 0x402166), then ELF's
+- The game shows two openings at launch: `LOGO.AVI`, the Taiwan publisher's movie (451
+  frames, 15 s; native 0x401e20, one caller, WinMain 0x402166), then ELF's
   animated logo, run by `start.mes` (0x4060d4; `elf.gp4` + `elf.ani`, then `start1.mes`).
   It was not one video played twice: `logo_play` replaces 0x401e20 and the MCI path in
   win32.c is never reached.
