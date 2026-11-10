@@ -11,8 +11,15 @@
 
 #include "fsys.h"
 #include "platform/dialog.h"
+#include "platform/docs.h"
 
 #define PATH_CAP 1024
+
+#ifdef __IPHONEOS__
+#define UNUSED_ON_IOS __attribute__((unused))
+#else
+#define UNUSED_ON_IOS
+#endif
 
 static char pref[PATH_CAP];
 static int pref_done;
@@ -39,6 +46,9 @@ int launch_in_bundle(void)
 		char *base = SDL_GetBasePath(); /* bundles: .../X.app/Contents/Resources/ */
 		known = base && strstr(base, ".app/Contents/") != NULL;
 		SDL_free(base);
+#ifdef __IPHONEOS__
+		known = 1; /* an iOS app has no console: the log goes to the save folder */
+#endif
 	}
 	return known;
 }
@@ -128,7 +138,7 @@ static void remembered_path(char *out, size_t cap)
 	snprintf(out, cap, "%s/game-folder.txt", launch_pref_dir() ? launch_pref_dir() : ".");
 }
 
-static int read_remembered(char *out, size_t cap)
+UNUSED_ON_IOS static int read_remembered(char *out, size_t cap)
 {
 	char p[PATH_CAP + 32];
 	remembered_path(p, sizeof p);
@@ -142,7 +152,7 @@ static int read_remembered(char *out, size_t cap)
 	return ok && *out;
 }
 
-static void write_remembered(const char *dir)
+UNUSED_ON_IOS static void write_remembered(const char *dir)
 {
 	if (!launch_pref_dir())
 		return;
@@ -172,7 +182,7 @@ static void strip_last(char *p)
 /* The executable's folder and a few above it (an .app's Resources,
  * Contents, the .app, the folder holding it, one more: so build/X.app finds
  * the repository's game/), each as itself and with "game" appended. */
-static int try_near_exe(void)
+UNUSED_ON_IOS static int try_near_exe(void)
 {
 	char *base = SDL_GetBasePath();
 	if (!base)
@@ -202,7 +212,7 @@ static void message(const char *text)
 }
 
 /* Folder picker until a folder validates or the player gives up. */
-static int pick(void)
+UNUSED_ON_IOS static int pick(void)
 {
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) /* SDL sets up the app first */
 		return 0;
@@ -233,6 +243,35 @@ static int pick(void)
 	return 0;
 }
 
+#ifdef __IPHONEOS__
+/* iOS/iPadOS: the game folder is copied into the app's Documents (Finder file sharing or the Files
+ * app), either as a folder (Documents/game) or as its contents (Documents). */
+static const char *ios_game_dir(int interactive)
+{
+	const char *docs = docs_dir();
+	char cand[PATH_CAP + 8];
+	if (docs) {
+		snprintf(cand, sizeof cand, "%s/game", docs);
+		if (try_dir(cand, "Documents") || try_dir(docs, "Documents"))
+			return found;
+	}
+	char text[PATH_CAP + 900];
+	int n = snprintf(text, sizeof text,
+			 "找不到遊戲資料。請用 Finder（USB 連接）或「檔案」App，把遊戲資料夾"
+			 "（光碟內容加上 data1.cab 內的 FLAG0..FLAG6，內含 DATA 資料夾）複製到"
+			 "「在我的 iPad 上 > 同級生２」，然後重新開啟本程式。\n\n"
+			 "The game data was not found. Copy the game folder (the CD contents plus FLAG0..FLAG6 "
+			 "from data1.cab, with DATA inside) into this app's Documents through Finder (USB) or "
+			 "the Files app (On My iPad > 同級生２), then relaunch.");
+	if (launch_pref_dir() && n > 0 && (size_t)n < sizeof text)
+		snprintf(text + n, sizeof text - (size_t)n, "\n\nLog: %s/nanpa2.log", launch_pref_dir());
+	fprintf(stderr, "%s\ntried:\n%s", text, tried);
+	if (interactive && SDL_InitSubSystem(SDL_INIT_VIDEO) == 0)
+		message(text);
+	return NULL;
+}
+#endif
+
 const char *launch_game_dir(const char *cli, int interactive)
 {
 	const char *env = getenv("NANPA2_GAME_DIR");
@@ -252,6 +291,9 @@ const char *launch_game_dir(const char *cli, int interactive)
 			message(text);
 		return NULL;
 	}
+#ifdef __IPHONEOS__
+	return ios_game_dir(interactive);
+#else
 	char mem[PATH_CAP];
 	if (read_remembered(mem, sizeof mem)) {
 		if (try_dir(mem, "remembered"))
@@ -274,4 +316,5 @@ const char *launch_game_dir(const char *cli, int interactive)
 	if (interactive)
 		message(text);
 	return NULL;
+#endif
 }
