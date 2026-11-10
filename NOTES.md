@@ -1780,4 +1780,6 @@ FLAG files, screenshots or Big5 tables; `game/README.md` is a placeholder; the o
 is 4 merge commits (b25f7f2, cd901fa, f2cbffa, 83e67cb) authored/committed as a different name with a second noreply address.
 CLAUDE.md: the game-data rule was reworded (never commit/upload/publish; copying the user's own files to the user's own
 devices on request is allowed); `.gitignore` gained `*.ipa`, `*.xcarchive`, signing files, `DerivedData/`. No LICENSE
-file yet (the owner must choose one).
+file yet (the owner chose MIT; see the LICENSE entry below).
+
+LICENSE added (MIT, 2026 pyang2045) with a scope note: code and docs only; the game is not included and not covered; third_party/ and SDL3 keep their own licenses.
