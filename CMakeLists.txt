@@ -1,11 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(nanpa2 C)
 
-# iOS / iPadOS (tools/build_ios.sh): CMAKE_SYSTEM_NAME=iOS. APPLE is true there too, so the macOS-only parts
-# (AppKit, the folder picker, bundle_macos.sh) test NANPA2_MACOS.
-if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
-  set(NANPA2_IOS ON)
-elseif(APPLE)
+# iOS / iPadOS is not built here: ios/nanpa2.xcodeproj (tools/build_ios.sh, tools/gen_xcodeproj.py).
+# tests/xcodeproj.py checks that it compiles the sources listed below.
+if(APPLE)
   set(NANPA2_MACOS ON)
 endif()
 
@@ -96,42 +94,8 @@ if(NANPA2_MACOS)
 else()
   list(APPEND SOURCES src/platform/dialog_none.c)
 endif()
-if(NANPA2_IOS)
-  list(APPEND SOURCES src/platform/docs_ios.m)
-endif()
-
-if(NANPA2_IOS)
-  # the .app: Info.plist from cmake/Info.ios.plist.in (landscape, full screen, file sharing)
-  set(NANPA2_APP_NAME "同級生２")
-  set(NANPA2_APP_ID "local.nanpa2" CACHE STRING "Bundle identifier of the .app")
-  set(NANPA2_IOS_MIN "13.0" CACHE STRING "Minimum iOS version")
-  set(NANPA2_VERSION "0.1" CACHE STRING "CFBundleShortVersionString")
-  execute_process(COMMAND git -C "${CMAKE_SOURCE_DIR}" rev-list --count HEAD
-    OUTPUT_VARIABLE NANPA2_BUILD OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-  if(NOT NANPA2_BUILD)
-    set(NANPA2_BUILD "1")
-  endif()
-  configure_file(cmake/Info.ios.plist.in "${CMAKE_BINARY_DIR}/Info.ios.plist" @ONLY)
-  # the app icon: cmake/ios/Assets.xcassets. Xcode generator: compiled by Xcode as a resource;
-  # Ninja builds: tools/build_ios.sh runs actool on it (the generator has no asset catalog step).
-  set(NANPA2_ASSETS "")
-  if(CMAKE_GENERATOR STREQUAL "Xcode")
-    set(NANPA2_ASSETS cmake/ios/Assets.xcassets)
-  endif()
-  add_executable(nanpa2 MACOSX_BUNDLE ${SOURCES} ${NANPA2_ASSETS})
-  set_target_properties(nanpa2 PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.ios.plist"
-    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME AppIcon
-    XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${NANPA2_APP_ID}")
-else()
-  add_executable(nanpa2 ${SOURCES})
-endif()
+add_executable(nanpa2 ${SOURCES})
 target_include_directories(nanpa2 PRIVATE src third_party)
-if(NANPA2_IOS)
-  # no build paths in __FILE__ or debug info of the shipped binary
-  target_compile_options(nanpa2 PRIVATE -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
-endif()
 target_link_libraries(nanpa2 PRIVATE SDL3::SDL3)
 # Windows (untested, tools/build_msys2.sh): a GUI program, so no console
 # window opens next to the game (set NANPA2_LOG_FILE for the log); SDL3's
@@ -147,8 +111,6 @@ if(APPLE)
 endif()
 if(NANPA2_MACOS)
   target_link_libraries(nanpa2 PRIVATE "-framework AppKit")
-elseif(NANPA2_IOS)
-  target_link_libraries(nanpa2 PRIVATE "-framework UIKit")
 endif()
 if(UNIX AND NOT APPLE)
   target_link_libraries(nanpa2 PRIVATE m) # stb_truetype, minimp3
@@ -177,12 +139,10 @@ if(NANPA2_MACOS)
     VERBATIM)
 endif()
 
-if(NOT NANPA2_IOS)
-  add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c src/iso.c)
-  target_include_directories(decode_all PRIVATE src)
-  add_executable(iso_check tests/iso_check.c src/iso.c)
-  target_include_directories(iso_check PRIVATE src)
-endif()
+add_executable(decode_all tests/decode_all.c src/lzh.c src/fsys.c src/iso.c)
+target_include_directories(decode_all PRIVATE src)
+add_executable(iso_check tests/iso_check.c src/iso.c)
+target_include_directories(iso_check PRIVATE src)
 
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
@@ -199,12 +159,15 @@ set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
 # as from the folder, decode_all agrees, and a recording made on the folder replays on the image.
 # The image: -DNANPA2_ISO=/path/NANPA2.iso or the environment variable NANPA2_ISO; skipped without.
 set(NANPA2_ISO "" CACHE FILEPATH "CD image (.iso) for the ISO test")
-if(NOT NANPA2_IOS)
-  add_test(NAME iso COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/iso.py"
-    $<TARGET_FILE:nanpa2> $<TARGET_FILE:iso_check> $<TARGET_FILE:decode_all>
-    "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/iso-test" "${NANPA2_ISO}")
-  set_tests_properties(iso PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
-endif()
+add_test(NAME iso COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/iso.py"
+  $<TARGET_FILE:nanpa2> $<TARGET_FILE:iso_check> $<TARGET_FILE:decode_all>
+  "${NANPA2_GAME_DIR}" "${CMAKE_BINARY_DIR}/iso-test" "${NANPA2_ISO}")
+set_tests_properties(iso PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
+
+# The iOS Xcode project compiles the same sources as this file lists, plus the iOS-specific ones
+# (tests/xcodeproj.py; regenerate with tools/gen_xcodeproj.py).
+add_test(NAME xcodeproj COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/xcodeproj.py" "${CMAKE_SOURCE_DIR}")
+set_tests_properties(xcodeproj PROPERTIES TIMEOUT 30)
 
 # Self-test (a few seconds, headless): a save round trip through the lifted
 # save/load code.
