@@ -453,6 +453,11 @@ int main(int argc, char **argv)
 		fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
 		return 1;
 	}
+#ifdef SDL_PLATFORM_IOS
+	/* landscape only: a resizable window otherwise allows every orientation
+	 * (UIKit_GetSupportedOrientations, SDL_uikitwindow.m) whatever Info.plist says */
+	SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
 	status_stage("window");
 	SDL_Window *win = SDL_CreateWindow("同級生２", win_w, win_h,
 					   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
