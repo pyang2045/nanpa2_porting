@@ -11,10 +11,13 @@
  * from there as an opaque N x N cell in the text colours. Semantics:
  * re-notes.md "Text routine".
  */
+#include <stddef.h>
+
 #include "game/ctl.h"
 #include "game/pace.h"
 #include "game/vm.h"
 #include "game/gmem.h"
+#include "platform/surface.h"
 #include "platform/text.h"
 
 
@@ -54,6 +57,7 @@ void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t f
 	uint32_t screen = G.rt.surface[0];
 	uint8_t *s = game_surface_lock(scratch);
 	uint8_t *d = game_surface_lock(screen) + G.rt.pitch[0] * y + x;
+	uint8_t *d0 = d;
 	for (uint32_t row = 0; row < n; row++) {
 		for (uint32_t col = 0; col < n; col++) {
 			int on = s[col] != 0;
@@ -64,6 +68,11 @@ void game_draw_char(uint16_t c, uint32_t x, uint32_t y, uint32_t size, uint8_t f
 		d += G.rt.pitch[0];
 	}
 	game_surface_unlock(scratch);
+	/* the platform's text layer is told where the cell went (nothing of the game changes) */
+	int pitch;
+	ptrdiff_t off = d0 - surf_lock(screen, &pitch);
+	if (off >= 0 && pitch > 0)
+		text_cell_placed(screen, (int)(off % pitch), (int)(off / pitch), (int)n, fg, bg);
 	game_surface_unlock(G.rt.surface[0]);
 }
 

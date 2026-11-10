@@ -71,6 +71,7 @@ set(SOURCES
   src/platform/clock.c
   src/platform/surface.c
   src/platform/text.c
+  src/platform/textlayer.c
   src/platform/logo.c
   src/cinepak.c
   src/platform/sound.c
@@ -114,6 +115,12 @@ else()
   add_executable(nanpa2 ${SOURCES})
 endif()
 target_include_directories(nanpa2 PRIVATE src third_party)
+# The default build is unoptimised (Debug); the glyph rasteriser (stb_truetype in text.c, used by the text
+# layer for every new glyph at the display's resolution, textlayer.c) is not fast enough that way: optimise
+# these two files whatever the build type. Neither is part of the game's own computation.
+if(NOT MSVC)
+  set_source_files_properties(src/platform/text.c src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
+endif()
 if(TARGET SDL2::SDL2)
   target_link_libraries(nanpa2 PRIVATE SDL2::SDL2)
 else()
@@ -175,6 +182,23 @@ if(NOT NANPA2_IOS)
   target_include_directories(decode_all PRIVATE src)
 endif()
 
+# The text layer's tracking and validation, with a stub rasteriser (tests/textlayer_test.c, no game data).
+add_executable(textlayer_test tests/textlayer_test.c src/platform/textlayer.c)
+target_include_directories(textlayer_test PRIVATE src third_party)
+if(TARGET SDL2::SDL2)
+  target_link_libraries(textlayer_test PRIVATE SDL2::SDL2)
+else()
+  target_include_directories(textlayer_test PRIVATE ${SDL2_INCLUDE_DIRS})
+  target_link_libraries(textlayer_test PRIVATE ${SDL2_LIBRARIES})
+endif()
+if(TARGET SDL2::SDL2main)
+  target_link_libraries(textlayer_test PRIVATE SDL2::SDL2main)
+endif()
+if(APPLE)
+  target_link_libraries(textlayer_test PRIVATE "-framework Foundation" "-framework CoreFoundation")
+endif()
+set_source_files_properties(src/platform/textlayer.c PROPERTIES COMPILE_OPTIONS "-O2")
+
 # Smoke test (about 60 s): a plain interactive launch (a real window on this
 # desktop) and a headless one: ctest --test-dir build -R smoke --output-on-failure
 # Exit 77 = skipped: the game checks passed but nobody could see the screen
@@ -185,6 +209,9 @@ enable_testing()
 add_test(NAME smoke COMMAND "${NANPA2_PYTHON}" "${CMAKE_SOURCE_DIR}/tests/smoke.py"
   $<TARGET_FILE:nanpa2> "${NANPA2_GAME_DIR}")
 set_tests_properties(smoke PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
+
+add_test(NAME textlayer COMMAND textlayer_test)
+set_tests_properties(textlayer PROPERTIES TIMEOUT 30 PASS_REGULAR_EXPRESSION "textlayer test: ok")
 
 # Self-test (a few seconds, headless): a save round trip through the lifted
 # save/load code.

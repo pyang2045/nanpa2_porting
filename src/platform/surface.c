@@ -10,6 +10,7 @@
 #include "platform/clock.h"
 #include "platform/window.h"
 #include "platform/present.h"
+#include "platform/textlayer.h"
 #include "trap.h"
 
 #define MAX_SURF 16
@@ -95,6 +96,7 @@ void surf_blt_fast(uint32_t dst, int x, int y, uint32_t src, int l, int t, int r
 {
 	struct surf *d = surf_checked(dst), *s = surf_checked(src);
 	int key = keyed && s->has_ckey;
+	tl_blit(dst, x, y, src, l, t, r, b);
 	for (int yy = t; yy < b; yy++) {
 		int dy = y + (yy - t);
 		if (yy < 0 || yy >= s->h || dy < 0 || dy >= d->h)
@@ -114,6 +116,7 @@ void surf_blt_fast(uint32_t dst, int x, int y, uint32_t src, int l, int t, int r
 void surf_fill(uint32_t surface, int l, int t, int r, int b, uint32_t colour)
 {
 	struct surf *s = surf_checked(surface);
+	tl_fill(surface, l, t, r, b);
 	for (int y = t < 0 ? 0 : t; y < b && y < s->h; y++)
 		for (int x = l < 0 ? 0 : l; x < r && x < s->w; x++)
 			s->pixels[y * s->pitch + x] = (uint8_t)colour;

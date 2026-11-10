@@ -11,8 +11,10 @@
  * is GDI's 1-pixel emboldening. Big5 is decoded as Windows code page 950. */
 #include "platform/text.h"
 #include "platform/surface.h"
+#include "platform/textlayer.h"
 
 #include <SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -489,8 +491,11 @@ static int strike_for(int em)
 	return r ? r : find_strike((em + 7) & ~7);
 }
 
-void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
-	       uint32_t bg_colour, int opaque)
+/* What the last text_draw rendered, for the text layer (platform/textlayer.h). */
+static struct tl_glyph cap;
+
+static void text_draw_impl(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len,
+			   uint32_t fg_colour, uint32_t bg_colour, int opaque)
 {
 	int pitch, sw, sh;
 	uint8_t *pixels = surf_lock(surface, &pitch);
@@ -519,6 +524,15 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	 * for zero, so map any non-black colour to 0xff */
 	uint32_t fg = fg_colour ? 0xff : 0, bg = bg_colour ? 0xff : 0;
 	int cell_w = len > 1 ? em : (em + 1) / 2;
+	cap.cp = ch;
+	cap.face = (uint8_t)(F - faces);
+	cap.fi = (uint8_t)fi;
+	cap.len = (uint8_t)len;
+	cap.em = (uint8_t)em;
+	cap.bold = (uint8_t)bold;
+	cap.cell_w = (uint8_t)cell_w;
+	cap.base = (float)base;
+	cap.cx = cell_w / 2.0f;
 
 	if (opaque)
 		for (int yy = 0; yy < em; yy++)
@@ -534,6 +548,9 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	if (strike > 0 && sbit_glyph((uint32_t)strike, stbtt_FindGlyphIndex(&F->info, (int)ch), &sb) &&
 	    (len > 1 || sb.adv <= cell_w)) {
 		int sbase = (signed char)F->data[strike + 16]; /* hori.ascender */
+		cap.em = F->data[strike + 45];
+		cap.base = (float)sbase;
+		cap.cx = (float)((cell_w - sb.adv) / 2) + sb.adv / 2.0f; /* int division as below */
 		int gx = x + (cell_w - sb.adv) / 2 + sb.bx, gy = y + sbase - sb.by;
 		for (int yy = 0; yy < sb.h; yy++)
 			for (int xx = 0; xx < sb.w; xx++) {
@@ -564,6 +581,7 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 	ink_mask(bm, gw, gh, em);
 	int gx = x + (cell_w - (int)(adv * sx + 0.5f)) / 2 + xo;
 	int gy = y + base + yo;
+	cap.cx = (float)((cell_w - (int)(adv * sx + 0.5f)) / 2) + (int)(adv * sx + 0.5f) / 2.0f;
 	for (int yy = 0; yy < gh; yy++)
 		for (int xx = 0; xx < gw; xx++) {
 			if (!bm[yy * gw + xx])
@@ -575,4 +593,138 @@ void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str
 			}
 		}
 	stbtt_FreeBitmap(bm, NULL);
+}
+
+void text_draw(uint32_t surface, int x, int y, uint32_t font, const uint8_t *str, int len, uint32_t fg_colour,
+	       uint32_t bg_colour, int opaque)
+{
+	memset(&cap, 0, sizeof cap);
+	text_draw_impl(surface, x, y, font, str, len, fg_colour, bg_colour, opaque);
+	/* the cell as the game is about to copy it: ink is a non-zero pixel */
+	int pitch, sw, sh;
+	if (!cap.cell_w || !surf_size(surface, &sw, &sh)) {
+		tl_glyph_drawn(&cap); /* nothing drawn: n is 0 */
+		return;
+	}
+	int n = (fonts[cap.fi].height + 7) & ~7;
+	if (n > 32 || x < 0 || y < 0 || x + n > sw || y + n > sh) {
+		memset(&cap, 0, sizeof cap);
+		tl_glyph_drawn(&cap);
+		return;
+	}
+	const uint8_t *px = surf_lock(surface, &pitch);
+	cap.n = (uint8_t)n;
+	for (int r = 0; r < n; r++)
+		for (int c = 0; c < n; c++)
+			if (px[(y + r) * pitch + x + c])
+				cap.mask[r] |= 1u << c;
+	tl_glyph_drawn(&cap);
+}
+
+/* ---- the text layer's glyphs: the outline, antialiased, at output resolution ---- */
+
+/* GDI's bold copies the glyph one game pixel to the right; the vector glyph is widened by this much of it
+ * (NANPA2_TEXT_SMEAR): a full pixel fuses the strokes of dense ideographs at the display's resolution */
+#define TEXT_SMEAR 0.75f
+
+/* The coverage bitmap of glyph g at `scale` output pixels per game pixel, widened for the bold
+ * the way GDI's emboldening widens it: copied one game pixel to the right, so every column of
+ * the result is the maximum over that shift. *xo, *yo: its top left from the pen on the baseline
+ * (y up is negative), in output pixels; *pen_x: the pen's distance from the cell's left, in game
+ * pixels (the glyph's advance centred in the cell, as text_draw does it). malloc'd, NULL if the
+ * face has no such glyph or draws nothing. */
+static uint8_t *hires_raw(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x)
+{
+	if (g->face >= nfaces)
+		return NULL;
+	struct face *f = &faces[g->face];
+	float low = stbtt_ScaleForMappingEmToPixels(&f->info, (float)g->em);
+	float sy = low * scale, sx = sy;
+	int adv, lsb;
+	stbtt_GetCodepointHMetrics(&f->info, (int)g->cp, &adv, &lsb);
+	/* the narrowing of wide Latin letters (see text_draw_impl) */
+	if (g->len == 1 && adv * low > g->cell_w)
+		sx = sy * g->cell_w / (adv * low);
+	int gw, gh, ox, oy;
+	unsigned char *bm = stbtt_GetCodepointBitmap(&f->info, sx, sy, (int)g->cp, &gw, &gh, &ox, &oy);
+	if (!bm)
+		return NULL;
+	/* the advance box centred where the bitmap's was (the strike's advance is a pixel wider than the
+	 * font's, and the division by 2 truncates) */
+	*pen_x = g->cx - adv * sx / scale / 2;
+	*xo = ox;
+	*yo = oy;
+	if (!g->bold) {
+		unsigned char *o = malloc((size_t)gw * (size_t)gh);
+		if (o)
+			memcpy(o, bm, (size_t)gw * (size_t)gh);
+		stbtt_FreeBitmap(bm, NULL);
+		*w = gw;
+		*h = gh;
+		return o;
+	}
+	static float smear = -1;
+	if (smear < 0)
+		smear = getenv("NANPA2_TEXT_SMEAR") ? (float)atof(getenv("NANPA2_TEXT_SMEAR")) : TEXT_SMEAR;
+	float sm = scale * smear; /* output pixels of the emboldening */
+	int m = (int)ceilf(sm) < 1 ? 1 : (int)ceilf(sm);
+	int ow = gw + m;
+	unsigned char *o = calloc((size_t)ow, (size_t)gh);
+	if (!o) {
+		stbtt_FreeBitmap(bm, NULL);
+		return NULL;
+	}
+	for (int y = 0; y < gh; y++) {
+		const unsigned char *row = bm + y * gw;
+		for (int x = 0; x < ow; x++) {
+			float best = 0;
+			for (int j = 0; j <= m; j++) {
+				float xf = x - j * sm / m;
+				int i0 = (int)floorf(xf);
+				float t = xf - (float)i0;
+				float a = i0 >= 0 && i0 < gw ? row[i0] : 0, b = i0 + 1 >= 0 && i0 + 1 < gw ? row[i0 + 1] : 0;
+				float v = a + (b - a) * t;
+				if (v > best)
+					best = v;
+			}
+			o[y * ow + x] = (unsigned char)(best + 0.5f);
+		}
+	}
+	stbtt_FreeBitmap(bm, NULL);
+	*w = ow;
+	*h = gh;
+	return o;
+}
+
+/* The strokes of the original's bitmap glyphs are a whole pixel wide where the outline's are
+ * thinner (a light Ming), so the coverage is raised a little (an exponent below 1 on it) to
+ * keep the weight of the text; NANPA2_TEXT_WEIGHT=1 leaves it as the outline has it. */
+#define TEXT_WEIGHT 0.8f
+
+uint8_t *text_hires_glyph(const struct tl_glyph *g, float scale, int *w, int *h, int *xo, int *yo, float *pen_x)
+{
+	static float weight;
+	static uint8_t lut[256];
+	if (weight == 0) {
+		weight = getenv("NANPA2_TEXT_WEIGHT") ? (float)atof(getenv("NANPA2_TEXT_WEIGHT")) : TEXT_WEIGHT;
+		if (!(weight > 0))
+			weight = TEXT_WEIGHT;
+		for (int i = 0; i < 256; i++)
+			lut[i] = (uint8_t)(255.0f * powf((float)i / 255.0f, weight) + 0.5f);
+	}
+	uint8_t *bm = hires_raw(g, scale, w, h, xo, yo, pen_x);
+	if (bm && weight != 1.0f)
+		for (int i = 0; i < *w * *h; i++)
+			bm[i] = lut[bm[i]];
+	return bm;
+}
+
+void text_hires_free(uint8_t *bm)
+{
+	free(bm);
+}
+
+void text_cell_placed(uint32_t surface, int x, int y, int n, uint8_t fg, uint8_t bg)
+{
+	tl_cell_placed(surface, x, y, n, fg, bg);
 }
